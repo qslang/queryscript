@@ -1,5 +1,5 @@
-use sqlparser::tokenizer;
 use sqlparser::ast as sqlast;
+use sqlparser::tokenizer;
 
 pub type Ident = String;
 pub type Path = Vec<Ident>;
@@ -25,7 +25,6 @@ pub struct FnArg {
 
 #[derive(Debug)]
 pub enum Expr {
-    TODO(Vec<tokenizer::Token>),
     SQLQuery(sqlast::Query),
     SQLExpr(sqlast::Expr),
 }
@@ -39,27 +38,27 @@ pub enum ImportArgs {
 
 #[derive(Debug)]
 pub enum StmtBody {
-    Import{
+    Import {
         path: Path,
         args: ImportArgs,
     },
-    TypeDef{
+    TypeDef {
         name: Ident,
         def: Type,
     },
-    FnDef{
+    FnDef {
         name: Ident,
         generics: Vec<Ident>,
         args: Vec<FnArg>,
         ret: Option<Type>,
         body: Expr,
     },
-    Let{
+    Let {
         name: Ident,
         type_: Option<Type>,
         body: Expr,
     },
-    Extern{
+    Extern {
         name: Ident,
         type_: Type,
     },

@@ -3,9 +3,9 @@ use crate::parser::error::{Result, UnexpectedTokenSnafu};
 use snafu::OptionExt;
 use sqlparser::{
     // ast::{ColumnDef, ColumnOptionDef, Statement as SQLStatement, TableConstraint},
-    dialect::GenericDialect,
+    dialect::{keywords::Keyword, GenericDialect},
     parser,
-    tokenizer::{Token, Tokenizer},
+    tokenizer::{Token, Tokenizer, Word},
 };
 
 pub struct Parser<'a> {
@@ -126,20 +126,14 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_expr(&mut self) -> Result<Expr> {
-        let mut tokens = Vec::new();
-        loop {
-            match self.peek_token() {
-                Token::EOF | Token::SemiColon => {
-                    break;
-                }
-                _ => {
-                    tokens.push(self.peek_token().clone());
-                }
-            }
-            self.next_token();
-        }
-
-        Ok(Expr::TODO(tokens))
+        Ok(match self.peek_token() {
+            Token::Word(Word {
+                value: _,
+                quote_style: _,
+                keyword: Keyword::SELECT,
+            }) => Expr::SQLQuery(self.sqlparser.parse_query()?),
+            _ => Expr::SQLExpr(self.sqlparser.parse_expr()?),
+        })
     }
 }
 
