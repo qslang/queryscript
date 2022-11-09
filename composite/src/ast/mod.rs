@@ -71,6 +71,5 @@ pub struct Stmt {
 
 #[derive(Debug)]
 pub struct Schema {
-    pub unparsed: Vec<tokenizer::Token>,
     pub stmts: Vec<Stmt>,
 }
