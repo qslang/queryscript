@@ -1,0 +1,40 @@
+type event {
+    user_id int64,
+    event_name string,
+    ts timestamp,
+    properties object, -- object is _usually_ JSON but not required to be
+}
+
+type log_entry {
+    user_id int64,
+    event_type string,
+    ts timestamp,
+    properties object,
+}
+
+type identifier bigint;
+
+-- A DAU is defined as a user who performs the "visit" or "refer" event
+fn dau_event(event_name string) -> boolean {
+    event_name IN ('visit', 'refer')
+}
+
+fn dau(events [event]) {
+    view {
+        SELECT date_trunc('day', ts) AS "day", user_id FROM events WHERE dau_event(event_name) GROUP BY 1, 2
+    }
+}
+
+-- These relations are declared but not defined, so they must be instantiated to use the module
+extern events [event];
+extern system_log [log_entry];
+
+-- This could also be done outside of the module, and this could be simplified to a
+-- single set of events.
+let log_events [event] = view {
+    SELECT user_id, event_type AS event_name, ts, properties FROM system_log
+};
+
+let all_dau = dau(
+    SELECT * FROM events UNION ALL SELECT * FROM log_events
+);

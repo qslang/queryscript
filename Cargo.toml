@@ -1,0 +1,6 @@
+[workspace]
+
+members = [
+    "composite",
+    "composite-cli",
+]

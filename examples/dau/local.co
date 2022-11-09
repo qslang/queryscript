@@ -1,0 +1,10 @@
+let events = load('data/events.json')
+let log = load('data/log.json')
+
+-- Instiate the imported schema with the events and log table loaded above.
+-- This will populate the namespace of this module with the public stuff 
+-- in schema.
+export from .schema {
+    events: events,
+    system_log: log,
+} import *;

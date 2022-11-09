@@ -1,0 +1,10 @@
+{"user_id": 51, "event_name": "refer", "ts": "2022-01-10"}
+{"user_id": 51, "event_name": "download", "ts": "2022-01-10"}
+{"user_id": 51, "event_name": "visit", "ts": "2022-01-12"}
+{"user_id": 50, "event_name": "refer", "ts": "2022-01-12"}
+{"user_id": 51, "event_name": "refer", "ts": "2022-01-10"}
+{"user_id": 52, "event_name": "refer", "ts": "2022-01-12"}
+{"user_id": 52, "event_name": "download", "ts": "2022-01-12"}
+{"user_id": 50, "event_name": "visit", "ts": "2022-01-11"}
+{"user_id": 51, "event_name": "visit", "ts": "2022-01-11"}
+{"user_id": 50, "event_name": "download", "ts": "2022-01-11"}

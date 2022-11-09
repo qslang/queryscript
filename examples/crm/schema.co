@@ -1,0 +1,66 @@
+-- This is a helper type that's embedded into many other types
+type ts_meta {
+    created timestamp,
+    updated timestamp,
+}
+
+-- These types are the logical data model
+type contact {
+    id int64,
+    first_name string,
+    last_name string,
+    email string,
+    org_id int64, -- TODO: Make this [int64] to point to multiple orgs
+
+    -- including a type without a name "flattens" its fields into the type
+    ...ts_meta,
+}
+
+type org {
+    id int64,
+    name string,
+    url string,
+    linkedin string,
+    ...ts_meta,
+}
+
+type auth_org {
+    id int64,
+    name string,
+    ...ts_meta,
+}
+
+type auth_user {
+    id int64,
+    first_name string,
+    last_name string,
+    email string,
+    org_id int64, -- TODO: mark as an FK to auth_org
+    ...ts_meta,
+}
+
+-- These types will be used to manage multi-tenant storage.
+type storage_contact {
+    storage_org_id int64,
+    ...user,
+}
+
+type storage_org {
+    storage_org_id int64,
+    ...org,
+}
+
+-- This function wraps a storage relation (any relation with storage_org_id)
+-- and returns the subset of rows that map to a specific org. You can
+-- use this to run arbitrary SQL from a user logged into a specific org,
+-- without letting them access rows from other orgs
+-- 
+-- This would be the ideal syntax:
+-- fn authorize(org_id int64, storage_table) {
+--    SELECT * EXCLUDE storage_org_id FROM storage_table WHERE storage_org_id=org_id
+-- }
+-- But we'll start with this to support the explicit version. We want to make it easy
+-- for Typescript users to use the syntax:
+fn authorize<R>(org_id int64, storage_table R) -> R EXCLUDE org_id {
+    SELECT * EXCLUDE storage_org_id FROM storage_table WHERE storage_org_id=org_id
+}
