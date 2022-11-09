@@ -15,7 +15,10 @@ impl Parser {
     }
 
     pub fn parse_schema(&self, tokens: &[Token]) -> Schema {
-        Schema::TODO(tokens.iter().map(|x| x.clone()).collect())
+        Schema{
+            unparsed: tokens.iter().map(|x| x.clone()).collect(),
+            stmts: Vec::new(),
+        }
     }
 }
 
