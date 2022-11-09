@@ -2,49 +2,35 @@ use crate::ast::*;
 use sqlparser::{
     // ast::{ColumnDef, ColumnOptionDef, Statement as SQLStatement, TableConstraint},
     dialect::{GenericDialect},
-    // parser::{Parser, ParserError},
+    parser,
     tokenizer::{Token, Tokenizer},
 };
 use snafu::{OptionExt};
 use crate::parser::error::{Result, UnexpectedTokenSnafu};
 
-pub struct Parser {
-    tokens: Vec<Token>,
-    i: usize,
+pub struct Parser<'a> {
+    sqlparser: parser::Parser<'a>,
 }
 
-impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Parser {
-        println!("{:?}", tokens);
-        let mut r = Parser{
-            tokens,
-            i: 0,
-        };
-        r.advance(0);
-        return r;
-    }
-
-    pub fn advance(&mut self, num: usize) {
-        self.i += num;
-        loop {
-            match self.current_token() {
-                Token::Whitespace(_) => self.i += 1,
-                _ => break,
-            };
+impl<'a> Parser<'a> {
+    pub fn new(tokens: Vec<Token>) -> Parser<'a> {
+        let dialect = &GenericDialect {};
+        Parser{
+            sqlparser: parser::Parser::new(tokens, dialect),
         }
     }
 
-    pub fn current_token(&mut self) -> &Token {
-        if self.i < self.tokens.len() {
-            &self.tokens[self.i]
-        } else {
-            &Token::EOF
-        }
+    pub fn next_token(&mut self) -> Token {
+        self.sqlparser.next_token()
+    }
+
+    pub fn peek_token(&mut self) -> Token {
+        self.sqlparser.peek_token()
     }
 
     pub fn parse_schema(&mut self) -> Result<Schema> {
         let mut stmts = Vec::new();
-        while !matches!(self.current_token(), Token::EOF) {
+        while !matches!(self.peek_token(), Token::EOF) {
             stmts.push(self.parse_stmt()?);
         }
 
@@ -54,32 +40,23 @@ impl Parser {
     }
 
     pub fn parse_stmt(&mut self) -> Result<Stmt> {
-        let token = self.current_token();
-        let export = as_word(token).context(UnexpectedTokenSnafu{
+        let token = self.peek_token();
+        let export = as_word(&token).context(UnexpectedTokenSnafu{
             token: token.clone(),
             msg: "expecting a word",
         })? == "export";
         if export {
-            self.advance(1);
+            self.next_token();
         }
 
-        let word = as_word(self.current_token());
+        let word = as_word(&self.peek_token());
         let body = match word {
             Some(w) => match w.to_lowercase().as_str() {
-                "import" => {
-                    panic!("unimplemented");
-                }
-                "extern" => {
-                    panic!("unimplemented");
-                }
-                "type" => {
-                    panic!("unimplemented");
-                }
-                "fn" => {
+                "import" | "extern" | "type" | "fn" => {
                     panic!("unimplemented");
                 }
                 "let" => {
-                    self.advance(1);
+                    self.next_token();
                     self.parse_let()?
                 }
                 _ => {
@@ -95,12 +72,12 @@ impl Parser {
             }
         };
 
-        match self.current_token() {
+        match self.peek_token() {
             Token::SemiColon => {
-                self.advance(1);
+                self.next_token();
             },
             _ => {
-                panic!("Unexpected token {}", self.current_token());
+                panic!("Unexpected token {}", self.peek_token());
             },
         }
 
@@ -113,10 +90,10 @@ impl Parser {
     pub fn parse_let(&mut self) -> Result<StmtBody> {
         // Assume the leading keywords have already been consumed
         //
-        let name = as_word(self.current_token()).expect("Expected identifier").to_string();
-        self.advance(1);
+        let name = as_word(&self.peek_token()).expect("Expected identifier").to_string();
+        self.next_token();
 
-        let type_ = match self.current_token() {
+        let type_ = match self.peek_token() {
             Token::Eq => {
                 None
             }
@@ -125,9 +102,9 @@ impl Parser {
             }
         };
 
-        let body = match self.current_token() {
+        let body = match self.peek_token() {
             Token::Eq => {
-                self.advance(1);
+                self.next_token();
                 self.parse_expr()?
             }
             _ => {
@@ -145,21 +122,15 @@ impl Parser {
     pub fn parse_type(&mut self) -> Result<Type> {
         let mut tokens = Vec::new();
         loop {
-            match self.current_token() {
-                Token::EOF => {
-                    break;
-                }
-                Token::SemiColon => {
-                    break;
-                }
-                Token::Eq => {
+            match self.peek_token() {
+                Token::EOF | Token::SemiColon | Token::Eq => {
                     break;
                 }
                 _ => {
-                    tokens.push(self.current_token().clone());
+                    tokens.push(self.peek_token().clone());
                 }
             }
-            self.advance(1);
+            self.next_token();
         }
 
         Ok(Type::TODO(tokens))
@@ -168,28 +139,25 @@ impl Parser {
     pub fn parse_expr(&mut self) -> Result<Expr> {
         let mut tokens = Vec::new();
         loop {
-            match self.current_token() {
-                Token::EOF => {
-                    break;
-                }
-                Token::SemiColon => {
+            match self.peek_token() {
+                Token::EOF | Token::SemiColon => {
                     break;
                 }
                 _ => {
-                    tokens.push(self.current_token().clone());
+                    tokens.push(self.peek_token().clone());
                 }
             }
-            self.advance(1);
+            self.next_token();
         }
 
         Ok(Expr::TODO(tokens))
     }
 }
 
-pub fn as_word(token: &Token) -> Option<&str> {
+pub fn as_word(token: &Token) -> Option<String> {
     match token {
         Token::Word(w) => {
-            Some(w.value.as_str())
+            Some(w.value.clone())
         }
         _ => {
             None
