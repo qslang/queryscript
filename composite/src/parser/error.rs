@@ -1,4 +1,3 @@
-use snafu::prelude::*;
 use snafu::{Backtrace, Snafu};
 pub type Result<T> = std::result::Result<T, ParserError>;
 
@@ -29,4 +28,5 @@ macro_rules! unexpected_token {
     };
 }
 
+#[allow(unused_imports)]
 pub(crate) use unexpected_token;
