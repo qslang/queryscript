@@ -11,32 +11,37 @@ use snafu::{OptionExt};
 use error::{unexpected_token, Result, UnexpectedTokenSnafu};
 
 pub struct Parser {
-    tokens: &[Token],
+    tokens: Vec<Token>,
     i: usize,
 }
 
 impl Parser {
-    pub fn new(tokens: &[Token]) -> Parser {
+    pub fn new(tokens: Vec<Token>) -> Parser {
+        println!("{:?}", tokens);
         let mut r = Parser{
             tokens,
             i: 0,
-        }
+        };
         r.advance(0);
         return r;
     }
 
     pub fn advance(&mut self, num: usize) {
         self.i += num;
-        while {
+        loop {
             match self.current_token() {
                 Token::Whitespace(_) => self.i += 1,
-                _ => break;
-            }
+                _ => break,
+            };
         }
     }
 
     pub fn current_token(&mut self) -> &Token {
-        &self.tokens[self.i]
+        if self.i < self.tokens.len() {
+            &self.tokens[self.i]
+        } else {
+            &Token::EOF
+        }
     }
 
     pub fn parse_schema(&mut self) -> Schema {
@@ -59,26 +64,19 @@ impl Parser {
             self.advance(1);
         }
 
-        let mut needs_semicolon = true;
         let word = as_word(self.current_token());
-        let mut stmt = match word {
-            Some(w) => match w.value.to_lowercase() {
+        let body = match word {
+            Some(w) => match w.to_lowercase().as_str() {
                 "import" => {
-                    self.parse_import();
+                    panic!("unimplemented");
                 }
                 "extern" => {
-                    self.advance(1);
-                    let mut stmt = self.parse_let();
-                    stmt.extern = true;
-
-                    stmt
+                    panic!("unimplemented");
                 }
                 "type" => {
-                    needs_semicolon = false;
                     panic!("unimplemented");
                 }
                 "fn" => {
-                    self.parse_fn()
                     panic!("unimplemented");
                 }
                 "let" => {
@@ -89,30 +87,31 @@ impl Parser {
                     if export {
                         self.parse_let()
                     } else {
-                        panic!("Unexpected keyword {}", w.value)
+                        panic!("Unexpected keyword {}", w)
                     }
                 }
             }
+            None => {
+                panic!("Expected keyword");
+            }
         };
 
-        stmt.export = export;
-
-        if needs_semicolon {
-            match self.current_token() {
-                Token::EOF => {},
-                Token::SemiColon => {
-                    self.advance(1);
-                },
-                _ => {
-                    panic!("Unexpected token {}", self.current_token());
-                },
-            }
+        match self.current_token() {
+            Token::SemiColon => {
+                self.advance(1);
+            },
+            _ => {
+                panic!("Unexpected token {}", self.current_token());
+            },
         }
 
-        return stmt;
+        return Stmt{
+            export,
+            body,
+        };
     }
 
-    pub parse_let(&mut self) -> Stmt {
+    pub fn parse_let(&mut self) -> StmtBody {
         // Assume the leading keywords have already been consumed
         //
         let name = as_word(self.current_token()).expect("Expected identifier").to_string();
@@ -125,14 +124,73 @@ impl Parser {
             _ => {
                 Some(self.parse_type())
             }
+        };
+
+        let body = match self.current_token() {
+            Token::Eq => {
+                self.advance(1);
+                self.parse_expr()
+            }
+            _ => {
+                panic!("Expected definition");
+            }
+        };
+
+        StmtBody::Let{
+            name,
+            type_,
+            body,
         }
+    }
+
+    pub fn parse_type(&mut self) -> Type {
+        let mut tokens = Vec::new();
+        loop {
+            match self.current_token() {
+                Token::EOF => {
+                    break;
+                }
+                Token::SemiColon => {
+                    break;
+                }
+                Token::Eq => {
+                    break;
+                }
+                _ => {
+                    tokens.push(self.current_token().clone());
+                }
+            }
+            self.advance(1);
+        }
+
+        Type::TODO(tokens)
+    }
+
+    pub fn parse_expr(&mut self) -> Expr {
+        let mut tokens = Vec::new();
+        loop {
+            match self.current_token() {
+                Token::EOF => {
+                    break;
+                }
+                Token::SemiColon => {
+                    break;
+                }
+                _ => {
+                    tokens.push(self.current_token().clone());
+                }
+            }
+            self.advance(1);
+        }
+
+        Expr::TODO(tokens)
     }
 }
 
 pub fn as_word(token: &Token) -> Option<&str> {
     match token {
         Token::Word(w) => {
-            Some(w.value.to_uppercase())
+            Some(w.value.as_str())
         }
         _ => {
             None
@@ -149,7 +207,7 @@ pub fn tokenize(text: &str) -> Vec<Token> {
 
 pub fn parse(text: &str) -> Schema {
     let tokens = tokenize(text);
-    let parser = Parser::new(tokens);
+    let mut parser = Parser::new(tokens);
 
     parser.parse_schema()
 }

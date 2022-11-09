@@ -12,6 +12,7 @@ pub struct StructEntry {
 
 #[derive(Debug)]
 pub enum Type {
+    TODO(Vec<tokenizer::Token>),
     Reference(Path),
     Struct(Vec<StructEntry>),
 }
@@ -24,6 +25,7 @@ pub struct FnArg {
 
 #[derive(Debug)]
 pub enum Expr {
+    TODO(Vec<tokenizer::Token>),
     SQLQuery(sqlast::Query),
     SQLExpr(sqlast::Expr),
 }
@@ -57,7 +59,7 @@ pub enum StmtBody {
         type_: Option<Type>,
         body: Expr,
     },
-    ExternLet{
+    Extern{
         name: Ident,
         type_: Type,
     },
