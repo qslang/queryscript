@@ -1,3 +1,5 @@
+pub mod error;
+
 use crate::ast::*;
 use sqlparser::{
     // ast::{ColumnDef, ColumnOptionDef, Statement as SQLStatement, TableConstraint},
@@ -5,6 +7,8 @@ use sqlparser::{
     // parser::{Parser, ParserError},
     tokenizer::{Token, Tokenizer},
 };
+use snafu::{OptionExt};
+use error::{unexpected_token, Result, UnexpectedTokenSnafu};
 
 pub struct Parser {
     tokens: &[Token],
@@ -46,8 +50,11 @@ impl Parser {
         }
     }
 
-    pub fn parse_stmt(&mut self) -> Stmt {
-        let export = as_word(self.current_token()).expect("Statements must begin with words") == "export";
+    pub fn parse_stmt(&mut self) -> Result<Stmt> {
+        let export = as_word(self.current_token()).context(UnexpectedTokenSnafu{
+            token: self.current_token().clone(), 
+            msg: "expecting a word",
+        })? == "export";
         if export {
             self.advance(1);
         }
