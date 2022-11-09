@@ -1,12 +1,12 @@
 use crate::ast::*;
+use crate::parser::error::{Result, UnexpectedTokenSnafu};
+use snafu::OptionExt;
 use sqlparser::{
     // ast::{ColumnDef, ColumnOptionDef, Statement as SQLStatement, TableConstraint},
-    dialect::{GenericDialect},
+    dialect::GenericDialect,
     parser,
     tokenizer::{Token, Tokenizer},
 };
-use snafu::{OptionExt};
-use crate::parser::error::{Result, UnexpectedTokenSnafu};
 
 pub struct Parser<'a> {
     sqlparser: parser::Parser<'a>,
@@ -15,7 +15,7 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     pub fn new(tokens: Vec<Token>) -> Parser<'a> {
         let dialect = &GenericDialect {};
-        Parser{
+        Parser {
             sqlparser: parser::Parser::new(tokens, dialect),
         }
     }
@@ -34,14 +34,12 @@ impl<'a> Parser<'a> {
             stmts.push(self.parse_stmt()?);
         }
 
-        Ok(Schema {
-            stmts,
-        })
+        Ok(Schema { stmts })
     }
 
     pub fn parse_stmt(&mut self) -> Result<Stmt> {
         let token = self.peek_token();
-        let export = as_word(&token).context(UnexpectedTokenSnafu{
+        let export = as_word(&token).context(UnexpectedTokenSnafu {
             token: token.clone(),
             msg: "expecting a word",
         })? == "export";
@@ -66,7 +64,7 @@ impl<'a> Parser<'a> {
                         panic!("Unexpected keyword {}", w)
                     }
                 }
-            }
+            },
             None => {
                 panic!("Expected keyword");
             }
@@ -75,31 +73,26 @@ impl<'a> Parser<'a> {
         match self.peek_token() {
             Token::SemiColon => {
                 self.next_token();
-            },
+            }
             _ => {
                 panic!("Unexpected token {}", self.peek_token());
-            },
+            }
         }
 
-        Ok(Stmt{
-            export,
-            body,
-        })
+        Ok(Stmt { export, body })
     }
 
     pub fn parse_let(&mut self) -> Result<StmtBody> {
         // Assume the leading keywords have already been consumed
         //
-        let name = as_word(&self.peek_token()).expect("Expected identifier").to_string();
+        let name = as_word(&self.peek_token())
+            .expect("Expected identifier")
+            .to_string();
         self.next_token();
 
         let type_ = match self.peek_token() {
-            Token::Eq => {
-                None
-            }
-            _ => {
-                Some(self.parse_type()?)
-            }
+            Token::Eq => None,
+            _ => Some(self.parse_type()?),
         };
 
         let body = match self.peek_token() {
@@ -112,11 +105,7 @@ impl<'a> Parser<'a> {
             }
         };
 
-        Ok(StmtBody::Let{
-            name,
-            type_,
-            body,
-        })
+        Ok(StmtBody::Let { name, type_, body })
     }
 
     pub fn parse_type(&mut self) -> Result<Type> {
@@ -156,12 +145,8 @@ impl<'a> Parser<'a> {
 
 pub fn as_word(token: &Token) -> Option<String> {
     match token {
-        Token::Word(w) => {
-            Some(w.value.clone())
-        }
-        _ => {
-            None
-        }
+        Token::Word(w) => Some(w.value.clone()),
+        _ => None,
     }
 }
 
