@@ -73,7 +73,7 @@ impl<'a> Parser<'a> {
                 if export {
                     self.parse_let()?
                 } else {
-                    return unexpected_token!(self.peek_token(), "Unexpected keyword");
+                    return unexpected_token!(self.peek_token(), "Expected: import | fn | extern | let | type");
                 }
             }
         };
@@ -91,10 +91,12 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_ident(&mut self) -> Result<Ident> {
-        let ident = as_word(&self.peek_token()).expect("Expected identifier").to_string();
-        self.next_token();
-
-        Ok(ident)
+        let token = self.next_token();
+        match token {
+            Token::Word(w) => Ok(w.value),
+            Token::DoubleQuotedString(s) => Ok(s),
+            _ => unexpected_token!(self.peek_token(), "Expected: WORD | DOUBLE_QUOTED_STRING"),
+        }
     }
 
     pub fn parse_extern(&mut self) -> Result<StmtBody> {
@@ -113,22 +115,19 @@ impl<'a> Parser<'a> {
         let mut ret = Vec::new();
         let mut expect_ident = true;
         loop {
-            match self.peek_token() {
-                Token::Word(w) => {
-                    if !expect_ident {
-                        break;
-                    }
-
-                    ret.push(w.value);
-                }
-                Token::Comma => {
-                    if expect_ident {
-                        break;
-                    }
-                }
-                _ => {
+            if expect_ident {
+                if let Ok(ident) = self.parse_ident() {
+                    ret.push(ident);
+                } else {
                     break;
                 }
+            } else {
+                match self.peek_token() {
+                    Token::Comma => {},
+                    _ => break,
+                }
+
+                self.next_token();
             }
 
             expect_ident = !expect_ident;
@@ -144,7 +143,7 @@ impl<'a> Parser<'a> {
         let generics = if self.consume_token(&Token::Lt) {
             let list = self.parse_idents()?;
             if !self.consume_token(&Token::Gt) {
-                return unexpected_token!(self.peek_token(), "Unexpected token");
+                return unexpected_token!(self.peek_token(), "Expected: '>'");
             }
 
             list
@@ -153,7 +152,7 @@ impl<'a> Parser<'a> {
         };
 
         if !self.consume_token(&Token::LParen) {
-            return unexpected_token!(self.peek_token(), "Unexpected token");
+            return unexpected_token!(self.peek_token(), "Expected: '('");
         }
 
         let mut args = Vec::new();
@@ -173,7 +172,7 @@ impl<'a> Parser<'a> {
                 Token::Comma => {},
                 Token::RParen => break,
                 _ => {
-                    return unexpected_token!(self.peek_token(), "Unexpected token");
+                    return unexpected_token!(self.peek_token(), "Expected: ',' | ')'");
                 }
             }
         }
@@ -185,13 +184,13 @@ impl<'a> Parser<'a> {
         };
 
         if !self.consume_token(&Token::LBrace) {
-            return unexpected_token!(self.peek_token(), "Unexpected token");
+            return unexpected_token!(self.peek_token(), "Expected: '{{'");
         }
 
         let body = self.parse_expr()?;
 
         if !self.consume_token(&Token::RBrace) {
-            return unexpected_token!(self.peek_token(), "Unexpected token");
+            return unexpected_token!(self.peek_token(), "Expected: '}}'");
         }
 
         Ok(StmtBody::FnDef {
@@ -253,7 +252,7 @@ impl<'a> Parser<'a> {
         let mut tokens = Vec::new();
         loop {
             match self.peek_token() {
-                Token::EOF | Token::SemiColon | Token::Eq | Token::Comma | Token::RParen => {
+                Token::EOF | Token::SemiColon | Token::Eq | Token::Comma | Token::RParen | Token::LBrace => {
                     break;
                 }
                 _ => {
