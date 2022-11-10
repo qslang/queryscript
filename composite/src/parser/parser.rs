@@ -1,6 +1,5 @@
 use crate::ast::*;
 use crate::parser::error::{unexpected_token, Result};
-use snafu::OptionExt;
 use sqlparser::{
     // ast::{ColumnDef, ColumnOptionDef, Statement as SQLStatement, TableConstraint},
     dialect::{keywords::Keyword, GenericDialect},
@@ -58,6 +57,14 @@ impl<'a> Parser<'a> {
         let body = match word {
             "import" => {
                 panic!("unimplemented");
+            }
+            "fn" => {
+                self.next_token();
+                self.parse_fn()?
+            }
+            "extern" => {
+                self.next_token();
+                self.parse_extern()?
             }
             "fn" => {
                 self.next_token();
@@ -136,6 +143,8 @@ impl<'a> Parser<'a> {
                     break;
                 }
             }
+
+            expect_ident = !expect_ident;
         }
 
         Ok(ret)
@@ -145,25 +154,28 @@ impl<'a> Parser<'a> {
         // Assume the leading "fn" has already been consumed
         //
         let name = self.parse_ident()?;
-        let generics = match self.peek_token() {
-            Token::Lt => {
-                self.next_token();
-                self.parse_ident_list()
+        let generics = if self.consume_token(&Token::Lt) {
+            let list = self.parse_idents()?;
+            if !self.consume_token(&Token::Gt) {
+                return unexpected_token!(self.peek_token(), "Unexpected token");
             }
-            _ => Vec::new(),
+
+            list
+        } else {
+            Vec::new()
         };
 
-        if !self.consume_token(Token::LParen) {
-            panic!("Expected ( token");
+        if !self.consume_token(&Token::LParen) {
+            return unexpected_token!(self.peek_token(), "Unexpected token");
         }
 
         let mut args = Vec::new();
         loop {
             let name = self.parse_ident()?;
             let type_ = match self.peek_token() {
-                Token::Comma | Token::RParen => {},
-                _ => self.parse_type()?,
-            }
+                Token::Comma | Token::RParen => None,
+                _ => Some(self.parse_type()?),
+            };
 
             args.push(FnArg{
                 name,
@@ -174,10 +186,34 @@ impl<'a> Parser<'a> {
                 Token::Comma => {},
                 Token::RParen => break,
                 _ => {
-                    panic!("Unexpected token");
+                    return unexpected_token!(self.peek_token(), "Unexpected token");
                 }
             }
         }
+
+        let ret = if self.consume_token(&Token::Arrow) {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        if !self.consume_token(&Token::LBrace) {
+            return unexpected_token!(self.peek_token(), "Unexpected token");
+        }
+
+        let body = self.parse_expr()?;
+
+        if !self.consume_token(&Token::RBrace) {
+            return unexpected_token!(self.peek_token(), "Unexpected token");
+        }
+
+        Ok(StmtBody::FnDef {
+            name,
+            generics,
+            args,
+            ret,
+            body,
+        })
     }
 
     pub fn parse_let(&mut self) -> Result<StmtBody> {
