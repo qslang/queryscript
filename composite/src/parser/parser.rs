@@ -36,6 +36,17 @@ impl<'a> Parser<'a> {
         Ok(self.sqlparser.expect_token(expected)?)
     }
 
+    pub fn expect_keyword(&mut self, expected: &str) -> Result<()> {
+        let word = as_word(&self.next_token())?;
+        if word != expected {
+            Ok(self
+                .sqlparser
+                .expected::<()>("from", Token::make_keyword(word.as_str()))?)
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn parse_schema(&mut self) -> Result<Schema> {
         let mut stmts = Vec::new();
         while !matches!(self.peek_token(), Token::EOF) {
@@ -55,7 +66,8 @@ impl<'a> Parser<'a> {
         let word = as_word(&self.peek_token())?;
         let body = match word.to_lowercase().as_str() {
             "import" => {
-                return unexpected_token!(self.peek_token(), "Unimplemented: import");
+                self.next_token();
+                self.parse_import()?
             }
             "fn" => {
                 self.next_token();
@@ -75,7 +87,7 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 if export {
-                    self.parse_let()?
+                    self.parse_import()?
                 } else {
                     return unexpected_token!(
                         self.peek_token(),
@@ -150,6 +162,18 @@ impl<'a> Parser<'a> {
         }
 
         Ok(ret)
+    }
+
+    pub fn parse_import(&mut self) -> Result<StmtBody> {
+        self.expect_token(&Token::Mul)?;
+        self.expect_keyword("from")?;
+
+        let path = vec![as_word(&self.next_token())?];
+
+        Ok(StmtBody::Import {
+            path,
+            args: ImportArgs::Star,
+        })
     }
 
     pub fn parse_fn(&mut self) -> Result<StmtBody> {
