@@ -5,9 +5,15 @@ pub type Ident = String;
 pub type Path = Vec<Ident>;
 
 #[derive(Debug)]
-pub struct StructEntry {
+pub struct NameAndType {
     pub name: Ident,
     pub def: Type,
+}
+
+#[derive(Debug)]
+pub enum StructEntry {
+    NameAndType(NameAndType),
+    Include(Path),
 }
 
 #[derive(Debug)]
@@ -42,10 +48,7 @@ pub enum StmtBody {
         path: Path,
         args: ImportArgs,
     },
-    TypeDef {
-        name: Ident,
-        def: Type,
-    },
+    TypeDef(NameAndType),
     FnDef {
         name: Ident,
         generics: Vec<Ident>,

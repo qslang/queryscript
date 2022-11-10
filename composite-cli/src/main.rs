@@ -1,9 +1,28 @@
+use clap::{Parser, Subcommand};
+use std::fs;
+
 use composite::parser;
-use std::env;
+
+#[derive(Debug, Parser)]
+#[command(author, version, about, long_about = None)]
+#[command(propagate_version = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    Parse { file: String },
+}
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    let text = &args[1];
+    let cli = Cli::parse();
 
-    println!("{:#?}", parser::parse(text).expect("Parser failed"));
+    match cli.command {
+        Commands::Parse { file } => {
+            let contents = fs::read_to_string(file).expect("Unable to read file");
+            eprintln!("{:#?}", parser::parse(&contents).expect("Parser failed"));
+        }
+    }
 }

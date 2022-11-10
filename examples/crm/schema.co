@@ -1,11 +1,10 @@
--- This is a helper type that's embedded into many other types
-type ts_meta {
+type ts_meta record {
     created timestamp,
     updated timestamp,
 }
 
 -- These types are the logical data model
-type contact {
+type contact record {
     id int64,
     first_name string,
     last_name string,
@@ -16,7 +15,7 @@ type contact {
     ...ts_meta,
 }
 
-type org {
+type org record {
     id int64,
     name string,
     url string,
@@ -24,13 +23,13 @@ type org {
     ...ts_meta,
 }
 
-type auth_org {
+type auth_org record {
     id int64,
     name string,
     ...ts_meta,
 }
 
-type auth_user {
+type auth_user record {
     id int64,
     first_name string,
     last_name string,
@@ -40,12 +39,12 @@ type auth_user {
 }
 
 -- These types will be used to manage multi-tenant storage.
-type storage_contact {
+type storage_contact record {
     storage_org_id int64,
     ...user,
 }
 
-type storage_org {
+type storage_org record {
     storage_org_id int64,
     ...org,
 }

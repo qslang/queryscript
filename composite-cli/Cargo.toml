@@ -5,5 +5,10 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+name = "composite"
+path = "src/main.rs"
+
 [dependencies]
 composite = { path="../composite" }
+clap = { version = "4.0", features=["derive"] }

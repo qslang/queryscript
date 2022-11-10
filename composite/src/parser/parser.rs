@@ -85,13 +85,9 @@ impl<'a> Parser<'a> {
             }
         };
 
-        match self.peek_token() {
-            Token::SemiColon => {
-                self.next_token();
-            }
-            t => {
-                return unexpected_token!(t, "Expecting a semi-colon");
-            }
+        // Consume (optional) semi-colons.
+        while matches!(self.peek_token(), Token::SemiColon) {
+            self.next_token();
         }
 
         Ok(Stmt { export, body })
@@ -102,8 +98,24 @@ impl<'a> Parser<'a> {
         match token {
             Token::Word(w) => Ok(w.value),
             Token::DoubleQuotedString(s) => Ok(s),
-            _ => unexpected_token!(self.peek_token(), "Expected: WORD | DOUBLE_QUOTED_STRING"),
+            _ => unexpected_token!(token, "Expected: WORD | DOUBLE_QUOTED_STRING"),
         }
+    }
+
+    pub fn parse_path(&mut self) -> Result<Path> {
+        let mut path = Vec::new();
+        loop {
+            path.push(self.parse_ident()?);
+            match self.peek_token() {
+                Token::Period => {
+                    self.next_token();
+                }
+                _ => {
+                    break;
+                }
+            }
+        }
+        Ok(path)
     }
 
     pub fn parse_extern(&mut self) -> Result<StmtBody> {
@@ -223,23 +235,14 @@ impl<'a> Parser<'a> {
         let name = as_word(&self.peek_token())?.to_string();
         self.next_token();
 
-        let def = match self.peek_token() {
-            Token::Eq => {
-                self.next_token();
-                self.parse_type()?
-            }
-            _ => {
-                return unexpected_token!(self.peek_token(), "Expected definition");
-            }
-        };
-
-        Ok(StmtBody::TypeDef { name, def })
+        let def = self.parse_type()?;
+        Ok(StmtBody::TypeDef(NameAndType { name, def }))
     }
 
     pub fn parse_type(&mut self) -> Result<Type> {
         match self.peek_token() {
             Token::Word(w) => {
-                if w.value.to_lowercase() == "struct" {
+                if w.value.to_lowercase() == "record" {
                     self.next_token();
                     return self.parse_struct();
                 }
@@ -247,22 +250,48 @@ impl<'a> Parser<'a> {
             _ => (),
         };
 
-        Ok(Type::Reference(vec![self.parse_ident()?]))
+        Ok(Type::Reference(self.parse_path()?))
     }
 
     pub fn parse_struct(&mut self) -> Result<Type> {
         self.expect_token(&Token::LBrace)?;
         let mut struct_ = Vec::new();
+        let mut needs_comma = false;
         loop {
             match self.peek_token() {
                 Token::RBrace => {
                     self.next_token();
                     break;
                 }
-                _ => {
+                Token::Comma => {
+                    if needs_comma {
+                        needs_comma = false;
+                    } else {
+                        return unexpected_token!(self.peek_token(), "Two consecutive commas");
+                    }
+                    self.next_token();
+                }
+                Token::Period => {
+                    for _ in 0..3 {
+                        if !matches!(self.peek_token(), Token::Period) {
+                            return unexpected_token!(self.peek_token(), "Three periods");
+                        }
+                        self.next_token();
+                    }
+                    struct_.push(StructEntry::Include(self.parse_path()?));
+                    needs_comma = true;
+                }
+                t => {
+                    if needs_comma {
+                        return unexpected_token!(
+                            t,
+                            "Expected a comma before the next type declaration"
+                        );
+                    }
                     let name = self.parse_ident()?;
                     let def = self.parse_type()?;
-                    struct_.push(StructEntry { name, def });
+                    struct_.push(StructEntry::NameAndType(NameAndType { name, def }));
+                    needs_comma = true;
                 }
             }
         }
@@ -297,6 +326,7 @@ pub fn tokenize(text: &str) -> Result<Vec<Token>> {
 
 pub fn parse(text: &str) -> Result<Schema> {
     let tokens = tokenize(text)?;
+    eprintln!("tokens: {:#?}", tokens);
     let mut parser = Parser::new(tokens);
 
     parser.parse_schema()
