@@ -28,6 +28,11 @@ impl<'a> Parser<'a> {
         self.sqlparser.peek_token()
     }
 
+    #[must_use]
+    pub fn consume_token(&mut self, expected: &Token) -> bool {
+        self.sqlparser.consume_token(expected)
+    }
+
     pub fn parse_schema(&mut self) -> Result<Schema> {
         let mut stmts = Vec::new();
         while !matches!(self.peek_token(), Token::EOF) {
@@ -46,8 +51,21 @@ impl<'a> Parser<'a> {
 
         let word = as_word(&self.peek_token())?;
         let body = match word.to_lowercase().as_str() {
-            "import" | "extern" | "fn" => {
+            "import" => {
                 panic!("unimplemented");
+
+        let word = as_word(&self.peek_token());
+        let body = match word {
+            "import" => {
+                panic!("unimplemented");
+            }
+            "fn" => {
+                self.next_token();
+                self.parse_fn()?
+            }
+            "extern" => {
+                self.next_token();
+                self.parse_extern()?
             }
             "let" => {
                 self.next_token();
@@ -78,12 +96,94 @@ impl<'a> Parser<'a> {
         Ok(Stmt { export, body })
     }
 
-    pub fn parse_let(&mut self) -> Result<StmtBody> {
-        // Assume the leading keywords have already been consumed
-        //
-        let name = as_word(&self.peek_token())?.to_string();
+    pub fn parse_ident(&mut self) -> Result<Ident> {
+        let ident = as_word(&self.peek_token()).expect("Expected identifier").to_string();
         self.next_token();
 
+        Ok(ident)
+    }
+
+    pub fn parse_extern(&mut self) -> Result<StmtBody> {
+        // Assume the leading "extern" has already been consumed
+        //
+        let name = self.parse_ident()?;
+        let type_ = self.parse_type()?;
+
+        Ok(StmtBody::Extern{
+            name,
+            type_,
+        })
+    }
+
+    pub fn parse_idents(&mut self) -> Result<Vec<Ident>> {
+        let mut ret = Vec::new();
+        let mut expect_ident = true;
+        loop {
+            match self.peek_token() {
+                Token::Word(w) => {
+                    if !expect_ident {
+                        break;
+                    }
+
+                    ret.push(w.value);
+                }
+                Token::Comma => {
+                    if expect_ident {
+                        break;
+                    }
+                }
+                _ => {
+                    break;
+                }
+            }
+        }
+
+        Ok(ret)
+    }
+
+    pub fn parse_fn(&mut self) -> Result<StmtBody> {
+        // Assume the leading "fn" has already been consumed
+        //
+        let name = self.parse_ident()?;
+        let generics = match self.peek_token() {
+            Token::Lt => {
+                self.next_token();
+                self.parse_ident_list()
+            }
+            _ => Vec::new(),
+        };
+
+        if !self.consume_token(Token::LParen) {
+            panic!("Expected ( token");
+        }
+
+        let mut args = Vec::new();
+        loop {
+            let name = self.parse_ident()?;
+            let type_ = match self.peek_token() {
+                Token::Comma | Token::RParen => {},
+                _ => self.parse_type()?,
+            }
+
+            args.push(FnArg{
+                name,
+                type_,
+            });
+
+            match self.next_token() {
+                Token::Comma => {},
+                Token::RParen => break,
+                _ => {
+                    panic!("Unexpected token");
+                }
+            }
+        }
+    }
+
+    pub fn parse_let(&mut self) -> Result<StmtBody> {
+        // Assume the leading "let" or "export" keywords have already been consumed
+        //
+        let name = self.parse_ident()?;
         let type_ = match self.peek_token() {
             Token::Eq => None,
             _ => Some(self.parse_type()?),
@@ -130,7 +230,7 @@ impl<'a> Parser<'a> {
         let mut tokens = Vec::new();
         loop {
             match self.peek_token() {
-                Token::EOF | Token::SemiColon | Token::Eq => {
+                Token::EOF | Token::SemiColon | Token::Eq | Token::Comma | Token::RParen => {
                     break;
                 }
                 _ => {
