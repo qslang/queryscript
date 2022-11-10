@@ -32,6 +32,10 @@ impl<'a> Parser<'a> {
         self.sqlparser.consume_token(expected)
     }
 
+    pub fn expect_token(&mut self, expected: &Token) -> Result<(), ParserError> {
+        self.sqlparser.expect_token(expected)
+    }
+
     pub fn parse_schema(&mut self) -> Result<Schema> {
         let mut stmts = Vec::new();
         while !matches!(self.peek_token(), Token::EOF) {
@@ -51,7 +55,8 @@ impl<'a> Parser<'a> {
         let word = as_word(&self.peek_token())?;
         let body = match word.to_lowercase().as_str() {
             "import" => {
-                panic!("unimplemented");
+                self.next_token();
+                self.parse_import()?
             }
             "fn" => {
                 self.next_token();
@@ -142,18 +147,14 @@ impl<'a> Parser<'a> {
         let name = self.parse_ident()?;
         let generics = if self.consume_token(&Token::Lt) {
             let list = self.parse_idents()?;
-            if !self.consume_token(&Token::Gt) {
-                return unexpected_token!(self.peek_token(), "Expected: '>'");
-            }
+            self.expect_token(&Token::Gt)?;
 
             list
         } else {
             Vec::new()
         };
 
-        if !self.consume_token(&Token::LParen) {
-            return unexpected_token!(self.peek_token(), "Expected: '('");
-        }
+        self.expect_token(&Token::LParen)?;
 
         let mut args = Vec::new();
         loop {
@@ -183,15 +184,11 @@ impl<'a> Parser<'a> {
             None
         };
 
-        if !self.consume_token(&Token::LBrace) {
-            return unexpected_token!(self.peek_token(), "Expected: '{{'");
-        }
+        self.expect_token(&Token::LBrace)?;
 
         let body = self.parse_expr()?;
 
-        if !self.consume_token(&Token::RBrace) {
-            return unexpected_token!(self.peek_token(), "Expected: '}}'");
-        }
+        self.expect_token(&Token::RBrace)?;
 
         Ok(StmtBody::FnDef {
             name,
