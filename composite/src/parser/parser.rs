@@ -55,7 +55,7 @@ impl<'a> Parser<'a> {
         let word = as_word(&self.peek_token())?;
         let body = match word.to_lowercase().as_str() {
             "import" => {
-                panic!("Unimplemented!");
+                return unexpected_token!(self.peek_token(), "Unimplemented");
             }
             "fn" => {
                 self.next_token();
@@ -210,7 +210,7 @@ impl<'a> Parser<'a> {
                 self.parse_expr()?
             }
             _ => {
-                panic!("Expected definition");
+                return unexpected_token!(self.peek_token(), "Expected definition");
             }
         };
 
@@ -229,7 +229,7 @@ impl<'a> Parser<'a> {
                 self.parse_type()?
             }
             _ => {
-                panic!("Expected definition");
+                return unexpected_token!(self.peek_token(), "Expected definition");
             }
         };
 
@@ -288,16 +288,15 @@ pub fn as_word(token: &Token) -> Result<String> {
     }
 }
 
-pub fn tokenize(text: &str) -> Vec<Token> {
+pub fn tokenize(text: &str) -> Result<Vec<Token>> {
     let dialect = &GenericDialect {};
     let mut tokenizer = Tokenizer::new(dialect, text);
 
-    // XXX Return a better error if the tokenizer fails
-    tokenizer.tokenize().expect("")
+    Ok(tokenizer.tokenize()?)
 }
 
 pub fn parse(text: &str) -> Result<Schema> {
-    let tokens = tokenize(text);
+    let tokens = tokenize(text)?;
     let mut parser = Parser::new(tokens);
 
     parser.parse_schema()

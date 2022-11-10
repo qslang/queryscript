@@ -11,6 +11,12 @@ pub enum ParserError {
         backtrace: Option<Backtrace>,
     },
 
+    #[snafu(display("Tokenizer error: {}", source), context(false))]
+    TokenizerError {
+        source: sqlparser::tokenizer::TokenizerError,
+        backtrace: Option<Backtrace>,
+    },
+
     #[snafu(display("SQL parser error: {}", source), context(false))]
     SQLParserError {
         source: sqlparser::parser::ParserError,
