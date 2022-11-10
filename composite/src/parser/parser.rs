@@ -55,7 +55,7 @@ impl<'a> Parser<'a> {
         let word = as_word(&self.peek_token())?;
         let body = match word.to_lowercase().as_str() {
             "import" => {
-                return unexpected_token!(self.peek_token(), "Unimplemented");
+                return unexpected_token!(self.peek_token(), "Unimplemented: import");
             }
             "fn" => {
                 self.next_token();
