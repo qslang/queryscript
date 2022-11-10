@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::parser::error::{Result, UnexpectedTokenSnafu};
+use crate::parser::error::{unexpected_token, Result};
 use snafu::OptionExt;
 use sqlparser::{
     // ast::{ColumnDef, ColumnOptionDef, Statement as SQLStatement, TableConstraint},
@@ -39,34 +39,30 @@ impl<'a> Parser<'a> {
 
     pub fn parse_stmt(&mut self) -> Result<Stmt> {
         let token = self.peek_token();
-        let export = as_word(&token).context(UnexpectedTokenSnafu {
-            token: token.clone(),
-            msg: "expecting a word",
-        })? == "export";
+        let export = as_word(&token)? == "export";
         if export {
             self.next_token();
         }
 
-        let word = as_word(&self.peek_token());
-        let body = match word {
-            Some(w) => match w.to_lowercase().as_str() {
-                "import" | "extern" | "type" | "fn" => {
-                    panic!("unimplemented");
-                }
-                "let" => {
-                    self.next_token();
+        let word = as_word(&self.peek_token())?;
+        let body = match word.to_lowercase().as_str() {
+            "import" | "extern" | "fn" => {
+                panic!("unimplemented");
+            }
+            "let" => {
+                self.next_token();
+                self.parse_let()?
+            }
+            "type" => {
+                self.next_token();
+                self.parse_typedef()?
+            }
+            _ => {
+                if export {
                     self.parse_let()?
+                } else {
+                    return unexpected_token!(self.peek_token(), "Unexpected keyword");
                 }
-                _ => {
-                    if export {
-                        self.parse_let()?
-                    } else {
-                        panic!("Unexpected keyword {}", w)
-                    }
-                }
-            },
-            None => {
-                panic!("Expected keyword");
             }
         };
 
@@ -74,8 +70,8 @@ impl<'a> Parser<'a> {
             Token::SemiColon => {
                 self.next_token();
             }
-            _ => {
-                panic!("Unexpected token {}", self.peek_token());
+            t => {
+                return unexpected_token!(t, "Expecting a semi-colon");
             }
         }
 
@@ -85,9 +81,31 @@ impl<'a> Parser<'a> {
     pub fn parse_let(&mut self) -> Result<StmtBody> {
         // Assume the leading keywords have already been consumed
         //
-        let name = as_word(&self.peek_token())
-            .expect("Expected identifier")
-            .to_string();
+        let name = as_word(&self.peek_token())?.to_string();
+        self.next_token();
+
+        let type_ = match self.peek_token() {
+            Token::Eq => None,
+            _ => Some(self.parse_type()?),
+        };
+
+        let body = match self.peek_token() {
+            Token::Eq => {
+                self.next_token();
+                self.parse_expr()?
+            }
+            _ => {
+                panic!("Expected definition");
+            }
+        };
+
+        Ok(StmtBody::Let { name, type_, body })
+    }
+
+    pub fn parse_typedef(&mut self) -> Result<StmtBody> {
+        // Assume the leading keywords have already been consumed
+        //
+        let name = as_word(&self.peek_token())?.to_string();
         self.next_token();
 
         let type_ = match self.peek_token() {
@@ -137,10 +155,10 @@ impl<'a> Parser<'a> {
     }
 }
 
-pub fn as_word(token: &Token) -> Option<String> {
+pub fn as_word(token: &Token) -> Result<String> {
     match token {
-        Token::Word(w) => Some(w.value.clone()),
-        _ => None,
+        Token::Word(w) => Ok(w.value.clone()),
+        _ => unexpected_token!(token, "expecting a word"),
     }
 }
 
@@ -148,6 +166,7 @@ pub fn tokenize(text: &str) -> Vec<Token> {
     let dialect = &GenericDialect {};
     let mut tokenizer = Tokenizer::new(dialect, text);
 
+    // XXX Return a better error if the tokenizer fails
     tokenizer.tokenize().expect("")
 }
 

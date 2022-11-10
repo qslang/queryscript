@@ -21,7 +21,7 @@ pub enum ParserError {
 #[allow(unused_macros)]
 macro_rules! unexpected_token {
     ($token: expr, $base: expr $(, $args:expr)* $(,)?) => {
-        UnexpectedTokenSnafu {
+        crate::parser::error::UnexpectedTokenSnafu {
             msg: format!($base $(, $args)*),
             token: $token.clone(),
         }.fail()
