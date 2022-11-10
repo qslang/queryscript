@@ -32,8 +32,8 @@ impl<'a> Parser<'a> {
         self.sqlparser.consume_token(expected)
     }
 
-    pub fn expect_token(&mut self, expected: &Token) -> Result<(), ParserError> {
-        self.sqlparser.expect_token(expected)
+    pub fn expect_token(&mut self, expected: &Token) -> Result<()> {
+        Ok(self.sqlparser.expect_token(expected)?)
     }
 
     pub fn parse_schema(&mut self) -> Result<Schema> {
@@ -55,8 +55,7 @@ impl<'a> Parser<'a> {
         let word = as_word(&self.peek_token())?;
         let body = match word.to_lowercase().as_str() {
             "import" => {
-                self.next_token();
-                self.parse_import()?
+                panic!("Unimplemented!");
             }
             "fn" => {
                 self.next_token();
