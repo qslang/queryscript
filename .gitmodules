@@ -1,0 +1,3 @@
+[submodule "sqlparser-rs"]
+	path = sqlparser-rs
+	url = git@git.mandrews.io:Projects/sqlparser-rs

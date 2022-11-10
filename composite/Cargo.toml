@@ -6,5 +6,5 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-sqlparser = "0.26"
+sqlparser = { path = "../sqlparser-rs" }
 snafu = "0.7.3"
