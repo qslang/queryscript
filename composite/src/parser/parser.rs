@@ -36,14 +36,26 @@ impl<'a> Parser<'a> {
         Ok(self.sqlparser.expect_token(expected)?)
     }
 
+    pub fn consume_keyword(&mut self, expected: &str) -> bool {
+        match self.peek_token() {
+            Token::Word(w) => {
+                if w.value.to_lowercase() == expected.to_lowercase() {
+                    self.next_token();
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
     pub fn expect_keyword(&mut self, expected: &str) -> Result<()> {
-        let word = as_word(&self.next_token())?;
-        if word != expected {
-            Ok(self
-                .sqlparser
-                .expected::<()>("from", Token::make_keyword(word.as_str()))?)
-        } else {
+        if self.consume_keyword(expected) {
             Ok(())
+        } else {
+            let token = self.peek_token();
+            Ok(self.sqlparser.expected::<()>(expected, token)?)
         }
     }
 
@@ -168,7 +180,7 @@ impl<'a> Parser<'a> {
         self.expect_token(&Token::Mul)?;
         self.expect_keyword("from")?;
 
-        let path = vec![as_word(&self.next_token())?];
+        let path = self.parse_path()?;
 
         Ok(StmtBody::Import {
             path,
@@ -264,17 +276,11 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_type(&mut self) -> Result<Type> {
-        match self.peek_token() {
-            Token::Word(w) => {
-                if w.value.to_lowercase() == "record" {
-                    self.next_token();
-                    return self.parse_struct();
-                }
-            }
-            _ => (),
-        };
-
-        Ok(Type::Reference(self.parse_path()?))
+        if self.consume_keyword("record") {
+            self.parse_struct()
+        } else {
+            Ok(Type::Reference(self.parse_path()?))
+        }
     }
 
     pub fn parse_struct(&mut self) -> Result<Type> {
