@@ -77,7 +77,10 @@ impl<'a> Parser<'a> {
                 if export {
                     self.parse_let()?
                 } else {
-                    return unexpected_token!(self.peek_token(), "Expected: import | fn | extern | let | type");
+                    return unexpected_token!(
+                        self.peek_token(),
+                        "Expected: import | fn | extern | let | type"
+                    );
                 }
             }
         };
@@ -109,10 +112,7 @@ impl<'a> Parser<'a> {
         let name = self.parse_ident()?;
         let type_ = self.parse_type()?;
 
-        Ok(StmtBody::Extern{
-            name,
-            type_,
-        })
+        Ok(StmtBody::Extern { name, type_ })
     }
 
     pub fn parse_idents(&mut self) -> Result<Vec<Ident>> {
@@ -127,7 +127,7 @@ impl<'a> Parser<'a> {
                 }
             } else {
                 match self.peek_token() {
-                    Token::Comma => {},
+                    Token::Comma => {}
                     _ => break,
                 }
 
@@ -163,13 +163,10 @@ impl<'a> Parser<'a> {
                 _ => Some(self.parse_type()?),
             };
 
-            args.push(FnArg{
-                name,
-                type_,
-            });
+            args.push(FnArg { name, type_ });
 
             match self.next_token() {
-                Token::Comma => {},
+                Token::Comma => {}
                 Token::RParen => break,
                 _ => {
                     return unexpected_token!(self.peek_token(), "Expected: ',' | ')'");
@@ -226,39 +223,50 @@ impl<'a> Parser<'a> {
         let name = as_word(&self.peek_token())?.to_string();
         self.next_token();
 
-        let type_ = match self.peek_token() {
-            Token::Eq => None,
-            _ => Some(self.parse_type()?),
-        };
-
-        let body = match self.peek_token() {
+        let def = match self.peek_token() {
             Token::Eq => {
                 self.next_token();
-                self.parse_expr()?
+                self.parse_type()?
             }
             _ => {
                 panic!("Expected definition");
             }
         };
 
-        Ok(StmtBody::Let { name, type_, body })
+        Ok(StmtBody::TypeDef { name, def })
     }
 
     pub fn parse_type(&mut self) -> Result<Type> {
-        let mut tokens = Vec::new();
+        match self.peek_token() {
+            Token::Word(w) => {
+                if w.value.to_lowercase() == "struct" {
+                    self.next_token();
+                    return self.parse_struct();
+                }
+            }
+            _ => (),
+        };
+
+        Ok(Type::Reference(vec![self.parse_ident()?]))
+    }
+
+    pub fn parse_struct(&mut self) -> Result<Type> {
+        self.expect_token(&Token::LBrace)?;
+        let mut struct_ = Vec::new();
         loop {
             match self.peek_token() {
-                Token::EOF | Token::SemiColon | Token::Eq | Token::Comma | Token::RParen | Token::LBrace => {
+                Token::RBrace => {
+                    self.next_token();
                     break;
                 }
                 _ => {
-                    tokens.push(self.peek_token().clone());
+                    let name = self.parse_ident()?;
+                    let def = self.parse_type()?;
+                    struct_.push(StructEntry { name, def });
                 }
             }
-            self.next_token();
         }
-
-        Ok(Type::TODO(tokens))
+        Ok(Type::Struct(struct_))
     }
 
     pub fn parse_expr(&mut self) -> Result<Expr> {
