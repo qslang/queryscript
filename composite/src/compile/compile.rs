@@ -288,24 +288,41 @@ pub fn typecheck(schema: Rc<RefCell<Schema>>, lhs_type: &Type, expr: &ast::Expr)
     unify_types(lhs_type, &rhs_type)
 }
 
-pub fn rebind_type(schema: &ast::Path, type_: &Type) -> Result<Type> {
+pub fn rebind_type(schema_path: &ast::Path, type_: &Type) -> Result<Type> {
     match type_ {
         Type::Unknown => Ok(Type::Unknown),
         Type::Atom(a) => Ok(Type::Atom(a.clone())),
         Type::Struct(fields) => Ok(Type::Struct(
             fields
                 .iter()
-                .map(|(k, v)| Ok((k.clone(), rebind_type(schema, v)?)))
+                .map(|(k, v)| Ok((k.clone(), rebind_type(schema_path, v)?)))
                 .collect::<Result<BTreeMap<String, Type>>>()?,
         )),
-        Type::List(inner) => Ok(Type::List(Box::new(rebind_type(schema, inner.as_ref())?))),
+        Type::List(inner) => Ok(Type::List(Box::new(rebind_type(
+            schema_path,
+            inner.as_ref(),
+        )?))),
         Type::Exclude { inner, excluded } => Ok(Type::Exclude {
-            inner: Box::new(rebind_type(schema, inner)?),
+            inner: Box::new(rebind_type(schema_path, inner)?),
             excluded: excluded.clone(),
         }),
         Type::Ref(p) => Ok(Type::Ref(Path {
-            schema: vec![vec![schema.clone()], p.schema.clone()].concat(),
+            schema: vec![vec![schema_path.clone()], p.schema.clone()].concat(),
             items: p.items.clone(),
+        })),
+    }
+}
+
+pub fn rebind_decl(schema_path: &ast::Path, decl: Rc<RefCell<Decl>>) -> Result<SchemaEntry> {
+    match &decl.borrow().value {
+        SchemaEntry::Schema(s) => Ok(SchemaEntry::Schema(s.clone())),
+        SchemaEntry::Type(t) => Ok(SchemaEntry::Type(rebind_type(schema_path, &t)?)),
+        SchemaEntry::Expr(e) => Ok(SchemaEntry::Expr(TypedExpr {
+            type_: rebind_type(schema_path, &e.type_)?,
+            expr: ast::Expr::ImportedPath {
+                schema_path: schema_path.clone(),
+                entry_path: vec![decl.borrow().name.clone()],
+            },
         })),
     }
 }
@@ -370,26 +387,22 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                             .iter()
                             .filter(|(_, v)| v.borrow().public)
                         {
-                            imports.push((
-                                k.clone(),
-                                match &v.borrow().value {
-                                    SchemaEntry::Schema(s) => SchemaEntry::Schema(s.clone()),
-                                    SchemaEntry::Type(t) => {
-                                        SchemaEntry::Type(rebind_type(path, &t)?)
-                                    }
-                                    SchemaEntry::Expr(e) => SchemaEntry::Expr(TypedExpr {
-                                        type_: rebind_type(path, &e.type_)?,
-                                        expr: ast::Expr::ImportedPath {
-                                            schema_path: path.clone(),
-                                            entry_path: vec![k.clone()],
-                                        },
-                                    }),
-                                },
-                            ));
+                            imports.push((k.clone(), rebind_decl(path, v.clone())?));
                         }
                     }
-                    ast::ImportList::Items(_items) => {
-                        return Err(CompileError::unimplemented("import list"));
+                    ast::ImportList::Items(items) => {
+                        for item in items {
+                            if item.len() != 1 {
+                                return Err(CompileError::unimplemented("path imports"));
+                            }
+
+                            let (decl, r) = lookup_path(imported.clone(), &convert_path(item))?;
+                            if r.len() > 0 {
+                                return Err(CompileError::no_such_entry(r.clone()));
+                            }
+
+                            imports.push((item[0].clone(), rebind_decl(path, decl.clone())?));
+                        }
                     }
                 }
 
