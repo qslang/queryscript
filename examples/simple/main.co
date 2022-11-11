@@ -1,0 +1,5 @@
+import schema;
+
+extern foo schema.Foo;
+
+let bar = foo.a;

@@ -49,14 +49,16 @@ pub struct Decl {
 
 #[derive(Clone, Debug)]
 pub struct Schema {
+    pub folder: Option<String>,
     pub parent_scope: Option<Rc<Schema>>,
     pub externs: BTreeSet<String>,
     pub decls: BTreeMap<String, Decl>,
 }
 
 impl Schema {
-    pub fn new() -> Schema {
+    pub fn new(folder: Option<String>) -> Schema {
         Schema {
+            folder,
             parent_scope: None,
             externs: BTreeSet::new(),
             decls: BTreeMap::new(),

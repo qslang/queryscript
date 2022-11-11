@@ -3,6 +3,7 @@ use crate::parser::error::ParserError;
 use crate::runtime::error::RuntimeError;
 use crate::schema::{Decl, Type};
 use snafu::{Backtrace, Snafu};
+use std::io;
 pub type Result<T> = std::result::Result<T, CompileError>;
 
 #[derive(Debug, Snafu)]
@@ -17,6 +18,12 @@ pub enum CompileError {
     #[snafu(display("Parser error: {}", source), context(false))]
     RuntimeError {
         source: RuntimeError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(context(false))]
+    FsError {
+        source: io::Error,
         backtrace: Option<Backtrace>,
     },
 

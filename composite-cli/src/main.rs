@@ -30,9 +30,7 @@ fn main() {
             );
         }
         Commands::Compile { file } => {
-            let contents = fs::read_to_string(file).expect("Unable to read file");
-            let schema =
-                compile::compile_schema_from_string(&contents).expect("Module parser failed");
+            let schema = compile::compile_schema_from_file(&file).expect("Compilation error");
             eprintln!("{:#?}", schema);
         }
     }

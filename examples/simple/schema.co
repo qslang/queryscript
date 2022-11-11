@@ -1,0 +1,4 @@
+export type Foo record {
+    a number,
+    b number,
+}
