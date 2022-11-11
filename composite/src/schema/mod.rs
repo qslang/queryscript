@@ -1,14 +1,9 @@
 use crate::ast;
 use crate::runtime;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 
 pub type Ident = ast::Ident;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NameAndType {
-    pub name: Ident,
-    pub def: Type,
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AtomicType {
@@ -22,7 +17,7 @@ pub enum AtomicType {
 pub enum Type {
     Unknown,
     Atom(AtomicType),
-    Struct(Vec<NameAndType>),
+    Struct(BTreeMap<String, Type>),
     List(Box<Type>),
     Exclude {
         inner: Box<Type>,
@@ -33,16 +28,16 @@ pub enum Type {
 pub type Value = runtime::Value;
 
 #[derive(Clone, Debug)]
-pub struct TypedValue {
+pub struct TypedExpr {
     pub type_: Type,
-    pub value: Value,
+    pub expr: ast::Expr,
 }
 
 #[derive(Clone, Debug)]
 pub enum SchemaEntry {
-    Import(Schema),
+    Schema(Schema),
     Type(Type),
-    Value(TypedValue),
+    Expr(TypedExpr),
 }
 
 #[derive(Clone, Debug)]
@@ -54,12 +49,16 @@ pub struct Decl {
 
 #[derive(Clone, Debug)]
 pub struct Schema {
+    pub parent_scope: Option<Rc<Schema>>,
+    pub externs: BTreeSet<String>,
     pub decls: BTreeMap<String, Decl>,
 }
 
 impl Schema {
     pub fn new() -> Schema {
         Schema {
+            parent_scope: None,
+            externs: BTreeSet::new(),
             decls: BTreeMap::new(),
         }
     }

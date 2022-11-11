@@ -1,1 +1,8 @@
-export let foo number = 1;
+type Foo record {
+    a number,
+    b number,
+}
+
+extern foo Foo;
+
+let bar = foo.a;

@@ -1,7 +1,7 @@
 use crate::ast;
 use crate::parser::error::ParserError;
 use crate::runtime::error::RuntimeError;
-use crate::schema::Type;
+use crate::schema::{Decl, Type};
 use snafu::{Backtrace, Snafu};
 pub type Result<T> = std::result::Result<T, CompileError>;
 
@@ -26,17 +26,28 @@ pub enum CompileError {
         backtrace: Option<Backtrace>,
     },
 
+    #[snafu(display("Duplicate entry: {:?}", path))]
+    DuplicateEntry {
+        path: ast::Path,
+        backtrace: Option<Backtrace>,
+    },
+
     #[snafu(display("No such entry: {:?}", path))]
     NoSuchEntry {
         path: ast::Path,
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("Wrong kind: declaration at {:?} is {} not {}", path, actual, expected))]
+    #[snafu(display(
+        "Wrong kind: declaration at {:?} is {:?} not {}",
+        path,
+        actual,
+        expected
+    ))]
     WrongKind {
         path: ast::Path,
         expected: String,
-        actual: String,
+        actual: Decl,
         backtrace: Option<Backtrace>,
     },
 
@@ -57,11 +68,15 @@ impl CompileError {
         return NoSuchEntrySnafu { path }.build();
     }
 
-    pub fn wrong_kind(path: ast::Path, expected: &str, actual: &str) -> CompileError {
+    pub fn duplicate_entry(path: ast::Path) -> CompileError {
+        return DuplicateEntrySnafu { path }.build();
+    }
+
+    pub fn wrong_kind(path: ast::Path, expected: &str, actual: &Decl) -> CompileError {
         return WrongKindSnafu {
             path,
             expected,
-            actual,
+            actual: actual.clone(),
         }
         .build();
     }

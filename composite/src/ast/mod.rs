@@ -42,6 +42,7 @@ pub struct FnArg {
 pub enum Expr {
     SQLQuery(sqlast::Query),
     SQLExpr(sqlast::Expr),
+    Unknown,
 }
 
 #[derive(Clone, Debug)]
