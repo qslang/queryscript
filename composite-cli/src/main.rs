@@ -14,6 +14,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Commands {
     Parse { file: String },
+    Run { file: String, expr: String },
 }
 
 fn main() {
@@ -23,6 +24,12 @@ fn main() {
         Commands::Parse { file } => {
             let contents = fs::read_to_string(file).expect("Unable to read file");
             eprintln!("{:#?}", parser::parse(&contents).expect("Parser failed"));
+        }
+        Commands::Run { file, expr } => {
+            let contents = fs::read_to_string(file).expect("Unable to read file");
+            let schema = schema::from_string(&contents).expect("Module parser failed");
+            let expr = parser::parse_expr(expr).expect("Expression parser failed");
+            eprintln!("{:#?}", runtime::eval(schema, e));
         }
     }
 }

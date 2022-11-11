@@ -84,6 +84,6 @@ pub struct Stmt {
 }
 
 #[derive(Debug)]
-pub struct Schema {
+pub struct Module {
     pub stmts: Vec<Stmt>,
 }

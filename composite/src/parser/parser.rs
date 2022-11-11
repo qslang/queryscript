@@ -59,13 +59,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_schema(&mut self) -> Result<Schema> {
+    pub fn parse_module(&mut self) -> Result<Module> {
         let mut stmts = Vec::new();
         while !matches!(self.peek_token(), Token::EOF) {
             stmts.push(self.parse_stmt()?);
         }
 
-        Ok(Schema { stmts })
+        Ok(Module { stmts })
     }
 
     pub fn parse_stmt(&mut self) -> Result<Stmt> {
@@ -379,11 +379,11 @@ pub fn tokenize(text: &str) -> Result<Vec<Token>> {
     Ok(tokenizer.tokenize()?)
 }
 
-pub fn parse(text: &str) -> Result<Schema> {
+pub fn parse_module(text: &str) -> Result<File> {
     let tokens = tokenize(text)?;
     let mut parser = Parser::new(tokens);
 
-    parser.parse_schema()
+    parser.parse_file()
 }
 
 // pub fn parse_sql(text: &str) {
