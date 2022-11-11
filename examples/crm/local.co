@@ -1,4 +1,4 @@
-import * from schema; -- This is a relative import
+import schema; -- This is a relative import
 
 let auth_users [schema.auth_user] = load('data/auth_users.json');
 let auth_orgs [schema.auth_org] = load('data/auth_orgs.json');

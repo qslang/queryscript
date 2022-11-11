@@ -58,6 +58,20 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[must_use]
+    fn maybe_parse<T, F>(&mut self, mut f: F) -> Option<T>
+    where
+        F: FnMut(&mut Parser<'a>) -> Result<T>,
+    {
+        let index = self.sqlparser.index;
+        if let Ok(t) = f(self) {
+            Some(t)
+        } else {
+            self.sqlparser.index = index;
+            None
+        }
+    }
+
     pub fn parse_schema(&mut self) -> Result<Schema> {
         let mut stmts = Vec::new();
         while !matches!(self.peek_token().token, Token::EOF) {
@@ -160,7 +174,21 @@ impl<'a> Parser<'a> {
         Ok(ret)
     }
 
+    pub fn parse_simple_import(&mut self) -> Result<StmtBody> {
+        let path = self.parse_path()?;
+        self.expect_token(&Token::SemiColon)?;
+        Ok(StmtBody::Import {
+            path,
+            list: ImportList::None,
+            args: None,
+        })
+    }
+
     pub fn parse_import(&mut self) -> Result<StmtBody> {
+        if let Some(stmt) = self.maybe_parse(Parser::parse_simple_import) {
+            return Ok(stmt);
+        }
+
         let list = if self.consume_token(&Token::Mul) {
             ImportList::Star
         } else {

@@ -47,6 +47,7 @@ pub enum Expr {
 
 #[derive(Clone, Debug)]
 pub enum ImportList {
+    None,
     Star,
     Items(Vec<Path>),
 }
