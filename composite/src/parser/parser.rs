@@ -69,6 +69,13 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_stmt(&mut self) -> Result<Stmt> {
+        if self.consume_token(&Token::SemiColon) {
+            return Ok(Stmt {
+                export: false,
+                body: StmtBody::Noop,
+            });
+        }
+
         let export = self.consume_keyword("export");
         let body = if self.consume_keyword("fn") {
             self.parse_fn()?
@@ -86,11 +93,6 @@ impl<'a> Parser<'a> {
                 "Expected: import | fn | extern | let | type"
             );
         };
-
-        // Consume (optional) semi-colons.
-        while matches!(self.peek_token(), Token::SemiColon) {
-            self.next_token();
-        }
 
         Ok(Stmt { export, body })
     }
@@ -125,6 +127,7 @@ impl<'a> Parser<'a> {
         //
         let name = self.parse_ident()?;
         let type_ = self.parse_type()?;
+        self.expect_token(&Token::SemiColon)?;
 
         Ok(StmtBody::Extern { name, type_ })
     }
@@ -193,6 +196,8 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
+
+        self.expect_token(&Token::SemiColon)?;
 
         Ok(StmtBody::Import { path, list, args })
     }
@@ -271,6 +276,8 @@ impl<'a> Parser<'a> {
             }
         };
 
+        self.expect_token(&Token::SemiColon)?;
+
         Ok(StmtBody::Let { name, type_, body })
     }
 
@@ -279,6 +286,10 @@ impl<'a> Parser<'a> {
         //
         let name = self.parse_ident()?;
         let def = self.parse_type()?;
+        match def {
+            Type::Struct(_) => {}
+            _ => self.expect_token(&Token::SemiColon)?,
+        }
         Ok(StmtBody::TypeDef(NameAndType { name, def }))
     }
 
@@ -370,7 +381,6 @@ pub fn tokenize(text: &str) -> Result<Vec<Token>> {
 
 pub fn parse(text: &str) -> Result<Schema> {
     let tokens = tokenize(text)?;
-    eprintln!("tokens: {:#?}", tokens);
     let mut parser = Parser::new(tokens);
 
     parser.parse_schema()

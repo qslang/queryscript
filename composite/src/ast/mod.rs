@@ -52,6 +52,7 @@ pub enum ImportList {
 
 #[derive(Debug)]
 pub enum StmtBody {
+    Noop,
     Import {
         path: Path,
         list: ImportList,
