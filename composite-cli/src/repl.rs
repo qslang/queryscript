@@ -1,5 +1,7 @@
 use rustyline::{error::ReadlineError, Editor};
 use snafu::{prelude::*, Whatever};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use composite::compile;
 use composite::parser;
@@ -11,7 +13,7 @@ pub fn run() {
         .expect("current working directory")
         .display()
         .to_string();
-    let mut repl_schema = compile::new_schema(Some(cwd));
+    let repl_schema = schema::Schema::new(Some(cwd));
 
     let mut rl = Editor::<()>::new().expect("readline library failed");
 
@@ -47,7 +49,7 @@ pub fn run() {
                     _ => {}
                 };
 
-                match run_command(&mut repl_schema, &line) {
+                match run_command(repl_schema.clone(), &line) {
                     Ok(_) => {}
                     Err(e) => {
                         eprintln!("Error: {}", e);
@@ -75,7 +77,7 @@ pub fn run() {
     }
 }
 
-fn run_command(repl_schema: &mut schema::Schema, cmd: &str) -> Result<(), Whatever> {
+fn run_command(repl_schema: Rc<RefCell<schema::Schema>>, cmd: &str) -> Result<(), Whatever> {
     let tokens = parser::tokenize(&cmd).with_whatever_context(|e| format!("{}", e))?;
     let mut parser = parser::Parser::new(tokens);
 
@@ -95,8 +97,8 @@ fn run_command(repl_schema: &mut schema::Schema, cmd: &str) -> Result<(), Whatev
 
     match parser.parse_expr() {
         Ok(ast) => {
-            let value =
-                runtime::eval(repl_schema, &ast).with_whatever_context(|e| format!("{}", e))?;
+            let value = runtime::eval(&repl_schema.borrow(), &ast)
+                .with_whatever_context(|e| format!("{}", e))?;
             println!("{:?}", value);
         }
         Err(e) => {

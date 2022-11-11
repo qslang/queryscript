@@ -16,6 +16,9 @@ pub fn eval(_schema: &schema::Schema, expr: &ast::Expr) -> Result<Value> {
         ast::Expr::Unknown => {
             return Err(RuntimeError::new("unresolved extern"));
         }
+        ast::Expr::ImportedPath { .. } => {
+            return Err(RuntimeError::unimplemented("imported values"));
+        }
         ast::Expr::SQLQuery(_) => {
             return Err(RuntimeError::unimplemented("SELECT"));
         }

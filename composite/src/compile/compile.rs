@@ -3,61 +3,18 @@ use crate::compile::error::*;
 use crate::parser::parse_schema;
 use crate::schema::*;
 use sqlparser::ast as sqlast;
-use std::collections::{BTreeMap, BTreeSet};
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path as FilePath;
 use std::rc::Rc;
 
-pub fn new_global_schema() -> Schema {
-    Schema {
-        folder: None,
-        parent_scope: None,
-        externs: BTreeSet::new(),
-        decls: BTreeMap::from([
-            (
-                "number".to_string(),
-                Decl {
-                    public: true,
-                    name: "number".to_string(),
-                    value: SchemaEntry::Type(Type::Atom(AtomicType::Number)),
-                },
-            ),
-            (
-                "string".to_string(),
-                Decl {
-                    public: true,
-                    name: "string".to_string(),
-                    value: SchemaEntry::Type(Type::Atom(AtomicType::String)),
-                },
-            ),
-            (
-                "bool".to_string(),
-                Decl {
-                    public: true,
-                    name: "string".to_string(),
-                    value: SchemaEntry::Type(Type::Atom(AtomicType::Bool)),
-                },
-            ),
-            (
-                "null".to_string(),
-                Decl {
-                    public: true,
-                    name: "string".to_string(),
-                    value: SchemaEntry::Type(Type::Atom(AtomicType::Null)),
-                },
-            ),
-        ]),
+pub fn lookup_schema(schema: Rc<RefCell<Schema>>, path: &ast::Path) -> Result<Rc<RefCell<Schema>>> {
+    if let Some(s) = schema.borrow().imports.get(path) {
+        return Ok(s.clone());
     }
-}
 
-pub fn new_schema(folder: Option<String>) -> Schema {
-    let mut schema = Schema::new(folder);
-    schema.parent_scope = Some(Rc::new(new_global_schema()));
-    schema
-}
-
-pub fn lookup_schema(schema: &Schema, path: &ast::Path) -> Result<Schema> {
-    if let Some(root) = &schema.folder {
+    let (k, v) = if let Some(root) = &schema.borrow().folder {
         let mut file_path_buf = FilePath::new(root).to_path_buf();
         for p in path {
             file_path_buf.push(FilePath::new(p));
@@ -65,64 +22,96 @@ pub fn lookup_schema(schema: &Schema, path: &ast::Path) -> Result<Schema> {
         file_path_buf.set_extension("co");
         let file_path = file_path_buf.as_path();
 
-        println!("{:?}", file_path);
         match file_path.to_str() {
-            Some(s) => match compile_schema_from_file(s) {
-                Ok(c) => Ok(c),
-                Err(CompileError::FsError { .. }) => Err(CompileError::no_such_entry(path.clone())),
-                Err(e) => Err(e),
+            Some(file_path_str) => match compile_schema_from_file(file_path_str) {
+                Ok(s) => (path.clone(), s.clone()),
+                Err(CompileError::FsError { .. }) => {
+                    return Err(CompileError::no_such_entry(path.clone()))
+                }
+                Err(e) => return Err(e),
             },
             None => return Err(CompileError::no_such_entry(path.clone())),
         }
     } else {
         return Err(CompileError::no_such_entry(path.clone()));
-    }
+    };
+
+    schema.borrow_mut().imports.insert(k, v.clone());
+    return Ok(v);
 }
 
-pub fn lookup_path<'a>(mut schema: &'a Schema, path: &ast::Path) -> Result<(&'a Decl, ast::Path)> {
-    if path.len() == 0 {
-        return Err(CompileError::no_such_entry(path.clone()));
+pub fn lookup_path(
+    mut schema: Rc<RefCell<Schema>>,
+    path: &Path,
+) -> Result<(Rc<RefCell<Decl>>, ast::Path)> {
+    let debug_path = debug_path(&path);
+    if path.items.len() == 0 {
+        return Err(CompileError::no_such_entry(debug_path));
     }
 
-    for i in 0..path.len() - 1 {
-        if let Some(next) = schema.decls.get(&path[i]) {
-            if i > 0 && !next.public {
-                return Err(CompileError::no_such_entry(path.clone()));
-            }
+    for imported_schema in &path.schema {
+        schema = lookup_schema(schema.clone(), &imported_schema)?;
+    }
 
-            match &next.value {
-                SchemaEntry::Schema(s) => {
-                    schema = &s;
+    for (i, ident) in path.items.iter().enumerate() {
+        let new = match schema.borrow().decls.get(ident) {
+            Some(decl) => {
+                if i > 0 && !decl.borrow().public {
+                    return Err(CompileError::wrong_kind(
+                        debug_path,
+                        "public",
+                        &decl.borrow().clone(),
+                    ));
                 }
-                _ => return Ok((&next, path[i + 1..].to_vec())),
+
+                let new = match &decl.borrow().value {
+                    SchemaEntry::Schema(imported) => lookup_schema(schema.clone(), &imported)?,
+                    _ => return Ok((decl.clone(), path.items[i + 1..].to_vec())),
+                };
+
+                if i == path.items.len() - 1 {
+                    return Ok((decl.clone(), vec![]));
+                }
+
+                new
             }
-        } else {
-            return Err(CompileError::no_such_entry(path.clone()));
-        }
+            None => {
+                return Err(CompileError::no_such_entry(debug_path));
+            }
+        };
+
+        schema = new;
     }
 
-    if let Some(last) = schema.decls.get(&path[path.len() - 1]) {
-        if path.len() > 1 && !last.public {
-            return Err(CompileError::no_such_entry(path.clone()));
-        }
-
-        return Ok((last, Vec::new()));
-    }
-
-    return Err(CompileError::no_such_entry(path.clone()));
+    return Err(CompileError::no_such_entry(debug_path));
 }
 
-pub fn resolve_type(schema: &Schema, ast: &ast::Type) -> Result<Type> {
+pub fn convert_path(items: &ast::Path) -> Path {
+    Path {
+        items: items.clone(),
+        schema: vec![],
+    }
+}
+
+pub fn debug_path(path: &Path) -> ast::Path {
+    path.schema
+        .iter()
+        .flatten()
+        .chain(&path.items)
+        .map(|i| i.clone())
+        .collect()
+}
+
+pub fn resolve_type(schema: Rc<RefCell<Schema>>, ast: &ast::Type) -> Result<Type> {
     match ast {
         ast::Type::Reference(path) => {
             let decl = {
-                let mut current = schema;
+                let mut current = schema.clone();
                 let decl = loop {
-                    match lookup_path(current, path) {
+                    current = match lookup_path(current.clone(), &convert_path(path)) {
                         Err(CompileError::NoSuchEntry { .. }) => {
-                            if let Some(parent_scope) = &current.parent_scope {
-                                current = parent_scope.as_ref();
-                                continue;
+                            if let Some(parent_scope) = current.borrow().parent_scope.clone() {
+                                parent_scope.clone()
                             } else {
                                 return Err(CompileError::no_such_entry(path.clone()));
                             }
@@ -140,10 +129,18 @@ pub fn resolve_type(schema: &Schema, ast: &ast::Type) -> Result<Type> {
                 decl.clone()
             };
 
-            match &decl.value {
-                SchemaEntry::Type(t) => Ok(t.clone()),
-                _ => Err(CompileError::wrong_kind(path.clone(), "type", &decl)),
-            }
+            let t = match decl.borrow().value.clone() {
+                SchemaEntry::Type(t) => t.clone(),
+                _ => {
+                    return Err(CompileError::wrong_kind(
+                        path.clone(),
+                        "type",
+                        &decl.borrow().clone(),
+                    ))
+                }
+            };
+
+            Ok(t)
         }
         ast::Type::Struct(entries) => {
             let mut fields = BTreeMap::new();
@@ -153,7 +150,7 @@ pub fn resolve_type(schema: &Schema, ast: &ast::Type) -> Result<Type> {
                         if fields.contains_key(&nt.name) {
                             return Err(CompileError::duplicate_entry(vec![nt.name.clone()]));
                         }
-                        fields.insert(nt.name.clone(), resolve_type(schema, &nt.def)?);
+                        fields.insert(nt.name.clone(), resolve_type(schema.clone(), &nt.def)?);
                     }
                     ast::StructEntry::Include { .. } => {
                         return Err(CompileError::unimplemented("Struct inclusions"));
@@ -171,13 +168,43 @@ pub fn resolve_type(schema: &Schema, ast: &ast::Type) -> Result<Type> {
 }
 
 pub fn resolve_global_atom(name: &str) -> Result<Type> {
-    let schema = new_global_schema();
-    resolve_type(&schema, &ast::Type::Reference(vec![name.to_string()]))
+    let schema = Schema::new_global_schema();
+    resolve_type(schema, &ast::Type::Reference(vec![name.to_string()]))
 }
 
-pub fn resolve_expr(schema: &Schema, expr: &ast::Expr) -> Result<Type> {
+pub fn resolve_expr(schema: Rc<RefCell<Schema>>, expr: &ast::Expr) -> Result<Type> {
     match expr {
         ast::Expr::Unknown => Ok(Type::Unknown),
+        ast::Expr::ImportedPath {
+            schema_path,
+            entry_path,
+        } => {
+            let full_path = Path {
+                schema: vec![schema_path.clone()],
+                items: entry_path.clone(),
+            };
+            let (decl, remainder) = lookup_path(schema, &full_path)?;
+            if remainder.len() > 0 {
+                return Err(CompileError::wrong_kind(
+                    debug_path(&full_path),
+                    "decl",
+                    &decl.borrow().clone(),
+                ));
+            }
+
+            let t = match &decl.borrow().value {
+                SchemaEntry::Expr(e) => e.type_.clone(),
+                _ => {
+                    return Err(CompileError::wrong_kind(
+                        debug_path(&full_path),
+                        "value",
+                        &decl.borrow().clone(),
+                    ))
+                }
+            };
+
+            Ok(t)
+        }
         ast::Expr::SQLQuery(_) => Err(CompileError::unimplemented("SELECT")),
         ast::Expr::SQLExpr(e) => match e {
             sqlast::Expr::Value(v) => match v {
@@ -196,10 +223,16 @@ pub fn resolve_expr(schema: &Schema, expr: &ast::Expr) -> Result<Type> {
             },
             sqlast::Expr::CompoundIdentifier(sqlpath) => {
                 let path: Vec<_> = sqlpath.iter().map(|e| e.value.clone()).collect();
-                let (decl, remainder) = lookup_path(schema, &path)?;
-                let type_ = match &decl.value {
+                let (decl, remainder) = lookup_path(schema, &convert_path(&path))?;
+                let type_ = match &decl.borrow().value {
                     SchemaEntry::Expr(v) => v.clone(),
-                    _ => return Err(CompileError::wrong_kind(path.clone(), "value", &decl)),
+                    _ => {
+                        return Err(CompileError::wrong_kind(
+                            path.clone(),
+                            "value",
+                            &decl.borrow().clone(),
+                        ))
+                    }
                 }
                 .type_;
 
@@ -249,19 +282,41 @@ pub fn unify_types(lhs: &Type, rhs: &Type) -> Result<Type> {
     return Ok(lhs.clone());
 }
 
-pub fn typecheck(schema: &Schema, lhs_type: &Type, expr: &ast::Expr) -> Result<Type> {
+pub fn typecheck(schema: Rc<RefCell<Schema>>, lhs_type: &Type, expr: &ast::Expr) -> Result<Type> {
     let rhs_type = resolve_expr(schema, expr)?;
 
     unify_types(lhs_type, &rhs_type)
 }
 
-pub fn compile_schema_from_string(contents: &str) -> Result<Schema> {
+pub fn rebind_type(schema: &ast::Path, type_: &Type) -> Result<Type> {
+    match type_ {
+        Type::Unknown => Ok(Type::Unknown),
+        Type::Atom(a) => Ok(Type::Atom(a.clone())),
+        Type::Struct(fields) => Ok(Type::Struct(
+            fields
+                .iter()
+                .map(|(k, v)| Ok((k.clone(), rebind_type(schema, v)?)))
+                .collect::<Result<BTreeMap<String, Type>>>()?,
+        )),
+        Type::List(inner) => Ok(Type::List(Box::new(rebind_type(schema, inner.as_ref())?))),
+        Type::Exclude { inner, excluded } => Ok(Type::Exclude {
+            inner: Box::new(rebind_type(schema, inner)?),
+            excluded: excluded.clone(),
+        }),
+        Type::Ref(p) => Ok(Type::Ref(Path {
+            schema: vec![vec![schema.clone()], p.schema.clone()].concat(),
+            items: p.items.clone(),
+        })),
+    }
+}
+
+pub fn compile_schema_from_string(contents: &str) -> Result<Rc<RefCell<Schema>>> {
     let ast = parse_schema(contents)?;
 
     compile_schema(None, &ast)
 }
 
-pub fn compile_schema_from_file(file_path: &str) -> Result<Schema> {
+pub fn compile_schema_from_file(file_path: &str) -> Result<Rc<RefCell<Schema>>> {
     let parsed_path = FilePath::new(file_path).canonicalize()?;
     if !parsed_path.exists() {
         return Err(CompileError::no_such_entry(
@@ -283,44 +338,78 @@ pub fn compile_schema_from_file(file_path: &str) -> Result<Schema> {
     compile_schema(folder, &ast)
 }
 
-pub fn compile_schema(folder: Option<String>, ast: &ast::Schema) -> Result<Schema> {
-    let mut schema = new_schema(folder);
-    compile_schema_entries(&mut schema, ast)?;
+pub fn compile_schema(folder: Option<String>, ast: &ast::Schema) -> Result<Rc<RefCell<Schema>>> {
+    let schema = Schema::new(folder);
+    compile_schema_entries(schema.clone(), ast)?;
     Ok(schema)
 }
 
-pub fn compile_schema_entries(schema: &mut Schema, ast: &ast::Schema) -> Result<()> {
+pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) -> Result<()> {
     for stmt in &ast.stmts {
         let entries: Vec<(String, SchemaEntry)> = match &stmt.body {
             ast::StmtBody::Noop => continue,
             ast::StmtBody::Import { path, list, args } => {
+                let mut imports = Vec::new();
+
                 if args.is_some() {
                     return Err(CompileError::unimplemented("import arguments"));
                 }
 
-                if !matches!(list, ast::ImportList::None) {
-                    return Err(CompileError::unimplemented("import lists"));
+                let imported = lookup_schema(schema.clone(), &path)?;
+                match list {
+                    ast::ImportList::None => {
+                        imports.push((
+                            path.last().unwrap().clone(),
+                            SchemaEntry::Schema(path.clone()),
+                        ));
+                    }
+                    ast::ImportList::Star => {
+                        for (k, v) in imported
+                            .borrow()
+                            .decls
+                            .iter()
+                            .filter(|(_, v)| v.borrow().public)
+                        {
+                            imports.push((
+                                k.clone(),
+                                match &v.borrow().value {
+                                    SchemaEntry::Schema(s) => SchemaEntry::Schema(s.clone()),
+                                    SchemaEntry::Type(t) => {
+                                        SchemaEntry::Type(rebind_type(path, &t)?)
+                                    }
+                                    SchemaEntry::Expr(e) => SchemaEntry::Expr(TypedExpr {
+                                        type_: rebind_type(path, &e.type_)?,
+                                        expr: ast::Expr::ImportedPath {
+                                            schema_path: path.clone(),
+                                            entry_path: vec![k.clone()],
+                                        },
+                                    }),
+                                },
+                            ));
+                        }
+                    }
+                    ast::ImportList::Items(_items) => {
+                        return Err(CompileError::unimplemented("import list"));
+                    }
                 }
 
-                let imported = lookup_schema(&schema, &path)?;
-
-                vec![(path.last().unwrap().clone(), SchemaEntry::Schema(imported))]
+                imports
             }
             ast::StmtBody::TypeDef(nt) => vec![(
                 nt.name.clone(),
-                SchemaEntry::Type(resolve_type(&schema, &nt.def)?),
+                SchemaEntry::Type(resolve_type(schema.clone(), &nt.def)?),
             )],
             ast::StmtBody::FnDef { .. } => return Err(CompileError::unimplemented("fn")),
             ast::StmtBody::Let { name, type_, body } => {
                 let lhs_type = if let Some(t) = type_ {
-                    resolve_type(&schema, &t)?
+                    resolve_type(schema.clone(), &t)?
                 } else {
                     Type::Unknown
                 };
                 vec![(
                     name.clone(),
                     SchemaEntry::Expr(TypedExpr {
-                        type_: typecheck(&schema, &lhs_type, &body)?,
+                        type_: typecheck(schema.clone(), &lhs_type, &body)?,
                         expr: body.clone(),
                     }),
                 )]
@@ -328,24 +417,24 @@ pub fn compile_schema_entries(schema: &mut Schema, ast: &ast::Schema) -> Result<
             ast::StmtBody::Extern { name, type_ } => vec![(
                 name.clone(),
                 SchemaEntry::Expr(TypedExpr {
-                    type_: resolve_type(&schema, type_)?,
+                    type_: resolve_type(schema.clone(), type_)?,
                     expr: ast::Expr::Unknown,
                 }),
             )],
         };
 
         for (name, value) in entries {
-            if schema.decls.contains_key(&name) {
+            if schema.borrow().decls.contains_key(&name) {
                 return Err(CompileError::duplicate_entry(vec![name]));
             }
 
-            schema.decls.insert(
+            schema.borrow_mut().decls.insert(
                 name.clone(),
-                Decl {
+                Rc::new(RefCell::new(Decl {
                     public: stmt.export,
                     name,
                     value,
-                },
+                })),
             );
         }
     }
