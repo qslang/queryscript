@@ -26,6 +26,10 @@ impl<'a> Parser<'a> {
         self.sqlparser.peek_token()
     }
 
+    pub fn reset(&mut self) {
+        self.sqlparser.index = 0;
+    }
+
     #[must_use]
     pub fn consume_token(&mut self, expected: &Token) -> bool {
         self.sqlparser.consume_token(expected)

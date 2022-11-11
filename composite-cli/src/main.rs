@@ -4,6 +4,8 @@ use std::fs;
 use composite::compile;
 use composite::parser;
 
+mod repl;
+
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
@@ -16,6 +18,7 @@ struct Cli {
 enum Commands {
     Parse { file: String },
     Compile { file: String },
+    Repl,
 }
 
 fn main() {
@@ -32,6 +35,9 @@ fn main() {
         Commands::Compile { file } => {
             let schema = compile::compile_schema_from_file(&file).expect("Compilation error");
             eprintln!("{:#?}", schema);
+        }
+        Commands::Repl => {
+            crate::repl::run();
         }
     }
 }

@@ -12,3 +12,6 @@ path = "src/main.rs"
 [dependencies]
 composite = { path="../composite" }
 clap = { version = "4.0", features=["derive"] }
+home = "0.5.4"
+rustyline = "10.0.0"
+snafu = "0.7.3"

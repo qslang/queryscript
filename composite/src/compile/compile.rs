@@ -50,6 +50,12 @@ pub fn new_global_schema() -> Schema {
     }
 }
 
+pub fn new_schema(folder: Option<String>) -> Schema {
+    let mut schema = Schema::new(folder);
+    schema.parent_scope = Some(Rc::new(new_global_schema()));
+    schema
+}
+
 pub fn lookup_schema(schema: &Schema, path: &ast::Path) -> Result<Schema> {
     if let Some(root) = &schema.folder {
         let mut file_path_buf = FilePath::new(root).to_path_buf();
@@ -278,9 +284,12 @@ pub fn compile_schema_from_file(file_path: &str) -> Result<Schema> {
 }
 
 pub fn compile_schema(folder: Option<String>, ast: &ast::Schema) -> Result<Schema> {
-    let mut schema = Schema::new(folder);
-    schema.parent_scope = Some(Rc::new(new_global_schema()));
+    let mut schema = new_schema(folder);
+    compile_schema_entries(&mut schema, ast)?;
+    Ok(schema)
+}
 
+pub fn compile_schema_entries(schema: &mut Schema, ast: &ast::Schema) -> Result<()> {
     for stmt in &ast.stmts {
         let entries: Vec<(String, SchemaEntry)> = match &stmt.body {
             ast::StmtBody::Noop => continue,
@@ -341,5 +350,5 @@ pub fn compile_schema(folder: Option<String>, ast: &ast::Schema) -> Result<Schem
         }
     }
 
-    Ok(schema)
+    Ok(())
 }
