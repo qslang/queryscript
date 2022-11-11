@@ -3,7 +3,7 @@ use crate::parser::error::{unexpected_token, Result};
 use sqlparser::{
     dialect::{keywords::Keyword, GenericDialect},
     parser,
-    tokenizer::{Token, Tokenizer, Word},
+    tokenizer::{Token, TokenWithLocation, Tokenizer, Word},
 };
 
 pub struct Parser<'a> {
@@ -11,18 +11,18 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(tokens: Vec<Token>) -> Parser<'a> {
+    pub fn new(tokens: Vec<TokenWithLocation>) -> Parser<'a> {
         let dialect = &GenericDialect {};
         Parser {
-            sqlparser: parser::Parser::new(tokens, dialect),
+            sqlparser: parser::Parser::new_with_locations(tokens, dialect),
         }
     }
 
-    pub fn next_token(&mut self) -> Token {
+    pub fn next_token(&mut self) -> TokenWithLocation {
         self.sqlparser.next_token()
     }
 
-    pub fn peek_token(&mut self) -> Token {
+    pub fn peek_token(&mut self) -> TokenWithLocation {
         self.sqlparser.peek_token()
     }
 
@@ -36,7 +36,7 @@ impl<'a> Parser<'a> {
     }
 
     pub fn consume_keyword(&mut self, expected: &str) -> bool {
-        match self.peek_token() {
+        match self.peek_token().token {
             Token::Word(w) => {
                 if w.value.to_lowercase() == expected.to_lowercase() {
                     self.next_token();
@@ -60,7 +60,7 @@ impl<'a> Parser<'a> {
 
     pub fn parse_schema(&mut self) -> Result<Schema> {
         let mut stmts = Vec::new();
-        while !matches!(self.peek_token(), Token::EOF) {
+        while !matches!(self.peek_token().token, Token::EOF) {
             stmts.push(self.parse_stmt()?);
         }
 
@@ -98,10 +98,14 @@ impl<'a> Parser<'a> {
 
     pub fn parse_ident(&mut self) -> Result<Ident> {
         let token = self.next_token();
-        match token {
+        let location = token.location;
+        match token.token {
             Token::Word(w) => Ok(w.value),
             Token::DoubleQuotedString(s) => Ok(s),
-            _ => unexpected_token!(token, "Expected: WORD | DOUBLE_QUOTED_STRING"),
+            token => unexpected_token!(
+                TokenWithLocation { token, location },
+                "Expected: WORD | DOUBLE_QUOTED_STRING"
+            ),
         }
     }
 
@@ -109,7 +113,7 @@ impl<'a> Parser<'a> {
         let mut path = Vec::new();
         loop {
             path.push(self.parse_ident()?);
-            match self.peek_token() {
+            match self.peek_token().token {
                 Token::Period => {
                     self.next_token();
                 }
@@ -142,7 +146,7 @@ impl<'a> Parser<'a> {
                     break;
                 }
             } else {
-                match self.peek_token() {
+                match self.peek_token().token {
                     Token::Comma => {}
                     _ => break,
                 }
@@ -219,14 +223,14 @@ impl<'a> Parser<'a> {
         let mut args = Vec::new();
         loop {
             let name = self.parse_ident()?;
-            let type_ = match self.peek_token() {
+            let type_ = match self.peek_token().token {
                 Token::Comma | Token::RParen => None,
                 _ => Some(self.parse_type()?),
             };
 
             args.push(FnArg { name, type_ });
 
-            match self.next_token() {
+            match self.next_token().token {
                 Token::Comma => {}
                 Token::RParen => break,
                 _ => {
@@ -260,12 +264,12 @@ impl<'a> Parser<'a> {
         // Assume the leading "let" or "export" keywords have already been consumed
         //
         let name = self.parse_ident()?;
-        let type_ = match self.peek_token() {
+        let type_ = match self.peek_token().token {
             Token::Eq => None,
             _ => Some(self.parse_type()?),
         };
 
-        let body = match self.peek_token() {
+        let body = match self.peek_token().token {
             Token::Eq => {
                 self.next_token();
                 self.parse_expr()?
@@ -319,7 +323,7 @@ impl<'a> Parser<'a> {
         let mut struct_ = Vec::new();
         let mut needs_comma = false;
         loop {
-            match self.peek_token() {
+            match self.peek_token().token {
                 Token::RBrace => {
                     self.next_token();
                     break;
@@ -334,7 +338,7 @@ impl<'a> Parser<'a> {
                 }
                 Token::Period => {
                     for _ in 0..3 {
-                        if !matches!(self.peek_token(), Token::Period) {
+                        if !matches!(self.peek_token().token, Token::Period) {
                             return unexpected_token!(self.peek_token(), "Three periods");
                         }
                         self.next_token();
@@ -342,10 +346,10 @@ impl<'a> Parser<'a> {
                     struct_.push(StructEntry::Include(self.parse_path()?));
                     needs_comma = true;
                 }
-                t => {
+                _ => {
                     if needs_comma {
                         return unexpected_token!(
-                            t,
+                            self.peek_token(),
                             "Expected a comma before the next type declaration"
                         );
                     }
@@ -360,7 +364,7 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_expr(&mut self) -> Result<Expr> {
-        Ok(match self.peek_token() {
+        Ok(match self.peek_token().token {
             Token::Word(Word {
                 value: _,
                 quote_style: _,
@@ -371,11 +375,11 @@ impl<'a> Parser<'a> {
     }
 }
 
-pub fn tokenize(text: &str) -> Result<Vec<Token>> {
+pub fn tokenize(text: &str) -> Result<Vec<TokenWithLocation>> {
     let dialect = &GenericDialect {};
     let mut tokenizer = Tokenizer::new(dialect, text);
 
-    Ok(tokenizer.tokenize()?)
+    Ok(tokenizer.tokenize_with_location()?)
 }
 
 pub fn parse_schema(text: &str) -> Result<Schema> {

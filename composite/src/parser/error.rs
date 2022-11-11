@@ -7,7 +7,7 @@ pub enum ParserError {
     #[snafu(display("Unexpected token {:?}: {}", token, msg))]
     UnexpectedToken {
         msg: String,
-        token: sqlparser::tokenizer::Token,
+        token: sqlparser::tokenizer::TokenWithLocation,
         backtrace: Option<Backtrace>,
     },
 
