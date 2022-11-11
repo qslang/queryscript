@@ -1,5 +1,4 @@
 use sqlparser::ast as sqlast;
-use sqlparser::tokenizer;
 
 pub type Ident = String;
 pub type Path = Vec<Ident>;
@@ -11,6 +10,12 @@ pub struct NameAndType {
 }
 
 #[derive(Debug)]
+pub struct NameAndExpr {
+    pub name: Ident,
+    pub val: Option<Expr>,
+}
+
+#[derive(Debug)]
 pub enum StructEntry {
     NameAndType(NameAndType),
     Include(Path),
@@ -18,9 +23,13 @@ pub enum StructEntry {
 
 #[derive(Debug)]
 pub enum Type {
-    TODO(Vec<tokenizer::Token>),
     Reference(Path),
     Struct(Vec<StructEntry>),
+    List(Box<Type>),
+    Exclude {
+        inner: Box<Type>,
+        excluded: Vec<Ident>,
+    },
 }
 
 #[derive(Debug)]
@@ -36,17 +45,17 @@ pub enum Expr {
 }
 
 #[derive(Debug)]
-pub enum ImportArgs {
-    None,
+pub enum ImportList {
     Star,
-    // Items(Vec<Path>),
+    Items(Vec<Path>),
 }
 
 #[derive(Debug)]
 pub enum StmtBody {
     Import {
         path: Path,
-        args: ImportArgs,
+        list: ImportList,
+        args: Option<Vec<NameAndExpr>>,
     },
     TypeDef(NameAndType),
     FnDef {

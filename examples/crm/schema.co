@@ -61,5 +61,5 @@ type storage_org record {
 -- But we'll start with this to support the explicit version. We want to make it easy
 -- for Typescript users to use the syntax:
 fn authorize<R>(org_id int64, storage_table R) -> R EXCLUDE org_id {
-    SELECT * EXCLUDE storage_org_id FROM storage_table WHERE storage_org_id=org_id
+    SELECT * /* EXCLUDE org_id */ FROM storage_table WHERE storage_org_id=org_id
 }

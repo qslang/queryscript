@@ -69,44 +69,22 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_stmt(&mut self) -> Result<Stmt> {
-        let token = self.peek_token();
-        let export = as_word(&token)? == "export";
-        if export {
-            self.next_token();
-        }
-
-        let word = as_word(&self.peek_token())?;
-        let body = match word.to_lowercase().as_str() {
-            "import" => {
-                self.next_token();
-                self.parse_import()?
-            }
-            "fn" => {
-                self.next_token();
-                self.parse_fn()?
-            }
-            "extern" => {
-                self.next_token();
-                self.parse_extern()?
-            }
-            "let" => {
-                self.next_token();
-                self.parse_let()?
-            }
-            "type" => {
-                self.next_token();
-                self.parse_typedef()?
-            }
-            _ => {
-                if export {
-                    self.parse_import()?
-                } else {
-                    return unexpected_token!(
-                        self.peek_token(),
-                        "Expected: import | fn | extern | let | type"
-                    );
-                }
-            }
+        let export = self.consume_keyword("export");
+        let body = if self.consume_keyword("fn") {
+            self.parse_fn()?
+        } else if self.consume_keyword("extern") {
+            self.parse_extern()?
+        } else if self.consume_keyword("let") {
+            self.parse_let()?
+        } else if self.consume_keyword("type") {
+            self.parse_typedef()?
+        } else if self.consume_keyword("import") || export {
+            self.parse_import()?
+        } else {
+            return unexpected_token!(
+                self.peek_token(),
+                "Expected: import | fn | extern | let | type"
+            );
         };
 
         // Consume (optional) semi-colons.
@@ -177,15 +155,46 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_import(&mut self) -> Result<StmtBody> {
-        self.expect_token(&Token::Mul)?;
+        let list = if self.consume_token(&Token::Mul) {
+            ImportList::Star
+        } else {
+            ImportList::Items(
+                self.parse_idents()?
+                    .iter()
+                    .map(|x| vec![x.clone()])
+                    .collect(),
+            )
+        };
         self.expect_keyword("from")?;
 
         let path = self.parse_path()?;
+        let args = if self.consume_token(&Token::LBrace) {
+            let mut args = Vec::new();
+            loop {
+                let name = self.parse_ident()?;
+                let val = if self.consume_token(&Token::Colon) {
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
 
-        Ok(StmtBody::Import {
-            path,
-            args: ImportArgs::Star,
-        })
+                args.push(NameAndExpr { name, val });
+
+                if !self.consume_token(&Token::Comma) {
+                    self.expect_token(&Token::RBrace)?;
+                    break;
+                }
+                if self.consume_token(&Token::RBrace) {
+                    break;
+                }
+            }
+
+            Some(args)
+        } else {
+            None
+        };
+
+        Ok(StmtBody::Import { path, list, args })
     }
 
     pub fn parse_fn(&mut self) -> Result<StmtBody> {
@@ -268,19 +277,31 @@ impl<'a> Parser<'a> {
     pub fn parse_typedef(&mut self) -> Result<StmtBody> {
         // Assume the leading keywords have already been consumed
         //
-        let name = as_word(&self.peek_token())?.to_string();
-        self.next_token();
-
+        let name = self.parse_ident()?;
         let def = self.parse_type()?;
         Ok(StmtBody::TypeDef(NameAndType { name, def }))
     }
 
     pub fn parse_type(&mut self) -> Result<Type> {
-        if self.consume_keyword("record") {
-            self.parse_struct()
+        let mut type_ = if self.consume_token(&Token::LBracket) {
+            let inner = self.parse_type()?;
+            self.expect_token(&Token::RBracket)?;
+            Type::List(Box::new(inner))
+        } else if self.consume_keyword("record") {
+            self.parse_struct()?
         } else {
-            Ok(Type::Reference(self.parse_path()?))
+            Type::Reference(self.parse_path()?)
+        };
+
+        if self.consume_keyword("exclude") {
+            let excluded = self.parse_idents()?;
+            type_ = Type::Exclude {
+                inner: Box::new(type_),
+                excluded,
+            };
         }
+
+        Ok(type_)
     }
 
     pub fn parse_struct(&mut self) -> Result<Type> {
@@ -333,17 +354,10 @@ impl<'a> Parser<'a> {
             Token::Word(Word {
                 value: _,
                 quote_style: _,
-                keyword: Keyword::SELECT,
+                keyword: Keyword::SELECT | Keyword::WITH,
             }) => Expr::SQLQuery(self.sqlparser.parse_query()?),
             _ => Expr::SQLExpr(self.sqlparser.parse_expr()?),
         })
-    }
-}
-
-pub fn as_word(token: &Token) -> Result<String> {
-    match token {
-        Token::Word(w) => Ok(w.value.clone()),
-        _ => unexpected_token!(token, "expecting a word"),
     }
 }
 
