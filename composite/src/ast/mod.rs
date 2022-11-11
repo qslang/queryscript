@@ -3,25 +3,25 @@ use sqlparser::ast as sqlast;
 pub type Ident = String;
 pub type Path = Vec<Ident>;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct NameAndType {
     pub name: Ident,
     pub def: Type,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct NameAndExpr {
     pub name: Ident,
     pub val: Option<Expr>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum StructEntry {
     NameAndType(NameAndType),
     Include(Path),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Type {
     Reference(Path),
     Struct(Vec<StructEntry>),
@@ -32,25 +32,25 @@ pub enum Type {
     },
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FnArg {
     pub name: Ident,
     pub type_: Option<Type>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Expr {
     SQLQuery(sqlast::Query),
     SQLExpr(sqlast::Expr),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ImportList {
     Star,
     Items(Vec<Path>),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum StmtBody {
     Noop,
     Import {
@@ -77,13 +77,13 @@ pub enum StmtBody {
     },
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Stmt {
     pub export: bool,
     pub body: StmtBody,
 }
 
-#[derive(Debug)]
-pub struct Module {
+#[derive(Clone, Debug)]
+pub struct Schema {
     pub stmts: Vec<Stmt>,
 }

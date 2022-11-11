@@ -1,7 +1,6 @@
 use crate::ast::*;
 use crate::parser::error::{unexpected_token, Result};
 use sqlparser::{
-    // ast::{ColumnDef, ColumnOptionDef, Statement as SQLStatement, TableConstraint},
     dialect::{keywords::Keyword, GenericDialect},
     parser,
     tokenizer::{Token, Tokenizer, Word},
@@ -59,13 +58,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_module(&mut self) -> Result<Module> {
+    pub fn parse_schema(&mut self) -> Result<Schema> {
         let mut stmts = Vec::new();
         while !matches!(self.peek_token(), Token::EOF) {
             stmts.push(self.parse_stmt()?);
         }
 
-        Ok(Module { stmts })
+        Ok(Schema { stmts })
     }
 
     pub fn parse_stmt(&mut self) -> Result<Stmt> {
@@ -379,14 +378,9 @@ pub fn tokenize(text: &str) -> Result<Vec<Token>> {
     Ok(tokenizer.tokenize()?)
 }
 
-pub fn parse_module(text: &str) -> Result<File> {
+pub fn parse_schema(text: &str) -> Result<Schema> {
     let tokens = tokenize(text)?;
     let mut parser = Parser::new(tokens);
 
-    parser.parse_file()
+    parser.parse_schema()
 }
-
-// pub fn parse_sql(text: &str) {
-//     let dialect = &GenericDialect {};
-//     DFParser::new_with_dialect(sql, dialect).unwrap()
-// }

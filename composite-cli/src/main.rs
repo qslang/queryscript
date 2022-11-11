@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use std::fs;
 
+use composite::compile;
 use composite::parser;
 
 #[derive(Debug, Parser)]
@@ -14,7 +15,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Commands {
     Parse { file: String },
-    Run { file: String, expr: String },
+    Compile { file: String },
 }
 
 fn main() {
@@ -23,13 +24,16 @@ fn main() {
     match cli.command {
         Commands::Parse { file } => {
             let contents = fs::read_to_string(file).expect("Unable to read file");
-            eprintln!("{:#?}", parser::parse(&contents).expect("Parser failed"));
+            eprintln!(
+                "{:#?}",
+                parser::parse_schema(&contents).expect("Parser failed")
+            );
         }
-        Commands::Run { file, expr } => {
+        Commands::Compile { file } => {
             let contents = fs::read_to_string(file).expect("Unable to read file");
-            let schema = schema::from_string(&contents).expect("Module parser failed");
-            let expr = parser::parse_expr(expr).expect("Expression parser failed");
-            eprintln!("{:#?}", runtime::eval(schema, e));
+            let schema =
+                compile::compile_schema_from_string(&contents).expect("Module parser failed");
+            eprintln!("{:#?}", schema);
         }
     }
 }
