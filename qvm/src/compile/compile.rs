@@ -55,77 +55,44 @@ pub fn lookup_schema(
 
 pub fn lookup_path(
     mut schema: Rc<RefCell<Schema>>,
-    path: &Path,
-) -> Result<(Rc<RefCell<Decl>>, SchemaPath, ast::Path)> {
-    let debug_path = debug_path(&path);
-    if path.items.len() == 0 {
-        return Err(CompileError::no_such_entry(debug_path));
+    path: &ast::Path,
+) -> Result<(Rc<RefCell<Decl>>, SchemaRef, ast::Path)> {
+    if path.len() == 0 {
+        return Err(CompileError::no_such_entry(path.clone()));
     }
 
-    let mut full_schema_path = Vec::new();
-    for (schema_path, schema_args) in &path.schema {
-        schema = lookup_schema(schema.clone(), &schema_path)?
-            .borrow()
-            .schema
-            .clone();
-        full_schema_path.push((schema_path.clone(), schema_args.clone()));
-    }
-
-    for (i, ident) in path.items.iter().enumerate() {
+    for (i, ident) in path.iter().enumerate() {
         let new = match schema.borrow().decls.get(ident) {
             Some(decl) => {
                 if i > 0 && !decl.borrow().public {
                     return Err(CompileError::wrong_kind(
-                        debug_path,
+                        path.clone(),
                         "public",
                         &decl.borrow().clone(),
                     ));
                 }
 
-                if i == path.items.len() - 1 {
-                    return Ok((decl.clone(), full_schema_path, vec![]));
+                if i == path.len() - 1 {
+                    return Ok((decl.clone(), schema.clone(), vec![]));
                 }
 
                 match &decl.borrow().value {
-                    SchemaEntry::Schema(imported) => {
-                        full_schema_path.push((imported.clone(), None));
-                        lookup_schema(schema.clone(), &imported)?
-                            .borrow()
-                            .schema
-                            .clone()
-                    }
-                    _ => {
-                        return {
-                            Ok((decl.clone(), full_schema_path, path.items[i + 1..].to_vec()))
-                        }
-                    }
+                    SchemaEntry::Schema(imported) => lookup_schema(schema.clone(), &imported)?
+                        .borrow()
+                        .schema
+                        .clone(),
+                    _ => return Ok((decl.clone(), schema.clone(), path[i + 1..].to_vec())),
                 }
             }
             None => {
-                return Err(CompileError::no_such_entry(debug_path));
+                return Err(CompileError::no_such_entry(path.clone()));
             }
         };
 
         schema = new;
     }
 
-    return Err(CompileError::no_such_entry(debug_path));
-}
-
-pub fn convert_path(items: &ast::Path) -> Path {
-    Path {
-        items: items.clone(),
-        schema: vec![],
-    }
-}
-
-pub fn debug_path(path: &Path) -> ast::Path {
-    path.schema
-        .iter()
-        .map(|x| format!("{:?}", x))
-        .chain(path.items.clone())
-        .map(|i| i.clone())
-        .collect()
+    return Err(CompileError::no_such_entry(path.clone()));
 }
 
 pub fn resolve_type(schema: Rc<RefCell<Schema>>, ast: &ast::Type) -> Result<Type> {
@@ -135,7 +102,7 @@ pub fn resolve_type(schema: Rc<RefCell<Schema>>, ast: &ast::Type) -> Result<Type
                 let mut current = schema.clone();
                 let mut tried_global = false;
                 let decl = loop {
-                    current = match lookup_path(current.clone(), &convert_path(path)) {
+                    current = match lookup_path(current.clone(), &path) {
                         Err(CompileError::NoSuchEntry { .. }) => {
                             if let Some(parent_scope) = current.borrow().parent_scope.clone() {
                                 parent_scope.clone()
@@ -323,7 +290,7 @@ pub fn compile_reference(
     sqlpath: &Vec<sqlast::Ident>,
 ) -> Result<TypedExpr> {
     let path: Vec<_> = sqlpath.iter().map(|e| e.value.clone()).collect();
-    let (decl, s, remainder) = lookup_path(schema.clone(), &convert_path(&path))?;
+    let (decl, s, remainder) = lookup_path(schema.clone(), &path)?;
     let type_ = match &decl.borrow().value {
         SchemaEntry::Expr(v) => v.clone(),
         _ => {
@@ -363,7 +330,7 @@ pub fn compile_reference(
 
     Ok(TypedExpr {
         type_: current.clone(),
-        expr: Expr::Path(Path {
+        expr: Expr::Ref(PathRef {
             schema: s,
             items: vec![vec![decl_name], remainder].concat(),
         }),
@@ -393,36 +360,36 @@ pub fn unify_types(lhs: &Type, rhs: &Type) -> Result<Type> {
     return Ok(lhs.clone());
 }
 
-pub fn rebind_type(schema: &SchemaPath, type_: &Type) -> Result<Type> {
+pub fn rebind_type(type_: &Type) -> Result<Type> {
     match type_ {
         Type::Unknown => Ok(Type::Unknown),
         Type::Atom(a) => Ok(Type::Atom(a.clone())),
         Type::Struct(fields) => Ok(Type::Struct(
             fields
                 .iter()
-                .map(|(k, v)| Ok((k.clone(), rebind_type(schema, v)?)))
+                .map(|(k, v)| Ok((k.clone(), rebind_type(v)?)))
                 .collect::<Result<BTreeMap<String, Type>>>()?,
         )),
-        Type::List(inner) => Ok(Type::List(Box::new(rebind_type(schema, inner.as_ref())?))),
+        Type::List(inner) => Ok(Type::List(Box::new(rebind_type(inner.as_ref())?))),
         Type::Exclude { inner, excluded } => Ok(Type::Exclude {
-            inner: Box::new(rebind_type(schema, inner)?),
+            inner: Box::new(rebind_type(inner)?),
             excluded: excluded.clone(),
         }),
         Type::Ref(p) => Ok(Type::Ref(Path {
-            schema: vec![schema.clone(), p.schema.clone()].concat(),
+            schema: p.schema.clone(),
             items: p.items.clone(),
         })),
     }
 }
 
-pub fn rebind_decl(schema: &SchemaPath, decl: Rc<RefCell<Decl>>) -> Result<SchemaEntry> {
+pub fn rebind_decl(schema: SchemaRef, decl: Rc<RefCell<Decl>>) -> Result<SchemaEntry> {
     match &decl.borrow().value {
         SchemaEntry::Schema(s) => Ok(SchemaEntry::Schema(s.clone())),
-        SchemaEntry::Type(t) => Ok(SchemaEntry::Type(rebind_type(schema, &t)?)),
+        SchemaEntry::Type(t) => Ok(SchemaEntry::Type(rebind_type(&t)?)),
         SchemaEntry::Expr(e) => Ok(SchemaEntry::Expr(TypedExpr {
-            type_: rebind_type(schema, &e.type_)?,
-            expr: Expr::Path(Path {
-                schema: schema.clone(),
+            type_: rebind_type(&e.type_)?,
+            expr: Expr::Ref(PathRef {
+                schema: schema,
                 items: vec![decl.borrow().name.clone()],
             }),
         })),
@@ -535,8 +502,6 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                     }
                 };
 
-                let imported_path = Vec::from([(path.clone(), id)]);
-
                 match list {
                     ast::ImportList::None => {
                         imports.push((
@@ -557,7 +522,7 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                             imports.push((
                                 k.clone(),
                                 false, /* extern_ */
-                                rebind_decl(&vec![(path.clone(), id)], v.clone())?,
+                                rebind_decl(imported.borrow().schema.clone(), v.clone())?,
                             ));
                         }
                     }
@@ -568,7 +533,7 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                             }
 
                             let (decl, s, r) =
-                                lookup_path(imported.borrow().schema.clone(), &convert_path(item))?;
+                                lookup_path(imported.borrow().schema.clone(), &item)?;
                             if r.len() > 0 {
                                 return Err(CompileError::no_such_entry(r.clone()));
                             }
@@ -576,10 +541,7 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                             imports.push((
                                 item[0].clone(),
                                 false, /* extern_ */
-                                rebind_decl(
-                                    &vec![imported_path.clone(), s].concat(),
-                                    decl.clone(),
-                                )?,
+                                rebind_decl(s.clone(), decl.clone())?,
                             ));
                         }
                     }

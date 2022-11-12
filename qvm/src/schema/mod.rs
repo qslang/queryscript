@@ -46,13 +46,19 @@ pub struct SQLExpr {
 }
 
 #[derive(Clone, Debug)]
+pub struct PathRef {
+    pub items: ast::Path,
+    pub schema: SchemaRef,
+}
+
+#[derive(Clone, Debug)]
 pub enum Expr {
     SQLQuery {
         // XXX This is just a passthrough and doesn't perform any compilation yet
         query: sqlast::Query,
     },
     SQLExpr(SQLExpr),
-    Path(Path),
+    Ref(PathRef),
     Unknown,
 }
 
