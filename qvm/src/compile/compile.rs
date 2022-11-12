@@ -82,20 +82,24 @@ pub fn lookup_path(
                     ));
                 }
 
-                let new = match &decl.borrow().value {
-                    SchemaEntry::Schema(imported) => lookup_schema(schema.clone(), &imported)?
-                        .borrow()
-                        .schema
-                        .clone(),
-                    _ => return Ok((decl.clone(), full_schema_path, path.items[i + 1..].to_vec())),
-                };
-
                 if i == path.items.len() - 1 {
                     return Ok((decl.clone(), full_schema_path, vec![]));
                 }
 
-                full_schema_path.push((vec![ident.clone()], None));
-                new
+                match &decl.borrow().value {
+                    SchemaEntry::Schema(imported) => {
+                        full_schema_path.push((imported.clone(), None));
+                        lookup_schema(schema.clone(), &imported)?
+                            .borrow()
+                            .schema
+                            .clone()
+                    }
+                    _ => {
+                        return {
+                            Ok((decl.clone(), full_schema_path, path.items[i + 1..].to_vec()))
+                        }
+                    }
+                }
             }
             None => {
                 return Err(CompileError::no_such_entry(debug_path));

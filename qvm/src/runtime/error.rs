@@ -45,3 +45,27 @@ impl RuntimeError {
         return UnimplementedSnafu { what }.build();
     }
 }
+
+#[allow(unused_macros)]
+macro_rules! fail {
+    ($base: expr $(, $args:expr)* $(,)?) => {
+        StringSnafu {
+            what: format!($base $(, $args)*),
+        }.fail()
+    };
+}
+
+#[allow(unused_imports)]
+pub(crate) use fail;
+
+#[allow(unused_macros)]
+macro_rules! rt_unimplemented {
+    ($base: expr $(, $args:expr)* $(,)?) => {
+        UnimplementedSnafu {
+            what: format!($base $(, $args)*),
+        }.fail()
+    };
+}
+
+#[allow(unused_imports)]
+pub(crate) use rt_unimplemented;

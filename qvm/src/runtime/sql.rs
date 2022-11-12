@@ -22,7 +22,7 @@ use std::{collections::HashMap, sync::Arc};
 use super::error::Result;
 use crate::schema;
 
-pub fn eval(_schema: &schema::Schema, query: &sqlast::Query) -> Result<()> {
+pub fn eval(_schema: schema::SchemaRef, query: &sqlast::Query) -> Result<()> {
     let schema_provider = SchemaProvider::new();
     let sql_to_rel = SqlToRel::new(&schema_provider);
 

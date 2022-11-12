@@ -10,13 +10,22 @@ pub enum Value {
     Bool(bool),
 }
 
-pub fn eval(schema: &schema::Schema, expr: &schema::Expr) -> Result<Value> {
+pub fn eval(schema: schema::SchemaRef, expr: &schema::Expr) -> Result<Value> {
     match expr {
         schema::Expr::Unknown => {
             return Err(RuntimeError::new("unresolved extern"));
         }
-        schema::Expr::Path { .. } => {
-            return Err(RuntimeError::unimplemented("imported values"));
+        schema::Expr::Path(path) => {
+            let (decl, _, _) =
+                crate::compile::lookup_path(schema.clone(), &path).expect("invalid path");
+
+            let ret = match decl.borrow().value {
+                crate::schema::SchemaEntry::Expr(ref e) => eval(schema, &e.expr),
+                _ => {
+                    return rt_unimplemented!("evaluating a non-expression");
+                }
+            };
+            ret
         }
         schema::Expr::SQLQuery { query, .. } => {
             super::sql::eval(schema, query)?;
@@ -42,3 +51,23 @@ pub fn eval(schema: &schema::Schema, expr: &schema::Expr) -> Result<Value> {
         },
     }
 }
+
+/*
+fn chase_schema(
+    schema: &schema::Schema,
+    schema_path: schema::SchemaPath,
+) -> Result<&schema::Schema> {
+    let curr = schema;
+    // XXX how do we use the usize instance id?
+    for (path, _) in schema_path.iter() {
+        match curr.imports.get(path) {
+            None => {
+                return fail!("Cannot find import: {:?}", path);
+            }
+            Some(schema) => {
+                curr = schema.as_ref().as_ref();
+            }
+        }
+    }
+}
+*/

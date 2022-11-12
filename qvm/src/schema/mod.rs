@@ -90,10 +90,12 @@ pub struct TypedNameAndExpr {
     pub expr: Expr,
 }
 
+pub type SchemaRef = Rc<RefCell<Schema>>;
+
 #[derive(Clone, Debug)]
 pub struct ImportedSchema {
     pub args: Option<Vec<BTreeMap<String, TypedNameAndExpr>>>,
-    pub schema: Rc<RefCell<Schema>>,
+    pub schema: SchemaRef,
 }
 
 #[derive(Clone, Debug)]

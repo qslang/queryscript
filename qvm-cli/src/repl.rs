@@ -1,7 +1,5 @@
 use rustyline::{error::ReadlineError, Editor};
 use snafu::{prelude::*, Whatever};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 use qvm::ast;
 use qvm::compile;
@@ -78,13 +76,13 @@ pub fn run() {
     }
 }
 
-fn run_command(repl_schema: Rc<RefCell<schema::Schema>>, cmd: &str) -> Result<(), Whatever> {
+fn run_command(repl_schema: schema::SchemaRef, cmd: &str) -> Result<(), Whatever> {
     let tokens = parser::tokenize(&cmd).with_whatever_context(|e| format!("{}", e))?;
     let mut parser = parser::Parser::new(tokens);
 
     match parser.parse_schema() {
         Ok(ast) => {
-            compile::compile_schema_entries(repl_schema, &ast)
+            compile::compile_schema_entries(repl_schema.clone(), &ast)
                 .with_whatever_context(|e| format!("{}", e))?;
             return Ok(());
         }
@@ -109,7 +107,7 @@ fn run_command(repl_schema: Rc<RefCell<schema::Schema>>, cmd: &str) -> Result<()
                 _ => compile::compile_expr(repl_schema.clone(), &ast)
                     .with_whatever_context(|e| format!("{}", e))?,
             };
-            let value = runtime::eval(&repl_schema.borrow(), &compiled.expr)
+            let value = runtime::eval(repl_schema.clone(), &compiled.expr)
                 .with_whatever_context(|e| format!("{}", e))?;
             println!("{:?}", value);
         }
