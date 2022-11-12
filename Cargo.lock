@@ -550,6 +550,7 @@ dependencies = [
  "lazy_static",
  "snafu",
  "sqlparser",
+ "tokio",
 ]
 
 [[package]]

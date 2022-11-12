@@ -1,12 +1,15 @@
+// TODO: I've left some unused_imports here because they'll be useful while filling in the
+// SchemaProvider implementation
 #[allow(unused_imports)]
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::common::{DataFusionError, Result as DFResult};
+use datafusion::execution::context::{SessionConfig, SessionState, TaskContext};
+use datafusion::execution::runtime_env::RuntimeEnv;
 #[allow(unused_imports)]
 use datafusion::logical_expr::{
-    logical_plan::builder::LogicalTableSource, AggregateUDF, ScalarUDF, TableSource,
+    logical_plan::builder::LogicalTableSource, AggregateUDF, LogicalPlan, ScalarUDF, TableSource,
 };
-use datafusion::optimizer::optimizer::{Optimizer, OptimizerConfig};
-use datafusion::physical_plan::planner::DefaultPhysicalPlanner;
+use datafusion::physical_plan::collect;
 #[allow(unused_imports)]
 use datafusion::sql::{
     planner::{ContextProvider, SqlToRel},
@@ -26,16 +29,23 @@ pub fn eval(_schema: &schema::Schema, query: &sqlast::Query) -> Result<()> {
     let mut ctes = HashMap::new(); // We may eventually want to parse/support these
     let plan = sql_to_rel.query_to_plan(query.clone(), &mut ctes)?;
 
-    // See arrow-datafusion/datafusion/core/src/execution/context.rs
-    // for an example of how to use the optimizer
-    let optimizer = Optimizer::new(&OptimizerConfig::new());
-    let mut optimizer_config = OptimizerConfig::new();
-    let plan = optimizer.optimize(&plan, &mut optimizer_config, |_, _| {})?;
+    let session_state =
+        SessionState::with_config_rt(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
 
-    eprintln!("Plan: {:?}", plan);
+    let plan = session_state.optimize(&plan)?;
 
-    let physical_planner = DefaultPhysicalPlanner::default();
+    let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+    // let physical_planner = DefaultPhysicalPlanner::default();
+    runtime.block_on(async { execute_plan(&session_state, &plan).await })?;
 
+    Ok(())
+}
+
+async fn execute_plan(session_state: &SessionState, plan: &LogicalPlan) -> Result<()> {
+    let pplan = session_state.create_physical_plan(&plan).await?;
+    let task_ctx = Arc::new(TaskContext::from(session_state));
+    let results = collect(pplan, task_ctx).await?;
+    eprintln!("Results: {:?}", results);
     Ok(())
 }
 

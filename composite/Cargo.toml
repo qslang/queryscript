@@ -10,3 +10,4 @@ sqlparser = { path = "../sqlparser-rs" }
 datafusion = { path = "../arrow-datafusion/datafusion/core" }
 snafu = "0.7.3"
 lazy_static = "1.4.0"
+tokio = "1.0"

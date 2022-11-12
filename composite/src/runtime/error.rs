@@ -24,6 +24,12 @@ pub enum RuntimeError {
     },
 
     #[snafu(context(false))]
+    IOError {
+        source: std::io::Error,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(context(false))]
     ParseFloatError {
         source: ParseFloatError,
         backtrace: Option<Backtrace>,
