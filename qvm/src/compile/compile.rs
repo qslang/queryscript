@@ -331,7 +331,7 @@ pub fn compile_reference(
     Ok(TypedExpr {
         type_: current.clone(),
         expr: Expr::Ref(PathRef {
-            schema: s,
+            schema: SchemaInstance::global(s),
             items: vec![vec![decl_name], remainder].concat(),
         }),
     })
@@ -375,21 +375,21 @@ pub fn rebind_type(type_: &Type) -> Result<Type> {
             inner: Box::new(rebind_type(inner)?),
             excluded: excluded.clone(),
         }),
-        Type::Ref(p) => Ok(Type::Ref(Path {
+        Type::Ref(p) => Ok(Type::Ref(PathRef {
             schema: p.schema.clone(),
             items: p.items.clone(),
         })),
     }
 }
 
-pub fn rebind_decl(schema: SchemaRef, decl: Rc<RefCell<Decl>>) -> Result<SchemaEntry> {
+pub fn rebind_decl(schema: SchemaInstance, decl: Rc<RefCell<Decl>>) -> Result<SchemaEntry> {
     match &decl.borrow().value {
         SchemaEntry::Schema(s) => Ok(SchemaEntry::Schema(s.clone())),
         SchemaEntry::Type(t) => Ok(SchemaEntry::Type(rebind_type(&t)?)),
         SchemaEntry::Expr(e) => Ok(SchemaEntry::Expr(TypedExpr {
             type_: rebind_type(&e.type_)?,
             expr: Expr::Ref(PathRef {
-                schema: schema,
+                schema,
                 items: vec![decl.borrow().name.clone()],
             }),
         })),
@@ -519,10 +519,14 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                             .iter()
                             .filter(|(_, v)| v.borrow().public)
                         {
+                            let imported_schema = SchemaInstance {
+                                schema: imported.borrow().schema.clone(),
+                                id,
+                            };
                             imports.push((
                                 k.clone(),
                                 false, /* extern_ */
-                                rebind_decl(imported.borrow().schema.clone(), v.clone())?,
+                                rebind_decl(imported_schema, v.clone())?,
                             ));
                         }
                     }
@@ -538,10 +542,11 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                                 return Err(CompileError::no_such_entry(r.clone()));
                             }
 
+                            let imported_schema = SchemaInstance { schema: s, id };
                             imports.push((
                                 item[0].clone(),
                                 false, /* extern_ */
-                                rebind_decl(s.clone(), decl.clone())?,
+                                rebind_decl(imported_schema, decl.clone())?,
                             ));
                         }
                     }

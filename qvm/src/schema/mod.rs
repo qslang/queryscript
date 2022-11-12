@@ -7,13 +7,29 @@ use std::rc::Rc;
 
 pub type Ident = ast::Ident;
 
-pub type SchemaPathEntry = (ast::Path, Option<usize>);
-pub type SchemaPath = Vec<SchemaPathEntry>;
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SchemaInstance {
+    pub schema: SchemaRef,
+    pub id: Option<usize>,
+}
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Path {
+impl SchemaInstance {
+    pub fn global(schema: SchemaRef) -> SchemaInstance {
+        SchemaInstance { schema, id: None }
+    }
+
+    pub fn instance(schema: SchemaRef, id: usize) -> SchemaInstance {
+        SchemaInstance {
+            schema,
+            id: Some(id),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PathRef {
     pub items: ast::Path,
-    pub schema: SchemaPath,
+    pub schema: SchemaInstance,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -34,24 +50,18 @@ pub enum Type {
         inner: Box<Type>,
         excluded: Vec<Ident>,
     },
-    Ref(Path),
+    Ref(PathRef),
 }
 
 pub type Value = runtime::Value;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SQLExpr {
     pub params: BTreeMap<String, Expr>,
     pub expr: sqlast::Expr,
 }
 
-#[derive(Clone, Debug)]
-pub struct PathRef {
-    pub items: ast::Path,
-    pub schema: SchemaRef,
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Expr {
     SQLQuery {
         // XXX This is just a passthrough and doesn't perform any compilation yet
@@ -62,26 +72,26 @@ pub enum Expr {
     Unknown,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TypedSQLExpr {
     pub type_: Type,
     pub expr: SQLExpr,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TypedExpr {
     pub type_: Type,
     pub expr: Expr,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SchemaEntry {
     Schema(ast::Path),
     Type(Type),
     Expr(TypedExpr),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Decl {
     pub public: bool,
     pub extern_: bool,
@@ -89,7 +99,7 @@ pub struct Decl {
     pub value: SchemaEntry,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TypedNameAndExpr {
     pub name: String,
     pub type_: Type,
@@ -98,13 +108,13 @@ pub struct TypedNameAndExpr {
 
 pub type SchemaRef = Rc<RefCell<Schema>>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ImportedSchema {
     pub args: Option<Vec<BTreeMap<String, TypedNameAndExpr>>>,
     pub schema: SchemaRef,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Schema {
     pub folder: Option<String>,
     pub parent_scope: Option<Rc<RefCell<Schema>>>,

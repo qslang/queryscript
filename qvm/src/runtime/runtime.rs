@@ -16,11 +16,12 @@ pub fn eval(schema: schema::SchemaRef, expr: &schema::Expr) -> Result<Value> {
             return Err(RuntimeError::new("unresolved extern"));
         }
         schema::Expr::Ref(schema::PathRef { items, schema }) => {
+            // XXX use the instance id
             let (decl, _, _) =
-                crate::compile::lookup_path(schema.clone(), &items).expect("invalid path");
+                crate::compile::lookup_path(schema.schema.clone(), &items).expect("invalid path");
 
             let ret = match decl.borrow().value {
-                crate::schema::SchemaEntry::Expr(ref e) => eval(schema.clone(), &e.expr),
+                crate::schema::SchemaEntry::Expr(ref e) => eval(schema.schema.clone(), &e.expr),
                 _ => {
                     return rt_unimplemented!("evaluating a non-expression");
                 }
