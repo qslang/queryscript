@@ -11,7 +11,7 @@ pub enum Value {
     Bool(bool),
 }
 
-pub fn eval(_schema: &schema::Schema, expr: &ast::Expr) -> Result<Value> {
+pub fn eval(schema: &schema::Schema, expr: &ast::Expr) -> Result<Value> {
     match expr {
         ast::Expr::Unknown => {
             return Err(RuntimeError::new("unresolved extern"));
@@ -19,8 +19,9 @@ pub fn eval(_schema: &schema::Schema, expr: &ast::Expr) -> Result<Value> {
         ast::Expr::ImportedPath { .. } => {
             return Err(RuntimeError::unimplemented("imported values"));
         }
-        ast::Expr::SQLQuery(_) => {
-            return Err(RuntimeError::unimplemented("SELECT"));
+        ast::Expr::SQLQuery(query) => {
+            super::sql::eval(schema, query)?;
+            Ok(Value::Null)
         }
         ast::Expr::SQLExpr(e) => match e {
             sqlast::Expr::Value(v) => match v {

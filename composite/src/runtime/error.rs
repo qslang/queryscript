@@ -18,6 +18,12 @@ pub enum RuntimeError {
     },
 
     #[snafu(context(false))]
+    DataFusionError {
+        source: datafusion::common::DataFusionError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(context(false))]
     ParseFloatError {
         source: ParseFloatError,
         backtrace: Option<Backtrace>,

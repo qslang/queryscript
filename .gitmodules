@@ -1,3 +1,7 @@
 [submodule "sqlparser-rs"]
 	path = sqlparser-rs
 	url = git@git.mandrews.io:Projects/sqlparser-rs
+[submodule "arrow-datafusion"]
+	path = arrow-datafusion
+	url = git@git.mandrews.io:Projects/arrow-datafusion
+	branch = with-locations-14.0.0

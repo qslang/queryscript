@@ -217,9 +217,6 @@ pub fn resolve_expr(schema: Rc<RefCell<Schema>>, expr: &ast::Expr) -> Result<Typ
                 sqlast::Value::Boolean(_) => resolve_global_atom("bool"),
                 sqlast::Value::Null => resolve_global_atom("string"),
                 sqlast::Value::Placeholder(_) => Ok(Type::Unknown),
-                _ => {
-                    return Err(CompileError::unimplemented(e.to_string().as_str()));
-                }
             },
             sqlast::Expr::CompoundIdentifier(sqlpath) => {
                 let path: Vec<_> = sqlpath.iter().map(|e| e.value.clone()).collect();
