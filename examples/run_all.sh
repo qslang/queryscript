@@ -2,7 +2,7 @@
 
 set -euxo pipefail
 
-composite parse examples/dau/schema.co
-composite parse examples/dau/local.co
-composite parse examples/crm/schema.co
-composite parse examples/crm/local.co
+qvm parse examples/dau/schema.co
+qvm parse examples/dau/local.co
+qvm parse examples/crm/schema.co
+qvm parse examples/crm/local.co

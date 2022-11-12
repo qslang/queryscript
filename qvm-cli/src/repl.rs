@@ -3,11 +3,11 @@ use snafu::{prelude::*, Whatever};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use composite::ast;
-use composite::compile;
-use composite::parser;
-use composite::runtime;
-use composite::schema;
+use qvm::ast;
+use qvm::compile;
+use qvm::parser;
+use qvm::runtime;
+use qvm::schema;
 
 pub fn run() {
     let cwd = std::env::current_dir()

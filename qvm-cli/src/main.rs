@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 use std::fs;
 
-use composite::compile;
-use composite::parser;
+use qvm::compile;
+use qvm::parser;
 
 mod repl;
 

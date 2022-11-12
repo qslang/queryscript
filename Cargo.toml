@@ -1,6 +1,6 @@
 [workspace]
 
 members = [
-    "composite",
-    "composite-cli",
+    "qvm",
+    "qvm-cli",
 ]
