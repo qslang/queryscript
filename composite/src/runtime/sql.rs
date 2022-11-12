@@ -5,6 +5,8 @@ use datafusion::common::{DataFusionError, Result as DFResult};
 use datafusion::logical_expr::{
     logical_plan::builder::LogicalTableSource, AggregateUDF, ScalarUDF, TableSource,
 };
+use datafusion::optimizer::optimizer::{Optimizer, OptimizerConfig};
+use datafusion::physical_plan::planner::DefaultPhysicalPlanner;
 #[allow(unused_imports)]
 use datafusion::sql::{
     planner::{ContextProvider, SqlToRel},
@@ -24,7 +26,15 @@ pub fn eval(_schema: &schema::Schema, query: &sqlast::Query) -> Result<()> {
     let mut ctes = HashMap::new(); // We may eventually want to parse/support these
     let plan = sql_to_rel.query_to_plan(query.clone(), &mut ctes)?;
 
+    // See arrow-datafusion/datafusion/core/src/execution/context.rs
+    // for an example of how to use the optimizer
+    let optimizer = Optimizer::new(&OptimizerConfig::new());
+    let mut optimizer_config = OptimizerConfig::new();
+    let plan = optimizer.optimize(&plan, &mut optimizer_config, |_, _| {})?;
+
     eprintln!("Plan: {:?}", plan);
+
+    let physical_planner = DefaultPhysicalPlanner::default();
 
     Ok(())
 }
