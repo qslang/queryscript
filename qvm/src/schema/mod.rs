@@ -3,14 +3,23 @@ use crate::runtime;
 use sqlparser::ast as sqlast;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::fmt;
 use std::rc::Rc;
 
 pub type Ident = ast::Ident;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct SchemaInstance {
     pub schema: SchemaRef,
     pub id: Option<usize>,
+}
+
+impl fmt::Debug for SchemaInstance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Ok(f.debug_struct("FnExpr")
+            .field("id", &self.id)
+            .finish_non_exhaustive()?)
+    }
 }
 
 impl SchemaInstance {
@@ -41,6 +50,12 @@ pub enum AtomicType {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FnType {
+    pub args: Vec<TypedName>,
+    pub ret: Box<Type>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Type {
     Unknown,
     Atom(AtomicType),
@@ -51,14 +66,29 @@ pub enum Type {
         excluded: Vec<Ident>,
     },
     Ref(PathRef),
+    Fn(FnType),
 }
 
 pub type Value = runtime::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SQLExpr {
-    pub params: BTreeMap<String, Expr>,
+    pub params: BTreeMap<ast::Path, Expr>,
     pub expr: sqlast::Expr,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct FnExpr {
+    pub inner_schema: Rc<RefCell<Schema>>,
+    pub body: Box<Expr>,
+}
+
+impl fmt::Debug for FnExpr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Ok(f.debug_struct("FnExpr")
+            .field("body", &self.body)
+            .finish_non_exhaustive()?)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -69,7 +99,15 @@ pub enum Expr {
     },
     SQLExpr(SQLExpr),
     Ref(PathRef),
+    Fn(FnExpr),
     Unknown,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TypedNameAndSQLExpr {
+    pub name: String,
+    pub type_: Type,
+    pub expr: SQLExpr,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -107,6 +145,12 @@ pub struct TypedNameAndExpr {
 }
 
 pub type SchemaRef = Rc<RefCell<Schema>>;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TypedName {
+    pub name: String,
+    pub type_: Type,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ImportedSchema {

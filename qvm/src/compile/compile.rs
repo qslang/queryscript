@@ -9,6 +9,8 @@ use std::fs;
 use std::path::Path as FilePath;
 use std::rc::Rc;
 
+const QVM_NAMESPACE: &str = "__qvm";
+
 pub fn lookup_schema(
     schema: Rc<RefCell<Schema>>,
     path: &ast::Path,
@@ -169,22 +171,33 @@ pub fn resolve_global_atom(name: &str) -> Result<Type> {
     resolve_type(schema, &ast::Type::Reference(vec![name.to_string()]))
 }
 
-pub fn intern_placeholder(schema: Rc<RefCell<Schema>>, expr: TypedExpr) -> Result<TypedSQLExpr> {
+pub fn new_placeholder_name(schema: Rc<RefCell<Schema>>, kind: &str) -> String {
+    let placeholder = schema.borrow().next_placeholder;
+    schema.borrow_mut().next_placeholder += 1;
+    format!("{}{}", kind, placeholder)
+}
+
+pub fn intern_placeholder(
+    schema: Rc<RefCell<Schema>>,
+    kind: &str,
+    expr: TypedExpr,
+) -> Result<TypedSQLExpr> {
     match expr.expr {
         Expr::SQLExpr(sqlexpr) => Ok(TypedSQLExpr {
             type_: expr.type_,
             expr: sqlexpr,
         }),
         _ => {
-            let placeholder = schema.borrow().next_placeholder;
-            schema.borrow_mut().next_placeholder += 1;
-            let placeholder_name = format!("<placeholder {}>", placeholder);
+            let placeholder_name = "@".to_string() + new_placeholder_name(schema, kind).as_str();
 
             Ok(TypedSQLExpr {
                 type_: expr.type_,
                 expr: SQLExpr {
-                    params: BTreeMap::from([(placeholder_name.clone(), expr.expr)]),
-                    expr: sqlast::Expr::Value(sqlast::Value::Placeholder(placeholder_name.clone())),
+                    params: BTreeMap::from([(vec![placeholder_name.clone()], expr.expr)]),
+                    expr: sqlast::Expr::Identifier(sqlast::Ident {
+                        value: placeholder_name.clone(),
+                        quote_style: None,
+                    }),
                 },
             })
         }
@@ -194,11 +207,12 @@ pub fn intern_placeholder(schema: Rc<RefCell<Schema>>, expr: TypedExpr) -> Resul
 pub fn compile_sqlarg(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Result<TypedSQLExpr> {
     Ok(intern_placeholder(
         schema.clone(),
+        "param",
         compile_sqlexpr(schema.clone(), expr)?,
     )?)
 }
 
-pub fn combine_sqlparams(all: Vec<&TypedSQLExpr>) -> Result<BTreeMap<String, Expr>> {
+pub fn combine_sqlparams(all: Vec<&TypedSQLExpr>) -> Result<BTreeMap<ast::Path, Expr>> {
     Ok(all
         .iter()
         .map(|t| t.expr.params.clone())
@@ -273,10 +287,143 @@ pub fn compile_sqlexpr(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Resu
                 }),
             })
         }
+        sqlast::Expr::Function(sqlast::Function {
+            name,
+            args,
+            over,
+            distinct,
+            ..
+        }) => {
+            if *distinct {
+                return Err(CompileError::unimplemented(
+                    format!("Function calls with DISTINCT").as_str(),
+                ));
+            }
+
+            if over.is_some() {
+                return Err(CompileError::unimplemented(
+                    format!("Function calls with OVER").as_str(),
+                ));
+            }
+
+            let function = compile_reference(schema.clone(), &name.0)?;
+            let fn_type = match function.type_ {
+                Type::Fn(f) => f,
+                _ => {
+                    return Err(CompileError::wrong_type(
+                        &Type::Fn(FnType {
+                            args: Vec::new(),
+                            ret: Box::new(Type::Unknown),
+                        }),
+                        &function.type_,
+                    ))
+                }
+            };
+            let mut compiled_args = Vec::new();
+            let mut compiled_args_by_name: BTreeMap<String, usize> = BTreeMap::new();
+            let mut pos: usize = 0;
+            for arg in args {
+                let (name, expr) = match arg {
+                    sqlast::FunctionArg::Named { name, arg } => (name.value.clone(), arg),
+                    sqlast::FunctionArg::Unnamed(arg) => {
+                        if pos >= fn_type.args.len() {
+                            return Err(CompileError::no_such_entry(vec![format!(
+                                "argument {}",
+                                pos
+                            )]));
+                        }
+                        pos += 1;
+                        (fn_type.args[pos - 1].name.clone(), arg)
+                    }
+                };
+
+                let expr = match expr {
+                    sqlast::FunctionArgExpr::Expr(e) => e,
+                    _ => {
+                        return Err(CompileError::unimplemented(
+                            format!("Weird function arguments").as_str(),
+                        ))
+                    }
+                };
+
+                let compiled_arg = compile_sqlarg(schema.clone(), &expr)?;
+                compiled_args_by_name.insert(name.clone(), compiled_args.len());
+                compiled_args.push(TypedNameAndSQLExpr {
+                    name: name.clone(),
+                    type_: compiled_arg.type_.clone(),
+                    expr: compiled_arg.expr.clone(),
+                });
+            }
+
+            for arg in fn_type.args {
+                if let Some(compiled_arg_idx) = compiled_args_by_name.get(&arg.name) {
+                    let compiled_arg = &compiled_args[*compiled_arg_idx];
+                    unify_types(&arg.type_, &compiled_arg.type_)?;
+                    compiled_args_by_name.remove(&arg.name);
+                } else {
+                    return Err(CompileError::no_such_entry(vec![arg.name]));
+                }
+            }
+
+            for (name, _) in compiled_args_by_name {
+                return Err(CompileError::no_such_entry(vec![name.clone()]));
+            }
+
+            let compiled_args_no_name = compiled_args
+                .iter()
+                .map(|e| TypedSQLExpr {
+                    type_: e.type_.clone(),
+                    expr: e.expr.clone(),
+                })
+                .collect::<Vec<_>>();
+            let mut params = combine_sqlparams(compiled_args_no_name.iter().collect())?;
+            let placeholder_name = vec![
+                QVM_NAMESPACE.to_string(),
+                new_placeholder_name(schema.clone(), "func"),
+            ];
+            params.insert(placeholder_name.clone(), function.expr);
+
+            // XXX There are cases here where we could inline eagerly
+            //
+            Ok(TypedExpr {
+                type_: fn_type.ret.as_ref().clone(),
+                expr: Expr::SQLExpr(SQLExpr {
+                    params,
+                    expr: sqlast::Expr::Function(sqlast::Function {
+                        name: sqlast::ObjectName(
+                            placeholder_name
+                                .iter()
+                                .map(|n| sqlast::Ident {
+                                    value: n.clone(),
+                                    quote_style: None,
+                                })
+                                .collect(),
+                        ),
+                        args: compiled_args
+                            .iter()
+                            .map(|e| sqlast::FunctionArg::Named {
+                                name: sqlast::Ident {
+                                    value: e.name.clone(),
+                                    quote_style: None,
+                                },
+                                arg: sqlast::FunctionArgExpr::Expr(e.expr.expr.clone()),
+                            })
+                            .collect(),
+                        over: None,
+                        distinct: false,
+                        special: false,
+                    }),
+                }),
+            })
+        }
         sqlast::Expr::CompoundIdentifier(sqlpath) => {
+            // XXX There are cases here where we could inline eagerly
+            //
             Ok(compile_reference(schema.clone(), sqlpath)?)
         }
         sqlast::Expr::Identifier(ident) => {
+            // XXX There are cases here where we could inline eagerly
+            //
             Ok(compile_reference(schema.clone(), &vec![ident.clone()])?)
         }
         _ => Err(CompileError::unimplemented(
@@ -537,7 +684,70 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                 false, /* extern_ */
                 SchemaEntry::Type(resolve_type(schema.clone(), &nt.def)?),
             )],
-            ast::StmtBody::FnDef { .. } => return Err(CompileError::unimplemented("fn")),
+            ast::StmtBody::FnDef {
+                name,
+                generics,
+                args,
+                ret,
+                body,
+            } => {
+                if generics.len() > 0 {
+                    return Err(CompileError::unimplemented("function generics"));
+                }
+
+                let inner_schema = Schema::new(schema.borrow().folder.clone());
+                inner_schema.borrow_mut().parent_scope = Some(schema.clone());
+
+                let mut compiled_args = Vec::new();
+                for arg in args {
+                    if inner_schema.borrow().decls.get(&arg.name).is_some() {
+                        return Err(CompileError::duplicate_entry(vec![name.clone()]));
+                    }
+                    let type_ = resolve_type(inner_schema.clone(), &arg.type_)?;
+                    inner_schema.borrow_mut().decls.insert(
+                        arg.name.clone(),
+                        Rc::new(RefCell::new(Decl {
+                            public: true,
+                            extern_: true,
+                            name: arg.name.clone(),
+                            value: SchemaEntry::Expr(TypedExpr {
+                                type_: type_.clone(),
+                                expr: Expr::Unknown,
+                            }),
+                        })),
+                    );
+                    inner_schema
+                        .borrow_mut()
+                        .externs
+                        .insert(arg.name.clone(), type_.clone());
+                    compiled_args.push(TypedName {
+                        name: arg.name.clone(),
+                        type_: type_.clone(),
+                    });
+                }
+
+                let compiled = compile_expr(inner_schema.clone(), body)?;
+                let type_ = if let Some(ret) = ret {
+                    unify_types(&resolve_type(inner_schema.clone(), ret)?, &compiled.type_)?
+                } else {
+                    compiled.type_
+                };
+
+                vec![(
+                    name.clone(),
+                    false, /* extern_ */
+                    SchemaEntry::Expr(TypedExpr {
+                        type_: Type::Fn(FnType {
+                            args: compiled_args,
+                            ret: Box::new(type_.clone()),
+                        }),
+                        expr: Expr::Fn(FnExpr {
+                            inner_schema: inner_schema.clone(),
+                            body: Box::new(compiled.expr),
+                        }),
+                    }),
+                )]
+            }
             ast::StmtBody::Let { name, type_, body } => {
                 let lhs_type = if let Some(t) = type_ {
                     resolve_type(schema.clone(), &t)?

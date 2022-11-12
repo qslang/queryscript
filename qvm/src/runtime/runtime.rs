@@ -28,6 +28,9 @@ pub fn eval(schema: schema::SchemaRef, expr: &schema::Expr) -> Result<Value> {
             };
             ret
         }
+        schema::Expr::Fn { .. } => {
+            return Err(RuntimeError::unimplemented("functions"));
+        }
         schema::Expr::SQLQuery { query, .. } => {
             super::sql::eval(schema, query)?;
             Ok(Value::Null)

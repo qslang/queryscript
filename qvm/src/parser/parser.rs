@@ -255,10 +255,7 @@ impl<'a> Parser<'a> {
         let mut args = Vec::new();
         loop {
             let name = self.parse_ident()?;
-            let type_ = match self.peek_token().token {
-                Token::Comma | Token::RParen => None,
-                _ => Some(self.parse_type()?),
-            };
+            let type_ = self.parse_type()?;
 
             args.push(FnArg { name, type_ });
 

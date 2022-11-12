@@ -35,7 +35,7 @@ pub enum Type {
 #[derive(Clone, Debug)]
 pub struct FnArg {
     pub name: Ident,
-    pub type_: Option<Type>,
+    pub type_: Type,
 }
 
 #[derive(Clone, Debug)]

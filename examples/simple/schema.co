@@ -5,4 +5,8 @@ export type Foo record {
 
 extern foo number;
 
-let bar = foo;
+fn incr(a number) {
+    a + 1
+}
+
+export let bar = incr(foo);
