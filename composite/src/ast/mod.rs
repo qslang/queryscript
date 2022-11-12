@@ -12,7 +12,7 @@ pub struct NameAndType {
 #[derive(Clone, Debug)]
 pub struct NameAndExpr {
     pub name: Ident,
-    pub val: Option<Expr>,
+    pub expr: Option<Expr>,
 }
 
 #[derive(Clone, Debug)]
@@ -42,7 +42,11 @@ pub struct FnArg {
 pub enum Expr {
     SQLQuery(sqlast::Query),
     SQLExpr(sqlast::Expr),
-    ImportedPath { schema_path: Path, entry_path: Path },
+    ImportedPath {
+        schema_args: Option<usize>,
+        schema_path: Path,
+        entry_path: Path,
+    },
     Unknown,
 }
 

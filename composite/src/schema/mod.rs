@@ -1,7 +1,7 @@
 use crate::ast;
 use crate::runtime;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 pub type Ident = ast::Ident;
@@ -51,17 +51,31 @@ pub enum SchemaEntry {
 #[derive(Clone, Debug)]
 pub struct Decl {
     pub public: bool,
+    pub extern_: bool,
     pub name: String,
     pub value: SchemaEntry,
+}
+
+#[derive(Clone, Debug)]
+pub struct TypedNameAndExpr {
+    pub name: String,
+    pub type_: Type,
+    pub expr: ast::Expr,
+}
+
+#[derive(Clone, Debug)]
+pub struct ImportedSchema {
+    pub args: Option<Vec<BTreeMap<String, TypedNameAndExpr>>>,
+    pub schema: Rc<RefCell<Schema>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Schema {
     pub folder: Option<String>,
     pub parent_scope: Option<Rc<RefCell<Schema>>>,
-    pub externs: BTreeSet<String>,
+    pub externs: BTreeMap<String, Type>,
     pub decls: BTreeMap<String, Rc<RefCell<Decl>>>,
-    pub imports: BTreeMap<ast::Path, Rc<RefCell<Schema>>>,
+    pub imports: BTreeMap<ast::Path, Rc<RefCell<ImportedSchema>>>,
 }
 
 impl Schema {
@@ -69,7 +83,7 @@ impl Schema {
         Rc::new(RefCell::new(Schema {
             folder,
             parent_scope: Some(Schema::new_global_schema()),
-            externs: BTreeSet::new(),
+            externs: BTreeMap::new(),
             decls: BTreeMap::new(),
             imports: BTreeMap::new(),
         }))
@@ -79,13 +93,14 @@ impl Schema {
         Rc::new(RefCell::new(Schema {
             folder: None,
             parent_scope: None,
-            externs: BTreeSet::new(),
+            externs: BTreeMap::new(),
             imports: BTreeMap::new(),
             decls: BTreeMap::from([
                 (
                     "number".to_string(),
                     Rc::new(RefCell::new(Decl {
                         public: true,
+                        extern_: false,
                         name: "number".to_string(),
                         value: SchemaEntry::Type(Type::Atom(AtomicType::Number)),
                     })),
@@ -94,6 +109,7 @@ impl Schema {
                     "string".to_string(),
                     Rc::new(RefCell::new(Decl {
                         public: true,
+                        extern_: false,
                         name: "string".to_string(),
                         value: SchemaEntry::Type(Type::Atom(AtomicType::String)),
                     })),
@@ -102,6 +118,7 @@ impl Schema {
                     "bool".to_string(),
                     Rc::new(RefCell::new(Decl {
                         public: true,
+                        extern_: false,
                         name: "string".to_string(),
                         value: SchemaEntry::Type(Type::Atom(AtomicType::Bool)),
                     })),
@@ -110,6 +127,7 @@ impl Schema {
                     "null".to_string(),
                     Rc::new(RefCell::new(Decl {
                         public: true,
+                        extern_: false,
                         name: "string".to_string(),
                         value: SchemaEntry::Type(Type::Atom(AtomicType::Null)),
                     })),

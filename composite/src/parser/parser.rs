@@ -210,13 +210,13 @@ impl<'a> Parser<'a> {
             let mut args = Vec::new();
             loop {
                 let name = self.parse_ident()?;
-                let val = if self.consume_token(&Token::Colon) {
+                let expr = if self.consume_token(&Token::Colon) {
                     Some(self.parse_expr()?)
                 } else {
                     None
                 };
 
-                args.push(NameAndExpr { name, val });
+                args.push(NameAndExpr { name, expr });
 
                 if !self.consume_token(&Token::Comma) {
                     self.expect_token(&Token::RBrace)?;

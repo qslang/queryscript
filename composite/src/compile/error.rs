@@ -64,6 +64,13 @@ pub enum CompileError {
         rhs: Type,
         backtrace: Option<Backtrace>,
     },
+
+    #[snafu(display("Error importing {:?}: {}", path, what))]
+    ImportError {
+        path: ast::Path,
+        what: String,
+        backtrace: Option<Backtrace>,
+    },
 }
 
 impl CompileError {
@@ -92,6 +99,14 @@ impl CompileError {
         return WrongTypeSnafu {
             lhs: lhs.clone(),
             rhs: rhs.clone(),
+        }
+        .build();
+    }
+
+    pub fn import_error(path: ast::Path, what: &str) -> CompileError {
+        return ImportSnafu {
+            path,
+            what: what.to_string(),
         }
         .build();
     }

@@ -2,3 +2,7 @@ export type Foo record {
     a number,
     b number,
 }
+
+extern foo number;
+
+let bar = foo;

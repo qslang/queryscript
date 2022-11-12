@@ -1,5 +1,7 @@
-import Foo from schema;
+let foo = 123;
 
-extern foo Foo;
+import bar from schema{
+    foo,
+};
 
-let bar = foo.a;
+let baz = bar;
