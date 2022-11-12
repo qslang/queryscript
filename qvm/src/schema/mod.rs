@@ -114,6 +114,8 @@ pub struct ImportedSchema {
     pub schema: SchemaRef,
 }
 
+// XXX We should implement a cheaper Eq / PartialEq over Schema, because it's
+// currently used to check if two types are equal.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Schema {
     pub folder: Option<String>,
