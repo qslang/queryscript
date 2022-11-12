@@ -3,6 +3,7 @@ use snafu::{prelude::*, Whatever};
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use composite::ast;
 use composite::compile;
 use composite::parser;
 use composite::runtime;
@@ -97,8 +98,17 @@ fn run_command(repl_schema: Rc<RefCell<schema::Schema>>, cmd: &str) -> Result<()
 
     match parser.parse_expr() {
         Ok(ast) => {
-            let compiled = compile::compile_expr(repl_schema.clone(), &ast)
-                .with_whatever_context(|e| format!("{}", e))?;
+            let compiled = match ast {
+                // XXX Since the compiler doesn't support queries yet, just pretend to compile them
+                // here for now.
+                //
+                ast::Expr::SQLQuery(q) => schema::TypedExpr {
+                    type_: schema::Type::Unknown,
+                    expr: schema::Expr::SQLQuery { query: q },
+                },
+                _ => compile::compile_expr(repl_schema.clone(), &ast)
+                    .with_whatever_context(|e| format!("{}", e))?,
+            };
             let value = runtime::eval(&repl_schema.borrow(), &compiled.expr)
                 .with_whatever_context(|e| format!("{}", e))?;
             println!("{:?}", value);

@@ -198,18 +198,120 @@ pub fn resolve_global_atom(name: &str) -> Result<Type> {
     resolve_type(schema, &ast::Type::Reference(vec![name.to_string()]))
 }
 
-pub fn intern_placeholder(schema: Rc<RefCell<Schema>>, expr: TypedExpr) -> Result<TypedExpr> {
-    let placeholder = schema.borrow().next_placeholder;
-    schema.borrow_mut().next_placeholder += 1;
-    let placeholder_name = format!("<placeholder {}>", placeholder);
+pub fn intern_placeholder(schema: Rc<RefCell<Schema>>, expr: TypedExpr) -> Result<TypedSQLExpr> {
+    match expr.expr {
+        Expr::SQLExpr(sqlexpr) => Ok(TypedSQLExpr {
+            type_: expr.type_,
+            expr: sqlexpr,
+        }),
+        _ => {
+            let placeholder = schema.borrow().next_placeholder;
+            schema.borrow_mut().next_placeholder += 1;
+            let placeholder_name = format!("<placeholder {}>", placeholder);
 
-    Ok(TypedExpr {
-        type_: expr.type_,
-        expr: Expr::SQLExpr {
-            params: BTreeMap::from([(placeholder_name.clone(), expr.expr)]),
-            expr: sqlast::Expr::Value(sqlast::Value::Placeholder(placeholder_name.clone())),
+            Ok(TypedSQLExpr {
+                type_: expr.type_,
+                expr: SQLExpr {
+                    params: BTreeMap::from([(placeholder_name.clone(), expr.expr)]),
+                    expr: sqlast::Expr::Value(sqlast::Value::Placeholder(placeholder_name.clone())),
+                },
+            })
+        }
+    }
+}
+
+pub fn compile_sqlarg(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Result<TypedSQLExpr> {
+    Ok(intern_placeholder(
+        schema.clone(),
+        compile_sqlexpr(schema.clone(), expr)?,
+    )?)
+}
+
+pub fn combine_sqlparams(all: Vec<&TypedSQLExpr>) -> Result<BTreeMap<String, Expr>> {
+    Ok(all
+        .iter()
+        .map(|t| t.expr.params.clone())
+        .flatten()
+        .collect())
+}
+
+pub fn compile_sqlexpr(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Result<TypedExpr> {
+    match expr {
+        sqlast::Expr::Value(v) => match v {
+            sqlast::Value::Number(_, _) => Ok(TypedExpr {
+                type_: resolve_global_atom("number")?,
+                expr: Expr::SQLExpr(SQLExpr {
+                    params: BTreeMap::new(),
+                    expr: expr.clone(),
+                }),
+            }),
+            sqlast::Value::SingleQuotedString(_)
+            | sqlast::Value::EscapedStringLiteral(_)
+            | sqlast::Value::NationalStringLiteral(_)
+            | sqlast::Value::HexStringLiteral(_)
+            | sqlast::Value::DoubleQuotedString(_) => Ok(TypedExpr {
+                type_: resolve_global_atom("string")?,
+                expr: Expr::SQLExpr(SQLExpr {
+                    params: BTreeMap::new(),
+                    expr: expr.clone(),
+                }),
+            }),
+            sqlast::Value::Boolean(_) => Ok(TypedExpr {
+                type_: resolve_global_atom("bool")?,
+                expr: Expr::SQLExpr(SQLExpr {
+                    params: BTreeMap::new(),
+                    expr: expr.clone(),
+                }),
+            }),
+            sqlast::Value::Null => Ok(TypedExpr {
+                type_: resolve_global_atom("null")?,
+                expr: Expr::SQLExpr(SQLExpr {
+                    params: BTreeMap::new(),
+                    expr: expr.clone(),
+                }),
+            }),
+            sqlast::Value::Placeholder(_) => Err(CompileError::unimplemented(
+                format!("SQL Parameter syntax: {}", expr).as_str(),
+            )),
         },
-    })
+        sqlast::Expr::BinaryOp { left, op, right } => {
+            let cleft = compile_sqlarg(schema.clone(), left)?;
+            let cright = compile_sqlarg(schema.clone(), right)?;
+            let params = combine_sqlparams(vec![&cleft, &cright])?;
+            let type_ = match op {
+                sqlast::BinaryOperator::Plus => {
+                    unify_types(&resolve_global_atom("number")?, &cleft.type_)?;
+                    unify_types(&resolve_global_atom("number")?, &cright.type_)?;
+                    resolve_global_atom("number")?
+                }
+                _ => {
+                    return Err(CompileError::unimplemented(
+                        format!("Binary operator: {}", op).as_str(),
+                    ));
+                }
+            };
+            Ok(TypedExpr {
+                type_,
+                expr: Expr::SQLExpr(SQLExpr {
+                    params,
+                    expr: sqlast::Expr::BinaryOp {
+                        left: Box::new(cleft.expr.expr),
+                        op: op.clone(),
+                        right: Box::new(cright.expr.expr),
+                    },
+                }),
+            })
+        }
+        sqlast::Expr::CompoundIdentifier(sqlpath) => {
+            Ok(compile_reference(schema.clone(), sqlpath)?)
+        }
+        sqlast::Expr::Identifier(ident) => {
+            Ok(compile_reference(schema.clone(), &vec![ident.clone()])?)
+        }
+        _ => Err(CompileError::unimplemented(
+            format!("Expression: {}", expr).as_str(),
+        )),
+    }
 }
 
 pub fn compile_reference(
@@ -267,54 +369,7 @@ pub fn compile_reference(
 pub fn compile_expr(schema: Rc<RefCell<Schema>>, expr: &ast::Expr) -> Result<TypedExpr> {
     match expr {
         ast::Expr::SQLQuery(_) => Err(CompileError::unimplemented("SELECT")),
-        ast::Expr::SQLExpr(e) => match e {
-            sqlast::Expr::Value(v) => match v {
-                sqlast::Value::Number(_, _) => Ok(TypedExpr {
-                    type_: resolve_global_atom("number")?,
-                    expr: Expr::SQLExpr {
-                        params: BTreeMap::new(),
-                        expr: e.clone(),
-                    },
-                }),
-                sqlast::Value::SingleQuotedString(_)
-                | sqlast::Value::EscapedStringLiteral(_)
-                | sqlast::Value::NationalStringLiteral(_)
-                | sqlast::Value::HexStringLiteral(_)
-                | sqlast::Value::DoubleQuotedString(_) => Ok(TypedExpr {
-                    type_: resolve_global_atom("string")?,
-                    expr: Expr::SQLExpr {
-                        params: BTreeMap::new(),
-                        expr: e.clone(),
-                    },
-                }),
-                sqlast::Value::Boolean(_) => Ok(TypedExpr {
-                    type_: resolve_global_atom("bool")?,
-                    expr: Expr::SQLExpr {
-                        params: BTreeMap::new(),
-                        expr: e.clone(),
-                    },
-                }),
-                sqlast::Value::Null => Ok(TypedExpr {
-                    type_: resolve_global_atom("null")?,
-                    expr: Expr::SQLExpr {
-                        params: BTreeMap::new(),
-                        expr: e.clone(),
-                    },
-                }),
-                sqlast::Value::Placeholder(_) => Err(CompileError::unimplemented(
-                    format!("SQL Parameter syntax: {}", e).as_str(),
-                )),
-            },
-            sqlast::Expr::CompoundIdentifier(sqlpath) => {
-                Ok(compile_reference(schema.clone(), sqlpath)?)
-            }
-            sqlast::Expr::Identifier(ident) => {
-                Ok(compile_reference(schema.clone(), &vec![ident.clone()])?)
-            }
-            _ => Err(CompileError::unimplemented(
-                format!("Expression: {}", e).as_str(),
-            )),
-        },
+        ast::Expr::SQLExpr(e) => Ok(compile_sqlexpr(schema.clone(), e)?),
     }
 }
 

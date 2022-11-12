@@ -22,7 +22,7 @@ pub fn eval(schema: &schema::Schema, expr: &schema::Expr) -> Result<Value> {
             super::sql::eval(schema, query)?;
             Ok(Value::Null)
         }
-        schema::Expr::SQLExpr { expr, .. } => match expr {
+        schema::Expr::SQLExpr(schema::SQLExpr { expr, .. }) => match expr {
             sqlast::Expr::Value(v) => match v {
                 sqlast::Value::Number(n, _) => Ok(Value::Number(n.parse()?)),
                 sqlast::Value::SingleQuotedString(s)

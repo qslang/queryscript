@@ -40,17 +40,26 @@ pub enum Type {
 pub type Value = runtime::Value;
 
 #[derive(Clone, Debug)]
+pub struct SQLExpr {
+    pub params: BTreeMap<String, Expr>,
+    pub expr: sqlast::Expr,
+}
+
+#[derive(Clone, Debug)]
 pub enum Expr {
     SQLQuery {
-        params: BTreeMap<String, Expr>,
+        // XXX This is just a passthrough and doesn't perform any compilation yet
         query: sqlast::Query,
     },
-    SQLExpr {
-        params: BTreeMap<String, Expr>,
-        expr: sqlast::Expr,
-    },
+    SQLExpr(SQLExpr),
     Path(Path),
     Unknown,
+}
+
+#[derive(Clone, Debug)]
+pub struct TypedSQLExpr {
+    pub type_: Type,
+    pub expr: SQLExpr,
 }
 
 #[derive(Clone, Debug)]
