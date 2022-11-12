@@ -1,15 +1,19 @@
 use crate::ast;
 use crate::runtime;
+use sqlparser::ast as sqlast;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
 pub type Ident = ast::Ident;
 
+pub type SchemaPathEntry = (ast::Path, Option<usize>);
+pub type SchemaPath = Vec<SchemaPathEntry>;
+
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Path {
     pub items: ast::Path,
-    pub schema: Vec<ast::Path>,
+    pub schema: SchemaPath,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -36,9 +40,23 @@ pub enum Type {
 pub type Value = runtime::Value;
 
 #[derive(Clone, Debug)]
+pub enum Expr {
+    SQLQuery {
+        params: BTreeMap<String, Expr>,
+        query: sqlast::Query,
+    },
+    SQLExpr {
+        params: BTreeMap<String, Expr>,
+        expr: sqlast::Expr,
+    },
+    Path(Path),
+    Unknown,
+}
+
+#[derive(Clone, Debug)]
 pub struct TypedExpr {
     pub type_: Type,
-    pub expr: ast::Expr,
+    pub expr: Expr,
 }
 
 #[derive(Clone, Debug)]
@@ -60,7 +78,7 @@ pub struct Decl {
 pub struct TypedNameAndExpr {
     pub name: String,
     pub type_: Type,
-    pub expr: ast::Expr,
+    pub expr: Expr,
 }
 
 #[derive(Clone, Debug)]
@@ -73,6 +91,7 @@ pub struct ImportedSchema {
 pub struct Schema {
     pub folder: Option<String>,
     pub parent_scope: Option<Rc<RefCell<Schema>>>,
+    pub next_placeholder: usize,
     pub externs: BTreeMap<String, Type>,
     pub decls: BTreeMap<String, Rc<RefCell<Decl>>>,
     pub imports: BTreeMap<ast::Path, Rc<RefCell<ImportedSchema>>>,
@@ -82,7 +101,8 @@ impl Schema {
     pub fn new(folder: Option<String>) -> Rc<RefCell<Schema>> {
         Rc::new(RefCell::new(Schema {
             folder,
-            parent_scope: Some(Schema::new_global_schema()),
+            parent_scope: None,
+            next_placeholder: 1,
             externs: BTreeMap::new(),
             decls: BTreeMap::new(),
             imports: BTreeMap::new(),
@@ -93,6 +113,7 @@ impl Schema {
         Rc::new(RefCell::new(Schema {
             folder: None,
             parent_scope: None,
+            next_placeholder: 1,
             externs: BTreeMap::new(),
             imports: BTreeMap::new(),
             decls: BTreeMap::from([

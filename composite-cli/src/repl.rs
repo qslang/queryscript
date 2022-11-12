@@ -97,7 +97,9 @@ fn run_command(repl_schema: Rc<RefCell<schema::Schema>>, cmd: &str) -> Result<()
 
     match parser.parse_expr() {
         Ok(ast) => {
-            let value = runtime::eval(&repl_schema.borrow(), &ast)
+            let compiled = compile::compile_expr(repl_schema.clone(), &ast)
+                .with_whatever_context(|e| format!("{}", e))?;
+            let value = runtime::eval(&repl_schema.borrow(), &compiled.expr)
                 .with_whatever_context(|e| format!("{}", e))?;
             println!("{:?}", value);
         }

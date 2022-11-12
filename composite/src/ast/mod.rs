@@ -42,12 +42,6 @@ pub struct FnArg {
 pub enum Expr {
     SQLQuery(sqlast::Query),
     SQLExpr(sqlast::Expr),
-    ImportedPath {
-        schema_args: Option<usize>,
-        schema_path: Path,
-        entry_path: Path,
-    },
-    Unknown,
 }
 
 #[derive(Clone, Debug)]
