@@ -35,14 +35,12 @@ pub fn eval(schema: schema::SchemaRef, expr: &schema::Expr) -> Result<Value> {
         schema::Expr::SQLExpr(schema::SQLExpr { expr, params }) => {
             let mut param_values = HashMap::new();
             for (name, param) in params {
+                eprintln!("expr: {:?}", &param.expr);
                 let value = eval(schema.clone(), &param.expr)?;
+                eprintln!("evaluated value: {:?}", value);
                 param_values.insert(
                     name.clone(),
-                    super::sql::SQLParam {
-                        name: name.clone(),
-                        type_: param.type_.clone(),
-                        value,
-                    },
+                    super::sql::SQLParam::new(name.clone(), value, &param.type_),
                 );
             }
 

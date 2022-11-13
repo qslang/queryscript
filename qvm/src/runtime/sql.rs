@@ -9,7 +9,10 @@ use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::logical_expr::{
     logical_plan::builder::LogicalTableSource, AggregateUDF, LogicalPlan, ScalarUDF, TableSource,
 };
-use datafusion::physical_expr::var_provider::VarProvider;
+use datafusion::physical_expr::{
+    execution_props::ExecutionProps,
+    var_provider::{VarProvider, VarType},
+};
 use datafusion::physical_plan::collect;
 #[allow(unused_imports)]
 use datafusion::sql::{
@@ -29,16 +32,20 @@ pub fn eval(
     query: &sqlast::Query,
     params: HashMap<Vec<String>, SQLParam>,
 ) -> Result<()> {
-    let schema_provider = SchemaProvider::new(params);
-    let sql_to_rel = SqlToRel::new(&schema_provider);
+    let schema_provider = Arc::new(SchemaProvider::new(params));
+    let sql_to_rel = SqlToRel::new(schema_provider.as_ref());
 
     let mut ctes = HashMap::new(); // We may eventually want to parse/support these
     let plan = sql_to_rel.query_to_plan(query.clone(), &mut ctes)?;
 
-    let session_state =
+    let mut session_state =
         SessionState::with_config_rt(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
 
     let plan = session_state.optimize(&plan)?;
+
+    let mut execution_props = ExecutionProps::new();
+    execution_props.add_var_provider(VarType::UserDefined, schema_provider.clone());
+    session_state.execution_props = execution_props;
 
     let runtime = tokio::runtime::Builder::new_current_thread().build()?;
     // let physical_planner = DefaultPhysicalPlanner::default();
@@ -55,10 +62,30 @@ async fn execute_plan(session_state: &SessionState, plan: &LogicalPlan) -> Resul
     Ok(())
 }
 
+#[derive(Debug)]
 pub struct SQLParam {
     pub name: Vec<String>,
-    pub type_: schema::Type,
     pub value: Value,
+    pub type_: Option<DataType>,
+}
+
+impl SQLParam {
+    pub fn new(name: Vec<String>, value: Value, type_: &schema::Type) -> SQLParam {
+        eprintln!("{:?} value: {:?} type: {:?}", name, value, type_);
+        SQLParam {
+            name,
+            value,
+            type_: match type_ {
+                schema::Type::Atom(a) => match a {
+                    schema::AtomicType::Null => Some(DataType::Null),
+                    schema::AtomicType::Bool => Some(DataType::Boolean),
+                    schema::AtomicType::Number => Some(DataType::Int64),
+                    schema::AtomicType::String => Some(DataType::Utf8),
+                },
+                _ => None,
+            },
+        }
+    }
 }
 
 struct SchemaProvider {
@@ -88,20 +115,11 @@ impl ContextProvider for SchemaProvider {
     }
 
     fn get_variable_type(&self, names: &[String]) -> Option<DataType> {
-        let param = if let Some(p) = self.params.get(&names.to_vec()) {
-            p
+        if let Some(p) = self.params.get(&names.to_vec()) {
+            eprintln!("p: {:?}", p);
+            p.type_.clone()
         } else {
-            return None;
-        };
-
-        match &param.type_ {
-            schema::Type::Atom(a) => match a {
-                schema::AtomicType::Null => Some(DataType::Null),
-                schema::AtomicType::Bool => Some(DataType::Boolean),
-                schema::AtomicType::Number => Some(DataType::Int64),
-                schema::AtomicType::String => Some(DataType::Utf8),
-            },
-            _ => None,
+            None
         }
     }
 }
@@ -117,6 +135,7 @@ impl VarProvider for SchemaProvider {
             Value::Bool(b) => ScalarValue::Boolean(Some(*b)),
         };
 
+        eprintln!("value: {:?}", value);
         Ok(value)
     }
 
