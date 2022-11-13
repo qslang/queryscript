@@ -16,13 +16,9 @@ pub fn eval(schema: schema::SchemaRef, expr: &schema::Expr) -> Result<Value> {
         schema::Expr::Unknown => {
             return Err(RuntimeError::new("unresolved extern"));
         }
-        schema::Expr::Ref(schema::PathRef { items, schema }) => {
-            // XXX use the instance id
-            let (decl, _, _) =
-                crate::compile::lookup_path(schema.schema.clone(), &items).expect("invalid path");
-
+        schema::Expr::Decl(decl) => {
             let ret = match decl.borrow().value {
-                crate::schema::SchemaEntry::Expr(ref e) => eval(schema.schema.clone(), &e.expr),
+                crate::schema::SchemaEntry::Expr(ref e) => eval(schema.clone(), &e.expr),
                 _ => {
                     return rt_unimplemented!("evaluating a non-expression");
                 }
@@ -85,23 +81,3 @@ pub fn eval(schema: schema::SchemaRef, expr: &schema::Expr) -> Result<Value> {
         }
     }
 }
-
-/*
-fn chase_schema(
-    schema: &schema::Schema,
-    schema_path: schema::SchemaPath,
-) -> Result<&schema::Schema> {
-    let curr = schema;
-    // XXX how do we use the usize instance id?
-    for (path, _) in schema_path.iter() {
-        match curr.imports.get(path) {
-            None => {
-                return fail!("Cannot find import: {:?}", path);
-            }
-            Some(schema) => {
-                curr = schema.as_ref().as_ref();
-            }
-        }
-    }
-}
-*/

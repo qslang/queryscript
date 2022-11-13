@@ -58,7 +58,7 @@ pub fn lookup_schema(
 pub fn lookup_path(
     mut schema: Rc<RefCell<Schema>>,
     path: &ast::Path,
-) -> Result<(Rc<RefCell<Decl>>, SchemaRef, ast::Path)> {
+) -> Result<(Rc<RefCell<Decl>>, ast::Path)> {
     if path.len() == 0 {
         return Err(CompileError::no_such_entry(path.clone()));
     }
@@ -75,7 +75,7 @@ pub fn lookup_path(
                 }
 
                 if i == path.len() - 1 {
-                    return Ok((decl.clone(), schema.clone(), vec![]));
+                    return Ok((decl.clone(), vec![]));
                 }
 
                 match &decl.borrow().value {
@@ -83,7 +83,7 @@ pub fn lookup_path(
                         .borrow()
                         .schema
                         .clone(),
-                    _ => return Ok((decl.clone(), schema.clone(), path[i + 1..].to_vec())),
+                    _ => return Ok((decl.clone(), path[i + 1..].to_vec())),
                 }
             }
             None => {
@@ -116,7 +116,7 @@ pub fn resolve_type(schema: Rc<RefCell<Schema>>, ast: &ast::Type) -> Result<Type
                             }
                         }
                         Err(e) => return Err(e),
-                        Ok((d, _, r)) => {
+                        Ok((d, r)) => {
                             if r.len() > 0 {
                                 return Err(CompileError::no_such_entry(r));
                             }
@@ -437,7 +437,7 @@ pub fn compile_reference(
     sqlpath: &Vec<sqlast::Ident>,
 ) -> Result<TypedExpr> {
     let path: Vec<_> = sqlpath.iter().map(|e| e.value.clone()).collect();
-    let (decl, s, remainder) = lookup_path(schema.clone(), &path)?;
+    let (decl, remainder) = lookup_path(schema.clone(), &path)?;
     let type_ = match &decl.borrow().value {
         SchemaEntry::Expr(v) => v.clone(),
         _ => {
@@ -449,6 +449,11 @@ pub fn compile_reference(
         }
     }
     .type_;
+
+    let top_level_ref = TypedExpr {
+        type_: type_.clone(),
+        expr: Expr::Decl(decl),
+    };
 
     let mut current = &type_;
     for i in 0..remainder.len() {
@@ -473,14 +478,30 @@ pub fn compile_reference(
         }
     }
 
-    let decl_name = decl.borrow().name.clone();
+    Ok(match remainder.len() {
+        0 => top_level_ref,
+        _ => {
+            // Turn the top level reference into a SQL placeholder, and return
+            // a path accessing it
+            let placeholder = intern_placeholder(schema, "param", top_level_ref)?;
+            let placeholder_name = match placeholder.expr.expr {
+                sqlast::Expr::Identifier(i) => i,
+                _ => panic!("placeholder expected to be an identifier"),
+            };
+            let mut full_name = vec![placeholder_name];
+            full_name.extend(remainder.into_iter().map(|n| sqlast::Ident {
+                value: n,
+                quote_style: None,
+            }));
 
-    Ok(TypedExpr {
-        type_: current.clone(),
-        expr: Expr::Ref(PathRef {
-            schema: SchemaInstance::global(s),
-            items: vec![vec![decl_name], remainder].concat(),
-        }),
+            TypedExpr {
+                type_: current.clone(),
+                expr: Expr::SQLExpr(SQLExpr {
+                    params: placeholder.expr.params,
+                    expr: sqlast::Expr::CompoundIdentifier(full_name),
+                }),
+            }
+        }
     })
 }
 
@@ -507,16 +528,13 @@ pub fn unify_types(lhs: &Type, rhs: &Type) -> Result<Type> {
     return Ok(lhs.clone());
 }
 
-pub fn rebind_decl(schema: SchemaInstance, decl: Rc<RefCell<Decl>>) -> Result<SchemaEntry> {
+pub fn rebind_decl(_schema: SchemaInstance, decl: Rc<RefCell<Decl>>) -> Result<SchemaEntry> {
     match &decl.borrow().value {
         SchemaEntry::Schema(s) => Ok(SchemaEntry::Schema(s.clone())),
         SchemaEntry::Type(t) => Ok(SchemaEntry::Type(t.clone())),
         SchemaEntry::Expr(e) => Ok(SchemaEntry::Expr(TypedExpr {
             type_: e.type_.clone(),
-            expr: Expr::Ref(PathRef {
-                schema,
-                items: vec![decl.borrow().name.clone()],
-            }),
+            expr: Expr::Decl(decl.clone()),
         })),
     }
 }
@@ -661,13 +679,19 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                                 return Err(CompileError::unimplemented("path imports"));
                             }
 
-                            let (decl, s, r) =
-                                lookup_path(imported.borrow().schema.clone(), &item)?;
+                            let (decl, r) = lookup_path(imported.borrow().schema.clone(), &item)?;
                             if r.len() > 0 {
                                 return Err(CompileError::no_such_entry(r.clone()));
                             }
 
-                            let imported_schema = SchemaInstance { schema: s, id };
+                            let imported_schema = SchemaInstance {
+                                schema: schema.clone(),
+                                id,
+                            };
+                            // XXX This is currently broken, because we don't actually "inject"
+                            // any meaningful reference to imported_schema's id into the decl.
+                            // We should figure out how to generate a new set of decls for the
+                            // imported schema (w/ the imported args)
                             imports.push((
                                 item[0].clone(),
                                 false, /* extern_ */

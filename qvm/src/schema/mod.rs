@@ -36,12 +36,6 @@ impl SchemaInstance {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PathRef {
-    pub items: ast::Path,
-    pub schema: SchemaInstance,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AtomicType {
     Null,
     Bool,
@@ -65,7 +59,7 @@ pub enum Type {
         inner: Box<Type>,
         excluded: Vec<Ident>,
     },
-    Ref(PathRef),
+    Decl(DeclRef),
     Fn(FnType),
 }
 
@@ -98,7 +92,7 @@ pub enum Expr {
         query: sqlast::Query,
     },
     SQLExpr(SQLExpr),
-    Ref(PathRef),
+    Decl(DeclRef),
     Fn(FnExpr),
     Unknown,
 }
@@ -145,6 +139,7 @@ pub struct TypedNameAndExpr {
 }
 
 pub type SchemaRef = Rc<RefCell<Schema>>;
+pub type DeclRef = Rc<RefCell<Decl>>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TypedName {
