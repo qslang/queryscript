@@ -35,9 +35,7 @@ pub fn eval(schema: schema::SchemaRef, expr: &schema::Expr) -> Result<Value> {
         schema::Expr::SQLExpr(schema::SQLExpr { expr, params }) => {
             let mut param_values = HashMap::new();
             for (name, param) in params {
-                eprintln!("expr: {:?}", &param.expr);
                 let value = eval(schema.clone(), &param.expr)?;
-                eprintln!("evaluated value: {:?}", value);
                 param_values.insert(
                     name.clone(),
                     super::sql::SQLParam::new(name.clone(), value, &param.type_),
@@ -74,8 +72,12 @@ pub fn eval(schema: schema::SchemaRef, expr: &schema::Expr) -> Result<Value> {
                 lock: None,
             };
 
-            super::sql::eval(schema, &query, param_values)?;
-            Ok(Value::Null)
+            let mut rows = super::sql::eval(schema, &query, param_values)?;
+            if rows.len() != 1 {
+                return fail!("Expected an expression to have exactly one row");
+            }
+
+            Ok(rows.remove(0))
         }
     }
 }

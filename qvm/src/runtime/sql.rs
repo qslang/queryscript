@@ -1,7 +1,11 @@
 // TODO: I've left some unused_imports here because they'll be useful while filling in the
 // SchemaProvider implementation
 #[allow(unused_imports)]
-use datafusion::arrow::datatypes::{DataType, Field, Schema};
+use datafusion::arrow::{
+    array::{as_primitive_array, Float64Array},
+    datatypes::{DataType, Field, Schema},
+    record_batch::RecordBatch,
+};
 use datafusion::common::{DataFusionError, Result as DFResult, ScalarValue};
 use datafusion::execution::context::{SessionConfig, SessionState, TaskContext};
 use datafusion::execution::runtime_env::RuntimeEnv;
@@ -23,7 +27,7 @@ use datafusion::sql::{
 use sqlparser::ast as sqlast;
 use std::{collections::HashMap, sync::Arc};
 
-use super::error::Result;
+use super::error::{fail, rt_unimplemented, Result};
 use crate::runtime::runtime::Value;
 use crate::schema;
 
@@ -31,7 +35,7 @@ pub fn eval(
     _schema: schema::SchemaRef,
     query: &sqlast::Query,
     params: HashMap<Vec<String>, SQLParam>,
-) -> Result<()> {
+) -> Result<Vec<Value>> {
     let schema_provider = Arc::new(SchemaProvider::new(params));
     let sql_to_rel = SqlToRel::new(schema_provider.as_ref());
 
@@ -49,17 +53,38 @@ pub fn eval(
 
     let runtime = tokio::runtime::Builder::new_current_thread().build()?;
     // let physical_planner = DefaultPhysicalPlanner::default();
-    runtime.block_on(async { execute_plan(&session_state, &plan).await })?;
+    let records = runtime.block_on(async { execute_plan(&session_state, &plan).await })?;
 
-    Ok(())
+    let mut ret = Vec::new();
+    for batch in records.iter() {
+        if batch.num_columns() != 1 {
+            return fail!("More than 1 column: {}", batch.num_columns());
+        }
+
+        let col = batch.column(0);
+        match col.data_type() {
+            DataType::Float64 => {
+                let arr: &Float64Array = col.as_any().downcast_ref().expect("Arrow cast");
+                ret.extend(arr.iter().map(|i| match i {
+                    Some(i) => Value::Number(i as f64),
+                    None => Value::Null,
+                }));
+            }
+            dt => return rt_unimplemented!("Arrays of type {:?}", dt),
+        }
+    }
+
+    Ok(ret)
 }
 
-async fn execute_plan(session_state: &SessionState, plan: &LogicalPlan) -> Result<()> {
+async fn execute_plan(
+    session_state: &SessionState,
+    plan: &LogicalPlan,
+) -> Result<Vec<RecordBatch>> {
     let pplan = session_state.create_physical_plan(&plan).await?;
     let task_ctx = Arc::new(TaskContext::from(session_state));
     let results = collect(pplan, task_ctx).await?;
-    eprintln!("Results: {:?}", results);
-    Ok(())
+    Ok(results)
 }
 
 #[derive(Debug)]
@@ -71,7 +96,6 @@ pub struct SQLParam {
 
 impl SQLParam {
     pub fn new(name: Vec<String>, value: Value, type_: &schema::Type) -> SQLParam {
-        eprintln!("{:?} value: {:?} type: {:?}", name, value, type_);
         SQLParam {
             name,
             value,
@@ -79,7 +103,7 @@ impl SQLParam {
                 schema::Type::Atom(a) => match a {
                     schema::AtomicType::Null => Some(DataType::Null),
                     schema::AtomicType::Bool => Some(DataType::Boolean),
-                    schema::AtomicType::Number => Some(DataType::Int64),
+                    schema::AtomicType::Number => Some(DataType::Float64),
                     schema::AtomicType::String => Some(DataType::Utf8),
                 },
                 _ => None,
@@ -116,7 +140,6 @@ impl ContextProvider for SchemaProvider {
 
     fn get_variable_type(&self, names: &[String]) -> Option<DataType> {
         if let Some(p) = self.params.get(&names.to_vec()) {
-            eprintln!("p: {:?}", p);
             p.type_.clone()
         } else {
             None
@@ -135,7 +158,6 @@ impl VarProvider for SchemaProvider {
             Value::Bool(b) => ScalarValue::Boolean(Some(*b)),
         };
 
-        eprintln!("value: {:?}", value);
         Ok(value)
     }
 

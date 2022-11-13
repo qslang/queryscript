@@ -49,7 +49,7 @@ impl RuntimeError {
 #[allow(unused_macros)]
 macro_rules! fail {
     ($base: expr $(, $args:expr)* $(,)?) => {
-        StringSnafu {
+        crate::runtime::error::StringSnafu {
             what: format!($base $(, $args)*),
         }.fail()
     };
@@ -61,7 +61,7 @@ pub(crate) use fail;
 #[allow(unused_macros)]
 macro_rules! rt_unimplemented {
     ($base: expr $(, $args:expr)* $(,)?) => {
-        UnimplementedSnafu {
+        crate::runtime::error::UnimplementedSnafu {
             what: format!($base $(, $args)*),
         }.fail()
     };
