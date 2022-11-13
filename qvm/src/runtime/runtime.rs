@@ -1,6 +1,7 @@
 use crate::runtime::error::*;
 use crate::schema;
 use sqlparser::ast as sqlast;
+use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
 pub enum Value {
@@ -32,27 +33,56 @@ pub fn eval(schema: schema::SchemaRef, expr: &schema::Expr) -> Result<Value> {
             return Err(RuntimeError::unimplemented("functions"));
         }
         schema::Expr::SQLQuery { query, .. } => {
-            super::sql::eval(schema, query)?;
+            super::sql::eval(schema, query, HashMap::new())?;
             Ok(Value::Null)
         }
-        schema::Expr::SQLExpr(schema::SQLExpr { expr, .. }) => match expr {
-            sqlast::Expr::Value(v) => match v {
-                sqlast::Value::Number(n, _) => Ok(Value::Number(n.parse()?)),
-                sqlast::Value::SingleQuotedString(s)
-                | sqlast::Value::EscapedStringLiteral(s)
-                | sqlast::Value::NationalStringLiteral(s)
-                | sqlast::Value::HexStringLiteral(s)
-                | sqlast::Value::DoubleQuotedString(s) => Ok(Value::String(s.clone())),
-                sqlast::Value::Boolean(b) => Ok(Value::Bool(*b)),
-                sqlast::Value::Null => Ok(Value::Null),
-                _ => {
-                    return Err(RuntimeError::unimplemented(expr.to_string().as_str()));
-                }
-            },
-            _ => {
-                return Err(RuntimeError::unimplemented(expr.to_string().as_str()));
+        schema::Expr::SQLExpr(schema::SQLExpr { expr, params }) => {
+            let mut param_values = HashMap::new();
+            for (name, param) in params {
+                let value = eval(schema.clone(), param)?;
+                param_values.insert(
+                    name.clone(),
+                    super::sql::SQLParam {
+                        name: name.clone(),
+                        type_: schema::Type::Unknown,
+                        value,
+                    },
+                );
             }
-        },
+
+            let query = sqlast::Query {
+                with: None,
+                body: Box::new(sqlast::SetExpr::Select(Box::new(sqlast::Select {
+                    distinct: false,
+                    top: None,
+                    projection: vec![sqlast::SelectItem::ExprWithAlias {
+                        expr: expr.clone(),
+                        alias: sqlast::Ident {
+                            value: "value".to_string(),
+                            quote_style: None,
+                        },
+                    }],
+                    into: None,
+                    from: Vec::new(),
+                    lateral_views: Vec::new(),
+                    selection: None,
+                    group_by: Vec::new(),
+                    cluster_by: Vec::new(),
+                    distribute_by: Vec::new(),
+                    sort_by: Vec::new(),
+                    having: None,
+                    qualify: None,
+                }))),
+                order_by: Vec::new(),
+                limit: None,
+                offset: None,
+                fetch: None,
+                lock: None,
+            };
+
+            super::sql::eval(schema, &query, param_values)?;
+            Ok(Value::Null)
+        }
     }
 }
 
