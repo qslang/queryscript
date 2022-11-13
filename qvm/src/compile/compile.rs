@@ -360,34 +360,12 @@ pub fn unify_types(lhs: &Type, rhs: &Type) -> Result<Type> {
     return Ok(lhs.clone());
 }
 
-pub fn rebind_type(type_: &Type) -> Result<Type> {
-    match type_ {
-        Type::Unknown => Ok(Type::Unknown),
-        Type::Atom(a) => Ok(Type::Atom(a.clone())),
-        Type::Struct(fields) => Ok(Type::Struct(
-            fields
-                .iter()
-                .map(|(k, v)| Ok((k.clone(), rebind_type(v)?)))
-                .collect::<Result<BTreeMap<String, Type>>>()?,
-        )),
-        Type::List(inner) => Ok(Type::List(Box::new(rebind_type(inner.as_ref())?))),
-        Type::Exclude { inner, excluded } => Ok(Type::Exclude {
-            inner: Box::new(rebind_type(inner)?),
-            excluded: excluded.clone(),
-        }),
-        Type::Ref(p) => Ok(Type::Ref(PathRef {
-            schema: p.schema.clone(),
-            items: p.items.clone(),
-        })),
-    }
-}
-
 pub fn rebind_decl(schema: SchemaInstance, decl: Rc<RefCell<Decl>>) -> Result<SchemaEntry> {
     match &decl.borrow().value {
         SchemaEntry::Schema(s) => Ok(SchemaEntry::Schema(s.clone())),
-        SchemaEntry::Type(t) => Ok(SchemaEntry::Type(rebind_type(&t)?)),
+        SchemaEntry::Type(t) => Ok(SchemaEntry::Type(t.clone())),
         SchemaEntry::Expr(e) => Ok(SchemaEntry::Expr(TypedExpr {
-            type_: rebind_type(&e.type_)?,
+            type_: e.type_.clone(),
             expr: Expr::Ref(PathRef {
                 schema,
                 items: vec![decl.borrow().name.clone()],
