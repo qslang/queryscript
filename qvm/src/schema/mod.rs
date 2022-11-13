@@ -65,10 +65,18 @@ pub enum Type {
 
 pub type Value = runtime::Value;
 
+pub type Params = BTreeMap<ast::Path, TypedExpr>;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SQLExpr {
-    pub params: BTreeMap<ast::Path, TypedExpr>,
+    pub params: Params,
     pub expr: sqlast::Expr,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SQLQuery {
+    pub params: Params,
+    pub query: sqlast::Query,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -87,10 +95,7 @@ impl fmt::Debug for FnExpr {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Expr {
-    SQLQuery {
-        // XXX This is just a passthrough and doesn't perform any compilation yet
-        query: sqlast::Query,
-    },
+    SQLQuery(SQLQuery),
     SQLExpr(SQLExpr),
     Decl(DeclRef),
     Fn(FnExpr),

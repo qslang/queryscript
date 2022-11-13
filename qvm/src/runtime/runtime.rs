@@ -1,3 +1,4 @@
+use super::sql::SQLParam;
 use crate::runtime::error::*;
 use crate::schema;
 use sqlparser::ast as sqlast;
@@ -9,6 +10,24 @@ pub enum Value {
     Number(f64),
     String(String),
     Bool(bool),
+}
+
+pub fn eval_params(
+    schema: schema::SchemaRef,
+    params: &schema::Params,
+) -> Result<HashMap<Vec<String>, SQLParam>> {
+    let mut param_values = HashMap::new();
+    for (name, param) in params {
+        eprintln!("expr: {:?}", &param.expr);
+        let value = eval(schema.clone(), &param.expr)?;
+        eprintln!("evaluated value: {:?}", value);
+        param_values.insert(
+            name.clone(),
+            SQLParam::new(name.clone(), value, &param.type_),
+        );
+    }
+
+    Ok(param_values)
 }
 
 pub fn eval(schema: schema::SchemaRef, expr: &schema::Expr) -> Result<Value> {
@@ -28,20 +47,13 @@ pub fn eval(schema: schema::SchemaRef, expr: &schema::Expr) -> Result<Value> {
         schema::Expr::Fn { .. } => {
             return Err(RuntimeError::unimplemented("functions"));
         }
-        schema::Expr::SQLQuery { query, .. } => {
-            super::sql::eval(schema, query, HashMap::new())?;
+        schema::Expr::SQLQuery(schema::SQLQuery { query, params }) => {
+            let sql_params = eval_params(schema.clone(), params)?;
+            super::sql::eval(schema, query, sql_params)?;
             Ok(Value::Null)
         }
         schema::Expr::SQLExpr(schema::SQLExpr { expr, params }) => {
-            let mut param_values = HashMap::new();
-            for (name, param) in params {
-                let value = eval(schema.clone(), &param.expr)?;
-                param_values.insert(
-                    name.clone(),
-                    super::sql::SQLParam::new(name.clone(), value, &param.type_),
-                );
-            }
-
+            let sql_params = eval_params(schema.clone(), params)?;
             let query = sqlast::Query {
                 with: None,
                 body: Box::new(sqlast::SetExpr::Select(Box::new(sqlast::Select {
@@ -72,7 +84,7 @@ pub fn eval(schema: schema::SchemaRef, expr: &schema::Expr) -> Result<Value> {
                 lock: None,
             };
 
-            let mut rows = super::sql::eval(schema, &query, param_values)?;
+            let mut rows = super::sql::eval(schema, &query, sql_params)?;
             if rows.len() != 1 {
                 return fail!("Expected an expression to have exactly one row");
             }

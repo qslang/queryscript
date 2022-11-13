@@ -1,7 +1,6 @@
 use rustyline::{error::ReadlineError, Editor};
 use snafu::{prelude::*, Whatever};
 
-use qvm::ast;
 use qvm::compile;
 use qvm::parser;
 use qvm::runtime;
@@ -96,17 +95,8 @@ fn run_command(repl_schema: schema::SchemaRef, cmd: &str) -> Result<(), Whatever
 
     match parser.parse_expr() {
         Ok(ast) => {
-            let compiled = match ast {
-                // XXX Since the compiler doesn't support queries yet, just pretend to compile them
-                // here for now.
-                //
-                ast::Expr::SQLQuery(q) => schema::TypedExpr {
-                    type_: schema::Type::Unknown,
-                    expr: schema::Expr::SQLQuery { query: q },
-                },
-                _ => compile::compile_expr(repl_schema.clone(), &ast)
-                    .with_whatever_context(|e| format!("{}", e))?,
-            };
+            let compiled = compile::compile_expr(repl_schema.clone(), &ast)
+                .with_whatever_context(|e| format!("{}", e))?;
             let value = runtime::eval(repl_schema.clone(), &compiled.expr)
                 .with_whatever_context(|e| format!("{}", e))?;
             println!("{:?}", value);

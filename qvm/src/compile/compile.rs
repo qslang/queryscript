@@ -193,7 +193,7 @@ pub fn intern_placeholder(
             Ok(TypedSQLExpr {
                 type_: expr.type_.clone(),
                 expr: SQLExpr {
-                    params: BTreeMap::from([(vec![placeholder_name.clone()], expr)]),
+                    params: Params::from([(vec![placeholder_name.clone()], expr)]),
                     expr: sqlast::Expr::Identifier(sqlast::Ident {
                         value: placeholder_name.clone(),
                         quote_style: None,
@@ -218,6 +218,202 @@ pub fn combine_sqlparams(all: Vec<&TypedSQLExpr>) -> Result<BTreeMap<ast::Path, 
         .map(|t| t.expr.params.clone())
         .flatten()
         .collect())
+}
+
+pub fn compile_select(schema: Rc<RefCell<Schema>>, select: &sqlast::Select) -> Result<TypedExpr> {
+    if select.distinct {
+        return Err(CompileError::unimplemented("DISTINCT"));
+    }
+
+    if select.top.is_some() {
+        return Err(CompileError::unimplemented("TOP"));
+    }
+
+    if select.into.is_some() {
+        return Err(CompileError::unimplemented("INTO"));
+    }
+
+    if select.lateral_views.len() > 0 {
+        return Err(CompileError::unimplemented("Lateral views"));
+    }
+
+    if select.selection.is_some() {
+        return Err(CompileError::unimplemented("WHERE"));
+    }
+
+    if select.group_by.len() > 0 {
+        return Err(CompileError::unimplemented("GROUP BY"));
+    }
+
+    if select.cluster_by.len() > 0 {
+        return Err(CompileError::unimplemented("CLUSTER BY"));
+    }
+
+    if select.distribute_by.len() > 0 {
+        return Err(CompileError::unimplemented("DISTRIBUTE BY"));
+    }
+
+    if select.sort_by.len() > 0 {
+        return Err(CompileError::unimplemented("ORDER BY"));
+    }
+
+    if select.having.is_some() {
+        return Err(CompileError::unimplemented("HAVING"));
+    }
+
+    if select.qualify.is_some() {
+        return Err(CompileError::unimplemented("QUALIFY"));
+    }
+
+    match select.from.len() {
+        0 => {
+            if select.projection.len() != 1 {
+                return Err(CompileError::unimplemented(
+                    "Multiple projections in projection without FROM",
+                ));
+            }
+
+            match &select.projection[0] {
+                sqlast::SelectItem::UnnamedExpr(e) => Ok(compile_sqlexpr(schema.clone(), e)?),
+                sqlast::SelectItem::ExprWithAlias { expr, .. } => {
+                    Ok(compile_sqlexpr(schema.clone(), expr)?)
+                }
+                _ => Err(CompileError::unimplemented(
+                    "Wildcard in SELECT without FROM",
+                )),
+            }
+        }
+        1 => {
+            if select.from[0].joins.len() > 0 {
+                return Err(CompileError::unimplemented("JOIN"));
+            }
+
+            if select.projection.len() != 1
+                || !matches!(select.projection[0], sqlast::SelectItem::Wildcard)
+            {
+                return Err(CompileError::unimplemented("Projections with FROM"));
+            }
+
+            match &select.from[0].relation {
+                sqlast::TableFactor::Table {
+                    name,
+                    alias,
+                    args,
+                    with_hints,
+                } => {
+                    if args.is_some() {
+                        return Err(CompileError::unimplemented("Table valued functions"));
+                    }
+
+                    if with_hints.len() > 0 {
+                        return Err(CompileError::unimplemented("WITH hints"));
+                    }
+
+                    let relation = compile_reference(schema.clone(), &name.0)?;
+
+                    // TODO: This should unify the type with [unknown] instead
+                    //
+                    if !matches!(relation.type_, Type::List { .. }) {
+                        return Err(CompileError::wrong_type(
+                            &Type::List(Box::new(Type::Unknown)),
+                            &relation.type_,
+                        ));
+                    }
+
+                    let placeholder_name = vec![
+                        QVM_NAMESPACE.to_string(),
+                        new_placeholder_name(schema.clone(), "rel"),
+                    ];
+
+                    let mut ret = select.clone();
+                    ret.from = vec![sqlast::TableWithJoins {
+                        relation: sqlast::TableFactor::Table {
+                            name: sqlast::ObjectName(
+                                placeholder_name
+                                    .iter()
+                                    .map(|n| sqlast::Ident {
+                                        value: n.clone(),
+                                        quote_style: None,
+                                    })
+                                    .collect(),
+                            ),
+                            alias: alias.clone(),
+                            args: args.clone(),
+                            with_hints: with_hints.clone(),
+                        },
+                        joins: Vec::new(),
+                    }];
+
+                    Ok(TypedExpr {
+                        type_: relation.type_.clone(),
+                        expr: Expr::SQLQuery(SQLQuery {
+                            params: Params::from([(
+                                placeholder_name.clone(),
+                                TypedExpr {
+                                    type_: relation.type_,
+                                    expr: relation.expr,
+                                },
+                            )]),
+                            query: sqlast::Query {
+                                with: None,
+                                body: Box::new(sqlast::SetExpr::Select(Box::new(ret))),
+                                order_by: Vec::new(),
+                                limit: None,
+                                offset: None,
+                                fetch: None,
+                                lock: None,
+                            },
+                        }),
+                    })
+                }
+                sqlast::TableFactor::Derived { .. } => {
+                    Err(CompileError::unimplemented("Subqueries"))
+                }
+                sqlast::TableFactor::TableFunction { .. } => {
+                    Err(CompileError::unimplemented("TABLE"))
+                }
+                sqlast::TableFactor::UNNEST { .. } => Err(CompileError::unimplemented("UNNEST")),
+                sqlast::TableFactor::NestedJoin { .. } => Err(CompileError::unimplemented("JOIN")),
+            }
+        }
+        _ => Err(CompileError::unimplemented("JOIN")),
+    }
+}
+
+pub fn compile_sqlquery(schema: Rc<RefCell<Schema>>, query: &sqlast::Query) -> Result<TypedExpr> {
+    if query.with.is_some() {
+        return Err(CompileError::unimplemented("WITH"));
+    }
+
+    if query.order_by.len() > 0 {
+        return Err(CompileError::unimplemented("ORDER BY"));
+    }
+
+    if query.limit.is_some() {
+        return Err(CompileError::unimplemented("LIMIT"));
+    }
+
+    if query.offset.is_some() {
+        return Err(CompileError::unimplemented("OFFSET"));
+    }
+
+    if query.fetch.is_some() {
+        return Err(CompileError::unimplemented("FETCH"));
+    }
+
+    if query.lock.is_some() {
+        return Err(CompileError::unimplemented("FOR { UPDATE | SHARE }"));
+    }
+
+    match query.body.as_ref() {
+        sqlast::SetExpr::Select(s) => compile_select(schema.clone(), s),
+        sqlast::SetExpr::Query(q) => compile_sqlquery(schema.clone(), q),
+        sqlast::SetExpr::SetOperation { .. } => {
+            Err(CompileError::unimplemented("UNION | EXCEPT | INTERSECT"))
+        }
+        sqlast::SetExpr::Values(_) => Err(CompileError::unimplemented("VALUES")),
+        sqlast::SetExpr::Insert(_) => Err(CompileError::unimplemented("INSERT")),
+    }
 }
 
 pub fn compile_sqlexpr(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Result<TypedExpr> {
@@ -513,7 +709,7 @@ pub fn compile_reference(
 
 pub fn compile_expr(schema: Rc<RefCell<Schema>>, expr: &ast::Expr) -> Result<TypedExpr> {
     match expr {
-        ast::Expr::SQLQuery(_) => Err(CompileError::unimplemented("SELECT")),
+        ast::Expr::SQLQuery(q) => Ok(compile_sqlquery(schema.clone(), q)?),
         ast::Expr::SQLExpr(e) => Ok(compile_sqlexpr(schema.clone(), e)?),
     }
 }
