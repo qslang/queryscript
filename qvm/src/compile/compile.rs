@@ -191,9 +191,9 @@ pub fn intern_placeholder(
             let placeholder_name = "@".to_string() + new_placeholder_name(schema, kind).as_str();
 
             Ok(TypedSQLExpr {
-                type_: expr.type_,
+                type_: expr.type_.clone(),
                 expr: SQLExpr {
-                    params: BTreeMap::from([(vec![placeholder_name.clone()], expr.expr)]),
+                    params: BTreeMap::from([(vec![placeholder_name.clone()], expr)]),
                     expr: sqlast::Expr::Identifier(sqlast::Ident {
                         value: placeholder_name.clone(),
                         quote_style: None,
@@ -212,7 +212,7 @@ pub fn compile_sqlarg(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Resul
     )?)
 }
 
-pub fn combine_sqlparams(all: Vec<&TypedSQLExpr>) -> Result<BTreeMap<ast::Path, Expr>> {
+pub fn combine_sqlparams(all: Vec<&TypedSQLExpr>) -> Result<BTreeMap<ast::Path, TypedExpr>> {
     Ok(all
         .iter()
         .map(|t| t.expr.params.clone())
@@ -381,7 +381,13 @@ pub fn compile_sqlexpr(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Resu
                 QVM_NAMESPACE.to_string(),
                 new_placeholder_name(schema.clone(), "func"),
             ];
-            params.insert(placeholder_name.clone(), function.expr);
+            params.insert(
+                placeholder_name.clone(),
+                TypedExpr {
+                    expr: function.expr,
+                    type_: *fn_type.ret.clone(),
+                },
+            );
 
             // XXX There are cases here where we could inline eagerly
             //

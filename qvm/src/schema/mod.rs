@@ -67,7 +67,7 @@ pub type Value = runtime::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SQLExpr {
-    pub params: BTreeMap<ast::Path, Expr>,
+    pub params: BTreeMap<ast::Path, TypedExpr>,
     pub expr: sqlast::Expr,
 }
 
