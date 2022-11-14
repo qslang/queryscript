@@ -8,7 +8,7 @@ pub type Ident = ast::Ident;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Type {
     Atom(AtomicType),
-    Struct(Vec<Field>),
+    Record(Vec<Field>),
     List(Box<Type>),
     Fn(FnType),
 }
@@ -267,7 +267,7 @@ impl TryFrom<&ArrowDataType> for Type {
             List(f) | LargeList(f) | FixedSizeList(f, _) => {
                 Type::List(Box::new(f.data_type().try_into()?))
             }
-            Struct(fields) => Type::Struct(
+            Struct(fields) => Type::Record(
                 fields
                     .iter()
                     .map(|f| {
