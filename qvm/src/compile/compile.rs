@@ -1,14 +1,15 @@
-use crate::ast;
-use crate::compile::error::*;
-use crate::parser::parse_schema;
-use crate::schema::*;
-use crate::types::{AtomicType, Field, FnType, Type};
 use sqlparser::ast as sqlast;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path as FilePath;
 use std::rc::Rc;
+
+use crate::ast;
+use crate::compile::error::*;
+use crate::parser::parse_schema;
+use crate::schema::*;
+use crate::types::{number::parse_numeric_type, Field, FnType, Type};
 
 const QVM_NAMESPACE: &str = "__qvm";
 
@@ -413,8 +414,8 @@ pub fn compile_sqlquery(schema: Rc<RefCell<Schema>>, query: &sqlast::Query) -> R
 pub fn compile_sqlexpr(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Result<TypedExpr> {
     match expr {
         sqlast::Expr::Value(v) => match v {
-            sqlast::Value::Number(_, _) => Ok(TypedExpr {
-                type_: resolve_global_atom("number")?,
+            sqlast::Value::Number(n, _) => Ok(TypedExpr {
+                type_: parse_numeric_type(n)?,
                 expr: Expr::SQLExpr(SQLExpr {
                     params: BTreeMap::new(),
                     expr: expr.clone(),

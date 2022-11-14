@@ -1,7 +1,8 @@
-use datafusion::arrow::datatypes::{IntervalUnit, TimeUnit};
+use datafusion::arrow::datatypes::{DataType as ArrowDataType, IntervalUnit, TimeUnit};
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use super::error::{ts_unimplemented, Result};
 use crate::ast;
 
 pub type Ident = ast::Ident;
@@ -237,4 +238,58 @@ pub enum AtomicType {
     /// not enforced.
     Map(Box<Field>, bool),
     */
+}
+
+impl TryFrom<&ArrowDataType> for Type {
+    type Error = super::error::TypesystemError;
+
+    fn try_from(t: &ArrowDataType) -> Result<Self> {
+        use ArrowDataType::*;
+        Ok(match t {
+            Null => Type::Atom(AtomicType::Null),
+            Boolean => Type::Atom(AtomicType::Boolean),
+            Int8 => Type::Atom(AtomicType::Int8),
+            Int16 => Type::Atom(AtomicType::Int16),
+            Int32 => Type::Atom(AtomicType::Int32),
+            Int64 => Type::Atom(AtomicType::Int64),
+            UInt8 => Type::Atom(AtomicType::UInt8),
+            UInt16 => Type::Atom(AtomicType::UInt16),
+            UInt32 => Type::Atom(AtomicType::UInt32),
+            UInt64 => Type::Atom(AtomicType::UInt64),
+            Float16 => Type::Atom(AtomicType::Float16),
+            Float32 => Type::Atom(AtomicType::Float32),
+            Float64 => Type::Atom(AtomicType::Float64),
+            Timestamp(u, s) => Type::Atom(AtomicType::Timestamp(u.clone(), s.clone())),
+            Date32 => Type::Atom(AtomicType::Date32),
+            Date64 => Type::Atom(AtomicType::Date64),
+            Time32(u) => Type::Atom(AtomicType::Time32(u.clone())),
+            Time64(u) => Type::Atom(AtomicType::Time64(u.clone())),
+            Duration(u) => Type::Atom(AtomicType::Duration(u.clone())),
+            Interval(u) => Type::Atom(AtomicType::Interval(u.clone())),
+            Binary => Type::Atom(AtomicType::Binary),
+            FixedSizeBinary(l) => Type::Atom(AtomicType::FixedSizeBinary(*l)),
+            LargeBinary => Type::Atom(AtomicType::LargeBinary),
+            Utf8 => Type::Atom(AtomicType::Utf8),
+            LargeUtf8 => Type::Atom(AtomicType::LargeUtf8),
+            Decimal128(p, s) => Type::Atom(AtomicType::Decimal128(*p, *s)),
+            Decimal256(p, s) => Type::Atom(AtomicType::Decimal256(*p, *s)),
+            List(f) | LargeList(f) | FixedSizeList(f, _) => {
+                Type::List(Box::new(f.data_type().try_into()?))
+            }
+            Struct(fields) => Type::Struct(
+                fields
+                    .iter()
+                    .map(|f| {
+                        Ok(Field {
+                            name: f.name().clone(),
+                            type_: f.data_type().try_into()?,
+                            nullable: f.is_nullable(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+            ),
+
+            Union(..) | Dictionary(..) | Map(..) => return ts_unimplemented!("union type"),
+        })
+    }
 }

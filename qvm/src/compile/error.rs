@@ -2,6 +2,7 @@ use crate::ast;
 use crate::parser::error::ParserError;
 use crate::runtime::error::RuntimeError;
 use crate::schema::Decl;
+use crate::types::error::TypesystemError;
 use crate::types::Type;
 use snafu::{Backtrace, Snafu};
 use std::io;
@@ -13,6 +14,12 @@ pub enum CompileError {
     #[snafu(display("Parser error: {}", source), context(false))]
     SyntaxError {
         source: ParserError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("Typesystem error: {}", source), context(false))]
+    TypesystemError {
+        source: TypesystemError,
         backtrace: Option<Backtrace>,
     },
 
