@@ -32,7 +32,7 @@ use sqlparser::ast as sqlast;
 use std::{collections::HashMap, sync::Arc};
 
 use super::error::{fail, rt_unimplemented, Result};
-use crate::runtime::runtime::Value;
+use crate::runtime::runtime::{FnValue, Value};
 use crate::schema;
 use crate::types;
 use chrono;
@@ -87,52 +87,85 @@ async fn execute_plan(ctx: &SessionContext, plan: &LogicalPlan) -> Result<Vec<Re
     Ok(results)
 }
 
-pub fn load_json(type_: &types::Type, file: String) -> Result<Value> {
-    let format = JsonFormat::default().with_schema_infer_max_rec(Some(0));
+#[derive(Clone, Debug)]
+pub struct LoadJsonFn {
+    schema: Arc<DFSchema>,
+}
 
-    let schema = Arc::new(match to_dftype(type_) {
-        DFType::Schema(s) => s,
-        _ => return fail!("File type is not a list of records"),
-    });
+impl LoadJsonFn {
+    pub fn new(type_: &types::Type) -> Result<LoadJsonFn> {
+        let ret_type = match type_ {
+            types::Type::Fn(types::FnType { ret, .. }) => ret,
+            _ => return fail!("Type of load_json is not a function"),
+        };
 
-    let runtime = tokio::runtime::Builder::new_current_thread().build()?;
-    let location = Path::from_filesystem_path(file.as_str())?;
-    let fmeta = std::fs::metadata(file)?;
-    let ometa = ObjectMeta {
-        location,
-        last_modified: fmeta.modified().map(chrono::DateTime::from).unwrap(),
-        size: fmeta.len() as usize,
-    };
-    // let physical_planner = DefaultPhysicalPlanner::default();
-    let records = runtime.block_on(async {
-        let plan = format
-            .create_physical_plan(
-                FileScanConfig {
-                    file_schema: schema,
-                    file_groups: vec![vec![ometa.into()]],
-                    limit: None,
-                    object_store_url: ObjectStoreUrl::local_filesystem(),
-                    projection: None,
-                    statistics: Statistics {
-                        num_rows: None,
-                        total_byte_size: None,
-                        column_statistics: None,
-                        is_exact: true,
+        let schema = Arc::new(match to_dftype(ret_type) {
+            DFType::Schema(s) => s,
+            _ => return fail!("Return type of load_json is not a list of records"),
+        });
+
+        Ok(LoadJsonFn { schema })
+    }
+
+    pub fn load_json(&self, file: String) -> Result<Value> {
+        let format = JsonFormat::default().with_schema_infer_max_rec(Some(0));
+
+        let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+        let location = Path::from_filesystem_path(file.as_str())?;
+        let fmeta = std::fs::metadata(file)?;
+        let ometa = ObjectMeta {
+            location,
+            last_modified: fmeta.modified().map(chrono::DateTime::from).unwrap(),
+            size: fmeta.len() as usize,
+        };
+        // let physical_planner = DefaultPhysicalPlanner::default();
+        let records = runtime.block_on(async {
+            let plan = format
+                .create_physical_plan(
+                    FileScanConfig {
+                        file_schema: self.schema.clone(),
+                        file_groups: vec![vec![ometa.into()]],
+                        limit: None,
+                        object_store_url: ObjectStoreUrl::local_filesystem(),
+                        projection: None,
+                        statistics: Statistics {
+                            num_rows: None,
+                            total_byte_size: None,
+                            column_statistics: None,
+                            is_exact: true,
+                        },
+                        table_partition_cols: Vec::new(),
+                        config_options: ConfigOptions::new().into_shareable(),
                     },
-                    table_partition_cols: Vec::new(),
-                    config_options: ConfigOptions::new().into_shareable(),
-                },
-                &[],
-            )
-            .await?;
+                    &[],
+                )
+                .await?;
 
-        let ctx =
-            SessionContext::with_config_rt(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
-        let task_ctx = ctx.task_ctx();
-        return DFResult::Ok(collect(plan, task_ctx).await? as Vec<RecordBatch>);
-    })?;
+            let ctx = SessionContext::with_config_rt(
+                SessionConfig::new(),
+                Arc::new(RuntimeEnv::default()),
+            );
+            let task_ctx = ctx.task_ctx();
+            return DFResult::Ok(collect(plan, task_ctx).await? as Vec<RecordBatch>);
+        })?;
 
-    Ok(Value::Records(records))
+        Ok(Value::Records(records))
+    }
+}
+
+impl FnValue for LoadJsonFn {
+    fn execute(&self, args: Vec<Value>) -> Result<Value> {
+        if args.len() != 1 {
+            return fail!("load_json expects exactly one argument");
+        }
+
+        let file = match &args[0] {
+            Value::String(s) => s.clone(),
+            _ => return fail!("load_json expects its first argument to be a string"),
+        };
+
+        self.load_json(file)
+    }
 }
 
 #[derive(Clone, Debug)]

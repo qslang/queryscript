@@ -59,7 +59,9 @@ pub fn eval(schema: schema::SchemaRef, expr: &schema::TypedExpr) -> Result<Value
             return Err(RuntimeError::unimplemented("functions"));
         }
         schema::Expr::NativeFn(name) => match name.as_str() {
-            "load_json" => super::sql::load_json(&expr.type_, "".to_string()),
+            "load_json" => Ok(Value::Fn(Box::new(super::sql::LoadJsonFn::new(
+                &expr.type_,
+            )?))),
             _ => return rt_unimplemented!("native function: {}", name),
         },
         schema::Expr::FnCall { .. } => {
