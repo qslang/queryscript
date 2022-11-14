@@ -1,6 +1,6 @@
 use crate::ast;
 use crate::runtime;
-use crate::types::{AtomicType, Type};
+use crate::types::{AtomicType, Field, FnType, Type};
 use sqlparser::ast as sqlast;
 use std::cell::RefCell;
 use std::collections::BTreeMap;

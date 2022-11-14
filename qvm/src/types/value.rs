@@ -1,25 +1,16 @@
+use dyn_clone::{clone_trait_object, DynClone};
 use std::any::Any;
+use std::fmt;
+use std::sync::Arc;
 
+use super::error::Result;
 use super::types::*;
 
-trait Value {
-    fn type_(&self) -> Type;
-    fn as_any(&self) -> &dyn Any;
-}
-
-trait Record: Value {
-    fn schema(&self) -> Vec<Field>;
-    fn get_value(&self, name: &str) -> &dyn Value;
-}
-
-trait List: Value {
-    fn data_type(&self) -> Type;
-}
-
-trait Batch: Value {
-    fn schema(&self) -> Vec<Field>;
-    fn row(&self, index: usize) -> &dyn Record;
-    fn column(&self, index: usize) -> &dyn List;
+pub enum Value {
+    Atom(AtomicValue),
+    Record(Arc<dyn Record>),
+    List(Arc<dyn List>),
+    Fn(Arc<dyn FnValue>),
 }
 
 pub enum AtomicValue {
@@ -38,7 +29,54 @@ pub enum AtomicValue {
     Float64(f64),
 }
 
-impl Value for AtomicValue {
+pub trait Record: fmt::Debug + DynClone + Send + Sync {
+    fn schema(&self) -> Vec<Field>;
+    fn as_any(&self) -> &dyn Any;
+}
+
+pub trait List: fmt::Debug + DynClone + Send + Sync {
+    fn data_type(&self) -> Type;
+    fn as_any(&self) -> &dyn Any;
+}
+
+pub trait FnValue: fmt::Debug + DynClone + Send + Sync {
+    fn execute(&self, args: Vec<Value>) -> Result<Value>;
+    fn fn_type(&self) -> FnType;
+    fn as_any(&self) -> &dyn Any;
+}
+
+clone_trait_object!(Record);
+clone_trait_object!(List);
+clone_trait_object!(FnValue);
+
+// XXX Is this needed?
+trait Batch {
+    fn schema(&self) -> Vec<Field>;
+    fn row(&self, index: usize) -> &dyn Record;
+    fn column(&self, index: usize) -> &dyn List;
+}
+
+impl Value {
+    fn type_(&self) -> Type {
+        match self {
+            Value::Atom(a) => a.type_(),
+            Value::Record(r) => Type::Record(r.schema()),
+            Value::List(l) => Type::List(Box::new(l.data_type())),
+            Value::Fn(f) => Type::Fn(f.fn_type()),
+        }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        match self {
+            Value::Atom(a) => a.as_any(),
+            Value::Record(r) => r.as_any(),
+            Value::List(l) => l.as_any(),
+            Value::Fn(f) => f.as_any(),
+        }
+    }
+}
+
+impl AtomicValue {
     fn type_(&self) -> Type {
         Type::Atom(match self {
             Self::Null => AtomicType::Null,

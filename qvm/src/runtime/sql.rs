@@ -202,7 +202,7 @@ fn to_dftype(type_: &types::Type) -> DFType {
             None => DFType::Unknown,
         },
         types::Type::List(inner) => match inner.as_ref() {
-            types::Type::Struct(fields) => DFType::Schema(DFSchema {
+            types::Type::Record(fields) => DFType::Schema(DFSchema {
                 fields: fields
                     .iter()
                     .map(|x| {
