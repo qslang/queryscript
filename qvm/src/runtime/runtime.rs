@@ -1,8 +1,11 @@
 use super::sql::SQLParam;
 use crate::runtime::error::*;
 use crate::schema;
+use datafusion::arrow::record_batch::RecordBatch;
+use dyn_clone::{clone_trait_object, DynClone};
 use sqlparser::ast as sqlast;
 use std::collections::HashMap;
+use std::fmt;
 
 #[derive(Clone, Debug)]
 pub enum Value {
@@ -10,16 +13,24 @@ pub enum Value {
     Number(f64),
     String(String),
     Bool(bool),
+    Records(Vec<RecordBatch>),
+    Fn(Box<dyn FnValue>),
 }
+
+pub trait FnValue: fmt::Debug + DynClone + Send + Sync {
+    fn execute(&self, args: Vec<Value>) -> Result<Value>;
+}
+
+clone_trait_object!(FnValue);
 
 pub fn eval_params(
     schema: schema::SchemaRef,
     params: &schema::Params,
-) -> Result<HashMap<Vec<String>, SQLParam>> {
+) -> Result<HashMap<String, SQLParam>> {
     let mut param_values = HashMap::new();
     for (name, param) in params {
         eprintln!("expr: {:?}", &param.expr);
-        let value = eval(schema.clone(), &param.expr)?;
+        let value = eval(schema.clone(), &param)?;
         eprintln!("evaluated value: {:?}", value);
         param_values.insert(
             name.clone(),
@@ -30,14 +41,14 @@ pub fn eval_params(
     Ok(param_values)
 }
 
-pub fn eval(schema: schema::SchemaRef, expr: &schema::Expr) -> Result<Value> {
-    match expr {
+pub fn eval(schema: schema::SchemaRef, expr: &schema::TypedExpr) -> Result<Value> {
+    match &expr.expr {
         schema::Expr::Unknown => {
             return Err(RuntimeError::new("unresolved extern"));
         }
         schema::Expr::Decl(decl) => {
             let ret = match &decl.value {
-                crate::schema::SchemaEntry::Expr(e) => eval(schema.clone(), &e.borrow().expr),
+                crate::schema::SchemaEntry::Expr(e) => eval(schema.clone(), &e.borrow()),
                 _ => {
                     return rt_unimplemented!("evaluating a non-expression");
                 }
@@ -47,13 +58,20 @@ pub fn eval(schema: schema::SchemaRef, expr: &schema::Expr) -> Result<Value> {
         schema::Expr::Fn { .. } => {
             return Err(RuntimeError::unimplemented("functions"));
         }
+        schema::Expr::NativeFn(name) => match name.as_str() {
+            "load_json" => super::sql::load_json(&expr.type_, "".to_string()),
+            _ => return rt_unimplemented!("native function: {}", name),
+        },
+        schema::Expr::FnCall { .. } => {
+            return Err(RuntimeError::unimplemented("functions"));
+        }
         schema::Expr::SQLQuery(schema::SQLQuery { query, params }) => {
-            let sql_params = eval_params(schema.clone(), params)?;
-            super::sql::eval(schema, query, sql_params)?;
+            let sql_params = eval_params(schema.clone(), &params)?;
+            super::sql::eval(schema, &query, sql_params)?;
             Ok(Value::Null)
         }
         schema::Expr::SQLExpr(schema::SQLExpr { expr, params }) => {
-            let sql_params = eval_params(schema.clone(), params)?;
+            let sql_params = eval_params(schema.clone(), &params)?;
             let query = sqlast::Query {
                 with: None,
                 body: Box::new(sqlast::SetExpr::Select(Box::new(sqlast::Select {

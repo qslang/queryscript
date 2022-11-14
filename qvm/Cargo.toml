@@ -6,8 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-sqlparser = { path = "../sqlparser-rs" }
+chrono = { version = "0.4.22", default-features = false }
 datafusion = { path = "../arrow-datafusion/datafusion/core" }
-snafu = "0.7.3"
+dyn-clone = "1.0.9"
 lazy_static = "1.4.0"
+object_store = "0.5.0"
+snafu = "0.7.3"
+sqlparser = { path = "../sqlparser-rs" }
 tokio = "1.0"

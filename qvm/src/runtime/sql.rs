@@ -1,29 +1,33 @@
 // TODO: I've left some unused_imports here because they'll be useful while filling in the
 // SchemaProvider implementation
-#[allow(unused_imports)]
 use datafusion::arrow::{
-    array::{as_primitive_array, Float64Array},
-    datatypes::{DataType, Field, Schema},
+    array::Float64Array,
+    datatypes::{DataType, Field as DFField, Schema as DFSchema},
     record_batch::RecordBatch,
 };
-use datafusion::common::{DataFusionError, Result as DFResult, ScalarValue};
-use datafusion::execution::context::{SessionConfig, SessionState, TaskContext};
-use datafusion::execution::runtime_env::RuntimeEnv;
+use datafusion::common::{DataFusionError, Result as DFResult, ScalarValue, Statistics};
+use datafusion::config::ConfigOptions;
+use datafusion::datasource::file_format::json::JsonFormat;
+use datafusion::datasource::file_format::FileFormat;
 #[allow(unused_imports)]
-use datafusion::logical_expr::{
-    logical_plan::builder::LogicalTableSource, AggregateUDF, LogicalPlan, ScalarUDF, TableSource,
-};
-use datafusion::physical_expr::{
-    execution_props::ExecutionProps,
-    var_provider::{VarProvider, VarType},
-};
+use datafusion::datasource::memory::MemTable;
+use datafusion::datasource::object_store::ObjectStoreUrl;
+#[allow(unused_imports)]
+use datafusion::datasource::{TableProvider, TableType};
+use datafusion::execution::context::{SessionConfig, SessionContext};
+use datafusion::execution::runtime_env::RuntimeEnv;
+use datafusion::logical_expr::{AggregateUDF, LogicalPlan, ScalarUDF, TableSource};
+use datafusion::physical_expr::var_provider::{VarProvider, VarType};
 use datafusion::physical_plan::collect;
+use datafusion::physical_plan::file_format::FileScanConfig;
 #[allow(unused_imports)]
 use datafusion::sql::{
     planner::{ContextProvider, SqlToRel},
     sqlparser::{dialect::GenericDialect, parser::Parser},
     TableReference,
 };
+use object_store::path::Path;
+use object_store::ObjectMeta;
 use sqlparser::ast as sqlast;
 use std::{collections::HashMap, sync::Arc};
 
@@ -31,30 +35,28 @@ use super::error::{fail, rt_unimplemented, Result};
 use crate::runtime::runtime::Value;
 use crate::schema;
 use crate::types;
+use chrono;
 
 pub fn eval(
     _schema: schema::SchemaRef,
     query: &sqlast::Query,
-    params: HashMap<Vec<String>, SQLParam>,
+    params: HashMap<String, SQLParam>,
 ) -> Result<Vec<Value>> {
+    let mut ctx =
+        SessionContext::with_config_rt(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
+
     let schema_provider = Arc::new(SchemaProvider::new(params));
+    register_params(schema_provider.clone(), &mut ctx)?;
+
     let sql_to_rel = SqlToRel::new(schema_provider.as_ref());
 
     let mut ctes = HashMap::new(); // We may eventually want to parse/support these
     let plan = sql_to_rel.query_to_plan(query.clone(), &mut ctes)?;
-
-    let mut session_state =
-        SessionState::with_config_rt(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
-
-    let plan = session_state.optimize(&plan)?;
-
-    let mut execution_props = ExecutionProps::new();
-    execution_props.add_var_provider(VarType::UserDefined, schema_provider.clone());
-    session_state.execution_props = execution_props;
+    let plan = ctx.optimize(&plan)?;
 
     let runtime = tokio::runtime::Builder::new_current_thread().build()?;
     // let physical_planner = DefaultPhysicalPlanner::default();
-    let records = runtime.block_on(async { execute_plan(&session_state, &plan).await })?;
+    let records = runtime.block_on(async { execute_plan(&ctx, &plan).await })?;
 
     let mut ret = Vec::new();
     for batch in records.iter() {
@@ -78,50 +80,163 @@ pub fn eval(
     Ok(ret)
 }
 
-async fn execute_plan(
-    session_state: &SessionState,
-    plan: &LogicalPlan,
-) -> Result<Vec<RecordBatch>> {
-    let pplan = session_state.create_physical_plan(&plan).await?;
-    let task_ctx = Arc::new(TaskContext::from(session_state));
+async fn execute_plan(ctx: &SessionContext, plan: &LogicalPlan) -> Result<Vec<RecordBatch>> {
+    let pplan = ctx.create_physical_plan(&plan).await?;
+    let task_ctx = ctx.task_ctx();
     let results = collect(pplan, task_ctx).await?;
     Ok(results)
 }
 
+pub fn load_json(type_: &types::Type, file: String) -> Result<Value> {
+    let format = JsonFormat::default().with_schema_infer_max_rec(Some(0));
+
+    let schema = Arc::new(match to_dftype(type_) {
+        DFType::Schema(s) => s,
+        _ => return fail!("File type is not a list of records"),
+    });
+
+    let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+    let location = Path::from_filesystem_path(file.as_str())?;
+    let fmeta = std::fs::metadata(file)?;
+    let ometa = ObjectMeta {
+        location,
+        last_modified: fmeta.modified().map(chrono::DateTime::from).unwrap(),
+        size: fmeta.len() as usize,
+    };
+    // let physical_planner = DefaultPhysicalPlanner::default();
+    let records = runtime.block_on(async {
+        let plan = format
+            .create_physical_plan(
+                FileScanConfig {
+                    file_schema: schema,
+                    file_groups: vec![vec![ometa.into()]],
+                    limit: None,
+                    object_store_url: ObjectStoreUrl::local_filesystem(),
+                    projection: None,
+                    statistics: Statistics {
+                        num_rows: None,
+                        total_byte_size: None,
+                        column_statistics: None,
+                        is_exact: true,
+                    },
+                    table_partition_cols: Vec::new(),
+                    config_options: ConfigOptions::new().into_shareable(),
+                },
+                &[],
+            )
+            .await?;
+
+        let ctx =
+            SessionContext::with_config_rt(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
+        let task_ctx = ctx.task_ctx();
+        return DFResult::Ok(collect(plan, task_ctx).await? as Vec<RecordBatch>);
+    })?;
+
+    Ok(Value::Records(records))
+}
+
+#[derive(Clone, Debug)]
+pub enum DFType {
+    DataType(DataType),
+    Schema(DFSchema),
+    Unknown,
+}
+
 #[derive(Debug)]
 pub struct SQLParam {
-    pub name: Vec<String>,
+    pub name: String,
     pub value: Value,
-    pub type_: Option<DataType>,
+    pub type_: DFType,
+}
+
+fn to_dfdatatype(type_: &types::Type) -> Option<DataType> {
+    match type_ {
+        types::Type::Atom(a) => match a {
+            types::AtomicType::Null => Some(DataType::Null),
+            types::AtomicType::Boolean => Some(DataType::Boolean),
+            types::AtomicType::Float64 => Some(DataType::Float64),
+            types::AtomicType::Utf8 => Some(DataType::Utf8),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn to_dftype(type_: &types::Type) -> DFType {
+    match type_ {
+        types::Type::Atom(_) => match to_dfdatatype(type_) {
+            Some(dt) => DFType::DataType(dt),
+            None => DFType::Unknown,
+        },
+        types::Type::List(inner) => match inner.as_ref() {
+            types::Type::Struct(fields) => DFType::Schema(DFSchema {
+                fields: fields
+                    .iter()
+                    .map(|x| {
+                        DFField::new(
+                            x.name.as_str(),
+                            to_dfdatatype(&x.type_).unwrap_or(DataType::Null),
+                            x.nullable,
+                        )
+                    })
+                    .collect(),
+                metadata: HashMap::new(),
+            }),
+            _ => DFType::Unknown,
+        },
+        _ => DFType::Unknown,
+    }
 }
 
 impl SQLParam {
-    pub fn new(name: Vec<String>, value: Value, type_: &types::Type) -> SQLParam {
+    pub fn new(name: String, value: Value, type_: &types::Type) -> SQLParam {
         SQLParam {
             name,
             value,
-            type_: match type_ {
-                types::Type::Atom(a) => match a {
-                    types::AtomicType::Null => Some(DataType::Null),
-                    types::AtomicType::Boolean => Some(DataType::Boolean),
-                    types::AtomicType::Float64 => Some(DataType::Float64),
-                    types::AtomicType::Utf8 => Some(DataType::Utf8),
-                    _ => None,
-                },
-                _ => None,
-            },
+            type_: to_dftype(type_),
         }
+    }
+
+    pub fn register(&self, ctx: &mut SessionContext) -> DFResult<()> {
+        match &self.type_ {
+            DFType::Schema(s) => match &self.value {
+                Value::Records(r) => {
+                    // XXX This copies the whole result Set
+                    //
+                    let table = MemTable::try_new(Arc::new(s.clone()), vec![r.clone()])?;
+                    ctx.register_table(self.name.as_str(), Arc::new(table))?;
+                }
+                _ => {
+                    return Err(DataFusionError::Internal(format!(
+                        "Relations must be represented as record batches"
+                    )));
+                }
+            },
+            _ => {}
+        };
+
+        Ok(())
     }
 }
 
 struct SchemaProvider {
-    params: HashMap<Vec<String>, SQLParam>,
+    params: HashMap<String, SQLParam>,
 }
 
 impl SchemaProvider {
-    fn new(params: HashMap<Vec<String>, SQLParam>) -> Self {
+    fn new(params: HashMap<String, SQLParam>) -> Self {
         SchemaProvider { params }
     }
+}
+
+fn register_params(schema: Arc<SchemaProvider>, ctx: &mut SessionContext) -> Result<()> {
+    ctx.register_variable(VarType::UserDefined, schema.clone());
+
+    for (_, param) in &schema.params {
+        param.register(ctx)?;
+    }
+
+    Ok(())
 }
 
 impl ContextProvider for SchemaProvider {
@@ -141,8 +256,15 @@ impl ContextProvider for SchemaProvider {
     }
 
     fn get_variable_type(&self, names: &[String]) -> Option<DataType> {
-        if let Some(p) = self.params.get(&names.to_vec()) {
-            p.type_.clone()
+        if names.len() != 1 {
+            return None;
+        }
+
+        if let Some(p) = self.params.get(&names[0]) {
+            match &p.type_ {
+                DFType::DataType(t) => Some(t.clone()),
+                _ => None,
+            }
         } else {
             None
         }
@@ -151,13 +273,30 @@ impl ContextProvider for SchemaProvider {
 
 impl VarProvider for SchemaProvider {
     fn get_value(&self, var_names: Vec<String>) -> DFResult<ScalarValue> {
-        let param = self.params.get(&var_names.to_vec()).unwrap();
+        if var_names.len() != 1 {
+            return Err(DataFusionError::Internal(format!(
+                "Invalid mutli-part variable name: {:?}",
+                var_names
+            )));
+        }
+
+        let param = self.params.get(&var_names[0]).unwrap();
 
         let value = match &param.value {
             Value::Null => ScalarValue::Null,
             Value::Number(n) => ScalarValue::Float64(Some(*n)),
             Value::String(s) => ScalarValue::Utf8(Some(s.clone())),
             Value::Bool(b) => ScalarValue::Boolean(Some(*b)),
+            Value::Fn(_) => {
+                return Err(DataFusionError::Internal(format!(
+                    "Cannot use function value as a scalar variable"
+                )))
+            }
+            Value::Records(_) => {
+                return Err(DataFusionError::Internal(format!(
+                    "Cannot use record set as a scalar variable"
+                )))
+            }
         };
 
         Ok(value)

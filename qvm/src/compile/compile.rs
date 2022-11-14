@@ -188,7 +188,7 @@ pub fn intern_placeholder(
             Ok(TypedSQLExpr {
                 type_: expr.type_.clone(),
                 expr: SQLExpr {
-                    params: Params::from([(vec![placeholder_name.clone()], expr)]),
+                    params: Params::from([(placeholder_name.clone(), expr)]),
                     expr: sqlast::Expr::Identifier(sqlast::Ident {
                         value: placeholder_name.clone(),
                         quote_style: None,
@@ -207,7 +207,7 @@ pub fn compile_sqlarg(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Resul
     )?)
 }
 
-pub fn combine_sqlparams(all: Vec<&TypedSQLExpr>) -> Result<BTreeMap<ast::Path, TypedExpr>> {
+pub fn combine_sqlparams(all: Vec<&TypedSQLExpr>) -> Result<BTreeMap<ast::Ident, TypedExpr>> {
     Ok(all
         .iter()
         .map(|t| t.expr.params.clone())
@@ -315,23 +315,16 @@ pub fn compile_select(schema: Rc<RefCell<Schema>>, select: &sqlast::Select) -> R
                         ));
                     }
 
-                    let placeholder_name = vec![
-                        QVM_NAMESPACE.to_string(),
-                        new_placeholder_name(schema.clone(), "rel"),
-                    ];
+                    let placeholder_name = QVM_NAMESPACE.to_string()
+                        + new_placeholder_name(schema.clone(), "rel").as_str();
 
                     let mut ret = select.clone();
                     ret.from = vec![sqlast::TableWithJoins {
                         relation: sqlast::TableFactor::Table {
-                            name: sqlast::ObjectName(
-                                placeholder_name
-                                    .iter()
-                                    .map(|n| sqlast::Ident {
-                                        value: n.clone(),
-                                        quote_style: None,
-                                    })
-                                    .collect(),
-                            ),
+                            name: sqlast::ObjectName(vec![sqlast::Ident {
+                                value: placeholder_name.clone(),
+                                quote_style: None,
+                            }]),
                             alias: alias.clone(),
                             args: args.clone(),
                             with_hints: with_hints.clone(),
@@ -568,10 +561,9 @@ pub fn compile_sqlexpr(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Resu
                 })
                 .collect::<Vec<_>>();
             let mut params = combine_sqlparams(compiled_args_no_name.iter().collect())?;
-            let placeholder_name = vec![
-                QVM_NAMESPACE.to_string(),
-                new_placeholder_name(schema.clone(), "func"),
-            ];
+            let placeholder_name =
+                QVM_NAMESPACE.to_string() + new_placeholder_name(schema.clone(), "func").as_str();
+
             params.insert(
                 placeholder_name.clone(),
                 TypedExpr {
@@ -587,15 +579,10 @@ pub fn compile_sqlexpr(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Resu
                 expr: Expr::SQLExpr(SQLExpr {
                     params,
                     expr: sqlast::Expr::Function(sqlast::Function {
-                        name: sqlast::ObjectName(
-                            placeholder_name
-                                .iter()
-                                .map(|n| sqlast::Ident {
-                                    value: n.clone(),
-                                    quote_style: None,
-                                })
-                                .collect(),
-                        ),
+                        name: sqlast::ObjectName(vec![sqlast::Ident {
+                            value: placeholder_name.clone(),
+                            quote_style: None,
+                        }]),
                         args: compiled_args
                             .iter()
                             .map(|e| sqlast::FunctionArg::Named {

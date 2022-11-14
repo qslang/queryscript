@@ -38,7 +38,7 @@ impl SchemaInstance {
 
 pub type Value = runtime::Value;
 
-pub type Params = BTreeMap<ast::Path, TypedExpr>;
+pub type Params = BTreeMap<ast::Ident, TypedExpr>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SQLExpr {
@@ -67,11 +67,19 @@ impl fmt::Debug for FnExpr {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FnCallExpr {
+    pub func: Box<Expr>,
+    pub args: Vec<Expr>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Expr {
     SQLQuery(SQLQuery),
     SQLExpr(SQLExpr),
     Decl(Decl),
     Fn(FnExpr),
+    FnCall(FnCallExpr),
+    NativeFn(String),
     Unknown,
 }
 
@@ -200,6 +208,25 @@ impl Schema {
                         extern_: false,
                         name: "string".to_string(),
                         value: SchemaEntry::Type(mkref(Type::Atom(AtomicType::Null))),
+                    },
+                ),
+                (
+                    "load_json".to_string(),
+                    Decl {
+                        public: true,
+                        extern_: false,
+                        name: "load_json".to_string(),
+                        value: SchemaEntry::Expr(mkref(TypedExpr {
+                            type_: Type::Fn(FnType {
+                                args: vec![Field {
+                                    name: "file".to_string(),
+                                    type_: Type::Atom(AtomicType::Utf8),
+                                    nullable: false,
+                                }],
+                                ret: Box::new(Type::List(Box::new(Type::Unknown))),
+                            }),
+                            expr: Expr::NativeFn("load_json".to_string()),
+                        })),
                     },
                 ),
             ]),

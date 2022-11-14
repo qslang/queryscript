@@ -1,3 +1,4 @@
+use object_store;
 use snafu::{Backtrace, Snafu};
 use std::num::ParseFloatError;
 pub type Result<T> = std::result::Result<T, RuntimeError>;
@@ -32,6 +33,12 @@ pub enum RuntimeError {
     #[snafu(context(false))]
     ParseFloatError {
         source: ParseFloatError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(context(false))]
+    PathError {
+        source: object_store::path::Error,
         backtrace: Option<Backtrace>,
     },
 }
