@@ -5,3 +5,4 @@ pub mod value;
 
 pub use error::TypesystemError;
 pub use types::*;
+pub use value::*;

@@ -2,27 +2,12 @@ use super::sql::SQLParam;
 use crate::runtime::error::*;
 use crate::schema;
 use crate::types;
+use crate::types::Value;
 use datafusion::arrow::record_batch::RecordBatch;
 use dyn_clone::{clone_trait_object, DynClone};
 use sqlparser::ast as sqlast;
 use std::collections::HashMap;
 use std::fmt;
-
-#[derive(Clone, Debug)]
-pub enum Value {
-    Null,
-    Number(f64),
-    String(String),
-    Bool(bool),
-    Records(Vec<RecordBatch>),
-    Fn(Box<dyn FnValue>),
-}
-
-pub trait FnValue: fmt::Debug + DynClone + Send + Sync {
-    fn execute(&self, args: Vec<Value>) -> Result<Value>;
-}
-
-clone_trait_object!(FnValue);
 
 pub fn eval_params(
     schema: schema::SchemaRef,

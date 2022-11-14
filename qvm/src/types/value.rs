@@ -6,14 +6,8 @@ use std::sync::Arc;
 use super::error::Result;
 use super::types::*;
 
+#[derive(Debug, Clone)]
 pub enum Value {
-    Atom(AtomicValue),
-    Record(Arc<dyn Record>),
-    List(Arc<dyn List>),
-    Fn(Arc<dyn FnValue>),
-}
-
-pub enum AtomicValue {
     Null,
     Boolean(bool),
     Int8(i8),
@@ -27,6 +21,10 @@ pub enum AtomicValue {
     Float16(f32),
     Float32(f32),
     Float64(f64),
+    Record(Arc<dyn Record>),
+    RecordBatch(Arc<dyn RecordBatch>),
+    List(Arc<dyn List>),
+    Fn(Arc<dyn FnValue>),
 }
 
 pub trait Record: fmt::Debug + DynClone + Send + Sync {
@@ -45,54 +43,39 @@ pub trait FnValue: fmt::Debug + DynClone + Send + Sync {
     fn as_any(&self) -> &dyn Any;
 }
 
-clone_trait_object!(Record);
-clone_trait_object!(List);
-clone_trait_object!(FnValue);
-
-// XXX Is this needed?
-trait Batch {
+trait RecordBatch: fmt::Debug + DynClone + Send + Sync {
     fn schema(&self) -> Vec<Field>;
+    fn as_any(&self) -> &dyn Any;
     fn row(&self, index: usize) -> &dyn Record;
     fn column(&self, index: usize) -> &dyn List;
 }
 
+clone_trait_object!(Record);
+clone_trait_object!(RecordBatch);
+clone_trait_object!(List);
+clone_trait_object!(FnValue);
+
 impl Value {
     fn type_(&self) -> Type {
         match self {
-            Value::Atom(a) => a.type_(),
-            Value::Record(r) => Type::Record(r.schema()),
-            Value::List(l) => Type::List(Box::new(l.data_type())),
-            Value::Fn(f) => Type::Fn(f.fn_type()),
+            Self::Null => Type::Atom(AtomicType::Null),
+            Self::Boolean(_) => Type::Atom(AtomicType::Boolean),
+            Self::Int8(_) => Type::Atom(AtomicType::Int8),
+            Self::Int16(_) => Type::Atom(AtomicType::Int16),
+            Self::Int32(_) => Type::Atom(AtomicType::Int32),
+            Self::Int64(_) => Type::Atom(AtomicType::Int64),
+            Self::UInt8(_) => Type::Atom(AtomicType::UInt8),
+            Self::UInt16(_) => Type::Atom(AtomicType::UInt16),
+            Self::UInt32(_) => Type::Atom(AtomicType::UInt32),
+            Self::UInt64(_) => Type::Atom(AtomicType::UInt64),
+            Self::Float16(_) => Type::Atom(AtomicType::Float16),
+            Self::Float32(_) => Type::Atom(AtomicType::Float32),
+            Self::Float64(_) => Type::Atom(AtomicType::Float64),
+            Self::Record(r) => Type::Record(r.schema()),
+            Self::RecordBatch(r) => Type::List(Box::new(Type::Record(r.schema()))),
+            Self::List(l) => Type::List(Box::new(l.data_type())),
+            Self::Fn(f) => Type::Fn(f.fn_type()),
         }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        match self {
-            Value::Atom(a) => a.as_any(),
-            Value::Record(r) => r.as_any(),
-            Value::List(l) => l.as_any(),
-            Value::Fn(f) => f.as_any(),
-        }
-    }
-}
-
-impl AtomicValue {
-    fn type_(&self) -> Type {
-        Type::Atom(match self {
-            Self::Null => AtomicType::Null,
-            Self::Boolean(_) => AtomicType::Boolean,
-            Self::Int8(_) => AtomicType::Int8,
-            Self::Int16(_) => AtomicType::Int16,
-            Self::Int32(_) => AtomicType::Int32,
-            Self::Int64(_) => AtomicType::Int64,
-            Self::UInt8(_) => AtomicType::UInt8,
-            Self::UInt16(_) => AtomicType::UInt16,
-            Self::UInt32(_) => AtomicType::UInt32,
-            Self::UInt64(_) => AtomicType::UInt64,
-            Self::Float16(_) => AtomicType::Float16,
-            Self::Float32(_) => AtomicType::Float32,
-            Self::Float64(_) => AtomicType::Float64,
-        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -110,6 +93,10 @@ impl AtomicValue {
             Self::Float16(x) => x as &dyn Any,
             Self::Float32(x) => x as &dyn Any,
             Self::Float64(x) => x as &dyn Any,
+            Self::Record(r) => r.as_any(),
+            Self::RecordBatch(r) => r.as_any(),
+            Self::List(l) => l.as_any(),
+            Self::Fn(f) => f.as_any(),
         }
     }
 }

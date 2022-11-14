@@ -32,9 +32,9 @@ use sqlparser::ast as sqlast;
 use std::{collections::HashMap, sync::Arc};
 
 use super::error::{fail, rt_unimplemented, Result};
-use crate::runtime::runtime::{FnValue, Value};
 use crate::schema;
 use crate::types;
+use crate::types::{FnValue, Value};
 use chrono;
 
 pub fn eval(
@@ -69,7 +69,7 @@ pub fn eval(
             DataType::Float64 => {
                 let arr: &Float64Array = col.as_any().downcast_ref().expect("Arrow cast");
                 ret.extend(arr.iter().map(|i| match i {
-                    Some(i) => Value::Number(i as f64),
+                    Some(i) => Value::Float64(i as f64),
                     None => Value::Null,
                 }));
             }
