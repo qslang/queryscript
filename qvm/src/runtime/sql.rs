@@ -30,6 +30,7 @@ use std::{collections::HashMap, sync::Arc};
 use super::error::{fail, rt_unimplemented, Result};
 use crate::runtime::runtime::Value;
 use crate::schema;
+use crate::types;
 
 pub fn eval(
     _schema: schema::SchemaRef,
@@ -95,16 +96,17 @@ pub struct SQLParam {
 }
 
 impl SQLParam {
-    pub fn new(name: Vec<String>, value: Value, type_: &schema::Type) -> SQLParam {
+    pub fn new(name: Vec<String>, value: Value, type_: &types::Type) -> SQLParam {
         SQLParam {
             name,
             value,
             type_: match type_ {
-                schema::Type::Atom(a) => match a {
-                    schema::AtomicType::Null => Some(DataType::Null),
-                    schema::AtomicType::Bool => Some(DataType::Boolean),
-                    schema::AtomicType::Number => Some(DataType::Float64),
-                    schema::AtomicType::String => Some(DataType::Utf8),
+                types::Type::Atom(a) => match a {
+                    types::AtomicType::Null => Some(DataType::Null),
+                    types::AtomicType::Boolean => Some(DataType::Boolean),
+                    types::AtomicType::Float64 => Some(DataType::Float64),
+                    types::AtomicType::Utf8 => Some(DataType::Utf8),
+                    _ => None,
                 },
                 _ => None,
             },

@@ -1,5 +1,6 @@
 use crate::ast;
 use crate::runtime;
+use crate::types::{AtomicType, Field, FnType, Type};
 use sqlparser::ast as sqlast;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -33,34 +34,6 @@ impl SchemaInstance {
             id: Some(id),
         }
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum AtomicType {
-    Null,
-    Bool,
-    Number,
-    String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FnType {
-    pub args: Vec<TypedName>,
-    pub ret: Box<Type>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Type {
-    Unknown,
-    Atom(AtomicType),
-    Struct(BTreeMap<String, Type>),
-    List(Box<Type>),
-    Exclude {
-        inner: Box<Type>,
-        excluded: Vec<Ident>,
-    },
-    Decl(DeclRef),
-    Fn(FnType),
 }
 
 pub type Value = runtime::Value;
@@ -97,7 +70,7 @@ impl fmt::Debug for FnExpr {
 pub enum Expr {
     SQLQuery(SQLQuery),
     SQLExpr(SQLExpr),
-    Decl(DeclRef),
+    Decl(Decl),
     Fn(FnExpr),
     Unknown,
 }
@@ -124,8 +97,12 @@ pub struct TypedExpr {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SchemaEntry {
     Schema(ast::Path),
-    Type(Type),
-    Expr(TypedExpr),
+    Type(Rc<RefCell<Type>>),
+    Expr(Rc<RefCell<TypedExpr>>),
+}
+
+pub fn mkref<T>(t: T) -> Rc<RefCell<T>> {
+    Rc::new(RefCell::new(t))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -144,7 +121,6 @@ pub struct TypedNameAndExpr {
 }
 
 pub type SchemaRef = Rc<RefCell<Schema>>;
-pub type DeclRef = Rc<RefCell<Decl>>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TypedName {
@@ -166,7 +142,7 @@ pub struct Schema {
     pub parent_scope: Option<Rc<RefCell<Schema>>>,
     pub next_placeholder: usize,
     pub externs: BTreeMap<String, Type>,
-    pub decls: BTreeMap<String, Rc<RefCell<Decl>>>,
+    pub decls: BTreeMap<String, Decl>,
     pub imports: BTreeMap<ast::Path, Rc<RefCell<ImportedSchema>>>,
 }
 
@@ -192,39 +168,39 @@ impl Schema {
             decls: BTreeMap::from([
                 (
                     "number".to_string(),
-                    Rc::new(RefCell::new(Decl {
+                    Decl {
                         public: true,
                         extern_: false,
                         name: "number".to_string(),
-                        value: SchemaEntry::Type(Type::Atom(AtomicType::Number)),
-                    })),
+                        value: SchemaEntry::Type(mkref(Type::Atom(AtomicType::Float64))),
+                    },
                 ),
                 (
                     "string".to_string(),
-                    Rc::new(RefCell::new(Decl {
+                    Decl {
                         public: true,
                         extern_: false,
                         name: "string".to_string(),
-                        value: SchemaEntry::Type(Type::Atom(AtomicType::String)),
-                    })),
+                        value: SchemaEntry::Type(mkref(Type::Atom(AtomicType::Utf8))),
+                    },
                 ),
                 (
                     "bool".to_string(),
-                    Rc::new(RefCell::new(Decl {
+                    Decl {
                         public: true,
                         extern_: false,
                         name: "string".to_string(),
-                        value: SchemaEntry::Type(Type::Atom(AtomicType::Bool)),
-                    })),
+                        value: SchemaEntry::Type(mkref(Type::Atom(AtomicType::Boolean))),
+                    },
                 ),
                 (
                     "null".to_string(),
-                    Rc::new(RefCell::new(Decl {
+                    Decl {
                         public: true,
                         extern_: false,
                         name: "string".to_string(),
-                        value: SchemaEntry::Type(Type::Atom(AtomicType::Null)),
-                    })),
+                        value: SchemaEntry::Type(mkref(Type::Atom(AtomicType::Null))),
+                    },
                 ),
             ]),
         }))

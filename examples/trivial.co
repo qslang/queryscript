@@ -1,1 +1,2 @@
 export let foo = 5;
+export let bar = 5.1;

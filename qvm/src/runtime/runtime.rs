@@ -36,8 +36,8 @@ pub fn eval(schema: schema::SchemaRef, expr: &schema::Expr) -> Result<Value> {
             return Err(RuntimeError::new("unresolved extern"));
         }
         schema::Expr::Decl(decl) => {
-            let ret = match decl.borrow().value {
-                crate::schema::SchemaEntry::Expr(ref e) => eval(schema.clone(), &e.expr),
+            let ret = match &decl.value {
+                crate::schema::SchemaEntry::Expr(e) => eval(schema.clone(), &e.borrow().expr),
                 _ => {
                     return rt_unimplemented!("evaluating a non-expression");
                 }

@@ -1,7 +1,8 @@
 use crate::ast;
 use crate::parser::error::ParserError;
 use crate::runtime::error::RuntimeError;
-use crate::schema::{Decl, Type};
+use crate::schema::Decl;
+use crate::types::Type;
 use snafu::{Backtrace, Snafu};
 use std::io;
 pub type Result<T> = std::result::Result<T, CompileError>;

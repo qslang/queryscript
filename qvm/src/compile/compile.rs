@@ -2,9 +2,10 @@ use crate::ast;
 use crate::compile::error::*;
 use crate::parser::parse_schema;
 use crate::schema::*;
+use crate::types::{AtomicType, Field, FnType, Type};
 use sqlparser::ast as sqlast;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path as FilePath;
 use std::rc::Rc;
@@ -55,10 +56,7 @@ pub fn lookup_schema(
     return Ok(imported);
 }
 
-pub fn lookup_path(
-    mut schema: Rc<RefCell<Schema>>,
-    path: &ast::Path,
-) -> Result<(Rc<RefCell<Decl>>, ast::Path)> {
+pub fn lookup_path(mut schema: Rc<RefCell<Schema>>, path: &ast::Path) -> Result<(Decl, ast::Path)> {
     if path.len() == 0 {
         return Err(CompileError::no_such_entry(path.clone()));
     }
@@ -66,19 +64,15 @@ pub fn lookup_path(
     for (i, ident) in path.iter().enumerate() {
         let new = match schema.borrow().decls.get(ident) {
             Some(decl) => {
-                if i > 0 && !decl.borrow().public {
-                    return Err(CompileError::wrong_kind(
-                        path.clone(),
-                        "public",
-                        &decl.borrow().clone(),
-                    ));
+                if i > 0 && !decl.public {
+                    return Err(CompileError::wrong_kind(path.clone(), "public", decl));
                 }
 
                 if i == path.len() - 1 {
                     return Ok((decl.clone(), vec![]));
                 }
 
-                match &decl.borrow().value {
+                match &decl.value {
                     SchemaEntry::Schema(imported) => lookup_schema(schema.clone(), &imported)?
                         .borrow()
                         .schema
@@ -125,31 +119,31 @@ pub fn resolve_type(schema: Rc<RefCell<Schema>>, ast: &ast::Type) -> Result<Type
                     }
                 };
 
-                decl.clone()
+                decl
             };
 
-            let t = match decl.borrow().value.clone() {
-                SchemaEntry::Type(t) => t.clone(),
-                _ => {
-                    return Err(CompileError::wrong_kind(
-                        path.clone(),
-                        "type",
-                        &decl.borrow().clone(),
-                    ))
-                }
+            let t = match decl.value {
+                SchemaEntry::Type(t) => t.borrow().clone(),
+                _ => return Err(CompileError::wrong_kind(path.clone(), "type", &decl)),
             };
 
             Ok(t)
         }
         ast::Type::Struct(entries) => {
-            let mut fields = BTreeMap::new();
+            let mut fields = Vec::new();
+            let mut seen = BTreeSet::new();
             for e in entries {
                 match e {
                     ast::StructEntry::NameAndType(nt) => {
-                        if fields.contains_key(&nt.name) {
+                        if seen.contains(&nt.name) {
                             return Err(CompileError::duplicate_entry(vec![nt.name.clone()]));
                         }
-                        fields.insert(nt.name.clone(), resolve_type(schema.clone(), &nt.def)?);
+                        seen.insert(nt.name.clone());
+                        fields.push(Field {
+                            name: nt.name.clone(),
+                            type_: resolve_type(schema.clone(), &nt.def)?,
+                            nullable: true, /* TODO: implement non-null types */
+                        });
                     }
                     ast::StructEntry::Include { .. } => {
                         return Err(CompileError::unimplemented("Struct inclusions"));
@@ -634,23 +628,27 @@ pub fn compile_sqlexpr(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Resu
     }
 }
 
+fn find_field<'a>(fields: &'a Vec<Field>, name: &str) -> Option<&'a Field> {
+    for f in fields.iter() {
+        if f.name == name {
+            return Some(f);
+        }
+    }
+    None
+}
+
 pub fn compile_reference(
     schema: Rc<RefCell<Schema>>,
     sqlpath: &Vec<sqlast::Ident>,
 ) -> Result<TypedExpr> {
     let path: Vec<_> = sqlpath.iter().map(|e| e.value.clone()).collect();
     let (decl, remainder) = lookup_path(schema.clone(), &path)?;
-    let type_ = match &decl.borrow().value {
-        SchemaEntry::Expr(v) => v.clone(),
-        _ => {
-            return Err(CompileError::wrong_kind(
-                path.clone(),
-                "value",
-                &decl.borrow().clone(),
-            ))
-        }
+    let type_ = match &decl.value {
+        SchemaEntry::Expr(v) => v.as_ref().borrow(),
+        _ => return Err(CompileError::wrong_kind(path.clone(), "value", &decl)),
     }
-    .type_;
+    .type_
+    .clone();
 
     let top_level_ref = TypedExpr {
         type_: type_.clone(),
@@ -662,18 +660,18 @@ pub fn compile_reference(
         let name = &remainder[i];
         match current {
             Type::Struct(fields) => {
-                if let Some(field) = fields.get(name) {
-                    current = field;
+                if let Some(field) = find_field(fields, name) {
+                    current = &field.type_;
                 } else {
                     return Err(CompileError::wrong_type(
-                        &Type::Struct(BTreeMap::from([(name.clone(), Type::Unknown)])),
+                        &Type::Struct(vec![Field::new_nullable(name.clone(), Type::Unknown)]),
                         current,
                     ));
                 }
             }
             _ => {
                 return Err(CompileError::wrong_type(
-                    &Type::Struct(BTreeMap::from([(name.clone(), Type::Unknown)])),
+                    &Type::Struct(vec![Field::new_nullable(name.clone(), Type::Unknown)]),
                     current,
                 ))
             }
@@ -730,14 +728,14 @@ pub fn unify_types(lhs: &Type, rhs: &Type) -> Result<Type> {
     return Ok(lhs.clone());
 }
 
-pub fn rebind_decl(_schema: SchemaInstance, decl: Rc<RefCell<Decl>>) -> Result<SchemaEntry> {
-    match &decl.borrow().value {
+pub fn rebind_decl(_schema: SchemaInstance, decl: &Decl) -> Result<SchemaEntry> {
+    match &decl.value {
         SchemaEntry::Schema(s) => Ok(SchemaEntry::Schema(s.clone())),
         SchemaEntry::Type(t) => Ok(SchemaEntry::Type(t.clone())),
-        SchemaEntry::Expr(e) => Ok(SchemaEntry::Expr(TypedExpr {
-            type_: e.type_.clone(),
+        SchemaEntry::Expr(e) => Ok(SchemaEntry::Expr(mkref(TypedExpr {
+            type_: e.borrow().type_.clone(),
             expr: Expr::Decl(decl.clone()),
-        })),
+        }))),
     }
 }
 
@@ -862,7 +860,7 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                             .borrow()
                             .decls
                             .iter()
-                            .filter(|(_, v)| v.borrow().public)
+                            .filter(|(_, v)| v.public)
                         {
                             let imported_schema = SchemaInstance {
                                 schema: imported.borrow().schema.clone(),
@@ -871,7 +869,7 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                             imports.push((
                                 k.clone(),
                                 false, /* extern_ */
-                                rebind_decl(imported_schema, v.clone())?,
+                                rebind_decl(imported_schema, &v)?,
                             ));
                         }
                     }
@@ -897,7 +895,7 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                             imports.push((
                                 item[0].clone(),
                                 false, /* extern_ */
-                                rebind_decl(imported_schema, decl.clone())?,
+                                rebind_decl(imported_schema, &decl)?,
                             ));
                         }
                     }
@@ -908,7 +906,7 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
             ast::StmtBody::TypeDef(nt) => vec![(
                 nt.name.clone(),
                 false, /* extern_ */
-                SchemaEntry::Type(resolve_type(schema.clone(), &nt.def)?),
+                SchemaEntry::Type(mkref(resolve_type(schema.clone(), &nt.def)?)),
             )],
             ast::StmtBody::FnDef {
                 name,
@@ -932,24 +930,21 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                     let type_ = resolve_type(inner_schema.clone(), &arg.type_)?;
                     inner_schema.borrow_mut().decls.insert(
                         arg.name.clone(),
-                        Rc::new(RefCell::new(Decl {
+                        Decl {
                             public: true,
                             extern_: true,
                             name: arg.name.clone(),
-                            value: SchemaEntry::Expr(TypedExpr {
+                            value: SchemaEntry::Expr(mkref(TypedExpr {
                                 type_: type_.clone(),
                                 expr: Expr::Unknown,
-                            }),
-                        })),
+                            })),
+                        },
                     );
                     inner_schema
                         .borrow_mut()
                         .externs
                         .insert(arg.name.clone(), type_.clone());
-                    compiled_args.push(TypedName {
-                        name: arg.name.clone(),
-                        type_: type_.clone(),
-                    });
+                    compiled_args.push(Field::new_nullable(arg.name.clone(), type_.clone()));
                 }
 
                 let compiled = compile_expr(inner_schema.clone(), body)?;
@@ -962,7 +957,7 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                 vec![(
                     name.clone(),
                     false, /* extern_ */
-                    SchemaEntry::Expr(TypedExpr {
+                    SchemaEntry::Expr(mkref(TypedExpr {
                         type_: Type::Fn(FnType {
                             args: compiled_args,
                             ret: Box::new(type_.clone()),
@@ -971,7 +966,7 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                             inner_schema: inner_schema.clone(),
                             body: Box::new(compiled.expr),
                         }),
-                    }),
+                    })),
                 )]
             }
             ast::StmtBody::Let { name, type_, body } => {
@@ -985,19 +980,19 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                 vec![(
                     name.clone(),
                     false, /* extern_ */
-                    SchemaEntry::Expr(TypedExpr {
+                    SchemaEntry::Expr(mkref(TypedExpr {
                         type_,
                         expr: compiled.expr,
-                    }),
+                    })),
                 )]
             }
             ast::StmtBody::Extern { name, type_ } => vec![(
                 name.clone(),
                 true, /* extern_ */
-                SchemaEntry::Expr(TypedExpr {
+                SchemaEntry::Expr(mkref(TypedExpr {
                     type_: resolve_type(schema.clone(), type_)?,
                     expr: Expr::Unknown,
-                }),
+                })),
             )],
         };
 
@@ -1008,12 +1003,12 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
 
             schema.borrow_mut().decls.insert(
                 name.clone(),
-                Rc::new(RefCell::new(Decl {
+                Decl {
                     public: stmt.export,
                     extern_: *extern_,
                     name: name.clone(),
                     value: value.clone(),
-                })),
+                },
             );
 
             if *extern_ {
@@ -1022,7 +1017,7 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                         schema
                             .borrow_mut()
                             .externs
-                            .insert(name.clone(), e.type_.clone());
+                            .insert(name.clone(), e.borrow().type_.clone());
                     }
                     _ => return Err(CompileError::unimplemented("type externs")),
                 }

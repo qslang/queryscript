@@ -10,7 +10,7 @@ pub type TypeRef = Rc<RefCell<Type>>;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Type {
     Unknown,
-    Atomic(AtomicType),
+    Atom(AtomicType),
     Struct(Vec<Field>),
     List(Box<Type>),
     Exclude {
@@ -31,12 +31,22 @@ pub struct FnType {
 // to take a 100% dependency on. We expect to extend these types over time to include more
 // QVM specific logic.
 
-// From arrow-schema/src/field.rs (minus some metadata fields)
+// From arrow-schema/src/field.rs
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Field {
-    name: String,
-    data_type: Type,
-    nullable: bool,
+    pub name: String,
+    pub type_: Type,
+    pub nullable: bool,
+}
+
+impl Field {
+    pub fn new_nullable(name: String, type_: Type) -> Field {
+        Field {
+            name,
+            type_,
+            nullable: true,
+        }
+    }
 }
 
 // From arrow-schema/src/datatype.rs
