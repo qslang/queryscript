@@ -490,8 +490,8 @@ pub fn compile_sqlexpr(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Resu
                 ));
             }
 
-            let function = compile_reference(schema.clone(), &name.0)?;
-            let fn_type = match function.type_ {
+            let func = compile_reference(schema.clone(), &name.0)?;
+            let fn_type = match func.type_ {
                 Type::Fn(f) => f,
                 _ => {
                     return Err(CompileError::wrong_type(
@@ -499,12 +499,11 @@ pub fn compile_sqlexpr(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Resu
                             args: Vec::new(),
                             ret: Box::new(Type::Unknown),
                         }),
-                        &function.type_,
+                        &func.type_,
                     ))
                 }
             };
-            let mut compiled_args = Vec::new();
-            let mut compiled_args_by_name: BTreeMap<String, usize> = BTreeMap::new();
+            let mut compiled_args: BTreeMap<String, TypedNameAndSQLExpr> = BTreeMap::new();
             let mut pos: usize = 0;
             for arg in args {
                 let (name, expr) = match arg {
@@ -530,60 +529,73 @@ pub fn compile_sqlexpr(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Resu
                     }
                 };
 
+                if compiled_args.get(&name).is_some() {
+                    return Err(CompileError::duplicate_entry(vec![name.clone()]));
+                }
+
                 let compiled_arg = compile_sqlarg(schema.clone(), &expr)?;
-                compiled_args_by_name.insert(name.clone(), compiled_args.len());
-                compiled_args.push(TypedNameAndSQLExpr {
-                    name: name.clone(),
-                    type_: compiled_arg.type_.clone(),
-                    expr: compiled_arg.expr.clone(),
-                });
+                compiled_args.insert(
+                    name.clone(),
+                    TypedNameAndSQLExpr {
+                        name: name.clone(),
+                        type_: compiled_arg.type_.clone(),
+                        expr: compiled_arg.expr.clone(),
+                    },
+                );
             }
 
+            let mut arg_sqlexprs = Vec::new();
             for arg in fn_type.args {
-                if let Some(compiled_arg_idx) = compiled_args_by_name.get(&arg.name) {
-                    let compiled_arg = &compiled_args[*compiled_arg_idx];
+                if let Some(compiled_arg) = compiled_args.get(&arg.name) {
                     unify_types(&arg.type_, &compiled_arg.type_)?;
-                    compiled_args_by_name.remove(&arg.name);
+                    arg_sqlexprs.push(compiled_arg);
                 } else {
                     return Err(CompileError::no_such_entry(vec![arg.name]));
                 }
             }
 
-            for (name, _) in compiled_args_by_name {
-                return Err(CompileError::no_such_entry(vec![name.clone()]));
-            }
-
-            let compiled_args_no_name = compiled_args
-                .iter()
-                .map(|e| TypedSQLExpr {
-                    type_: e.type_.clone(),
-                    expr: e.expr.clone(),
-                })
-                .collect::<Vec<_>>();
-            let mut params = combine_sqlparams(compiled_args_no_name.iter().collect())?;
-            let placeholder_name =
-                QVM_NAMESPACE.to_string() + new_placeholder_name(schema.clone(), "func").as_str();
-
-            params.insert(
-                placeholder_name.clone(),
-                TypedExpr {
-                    expr: function.expr,
-                    type_: *fn_type.ret.clone(),
-                },
-            );
-
-            // XXX There are cases here where we could inline eagerly
+            // TODO: Once we start binding SQL queries, we need to detect whether the arguments
+            // contain any references to values within the SQL query and avoid lifting the function
+            // expression if they do.
             //
-            Ok(TypedExpr {
-                type_: fn_type.ret.as_ref().clone(),
-                expr: Expr::SQLExpr(SQLExpr {
+            let expr = if true {
+                let arg_exprs: Vec<_> = arg_sqlexprs
+                    .iter()
+                    .map(|e| Expr::SQLExpr(e.expr.clone()))
+                    .collect();
+                Expr::FnCall(FnCallExpr {
+                    func: Box::new(func.expr),
+                    args: arg_exprs,
+                })
+            } else {
+                let args_nonames = arg_sqlexprs
+                    .iter()
+                    .map(|e| TypedSQLExpr {
+                        type_: e.type_.clone(),
+                        expr: e.expr.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                let mut params = combine_sqlparams(args_nonames.iter().collect())?;
+
+                let placeholder_name = QVM_NAMESPACE.to_string()
+                    + new_placeholder_name(schema.clone(), "func").as_str();
+
+                params.insert(
+                    placeholder_name.clone(),
+                    TypedExpr {
+                        expr: func.expr,
+                        type_: *fn_type.ret.clone(),
+                    },
+                );
+
+                Expr::SQLExpr(SQLExpr {
                     params,
                     expr: sqlast::Expr::Function(sqlast::Function {
                         name: sqlast::ObjectName(vec![sqlast::Ident {
                             value: placeholder_name.clone(),
                             quote_style: None,
                         }]),
-                        args: compiled_args
+                        args: arg_sqlexprs
                             .iter()
                             .map(|e| sqlast::FunctionArg::Named {
                                 name: sqlast::Ident {
@@ -597,7 +609,14 @@ pub fn compile_sqlexpr(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Resu
                         distinct: false,
                         special: false,
                     }),
-                }),
+                })
+            };
+
+            // XXX There are cases here where we could inline eagerly
+            //
+            Ok(TypedExpr {
+                type_: fn_type.ret.as_ref().clone(),
+                expr,
             })
         }
         sqlast::Expr::CompoundIdentifier(sqlpath) => {
