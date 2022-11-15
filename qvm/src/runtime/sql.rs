@@ -217,6 +217,7 @@ fn to_dfdatatype(type_: &types::Type) -> Option<DataType> {
         types::Type::Atom(a) => match a {
             types::AtomicType::Null => Some(DataType::Null),
             types::AtomicType::Boolean => Some(DataType::Boolean),
+            types::AtomicType::Int64 => Some(DataType::Int64),
             types::AtomicType::Float64 => Some(DataType::Float64),
             types::AtomicType::Utf8 => Some(DataType::Utf8),
             _ => None,
@@ -344,6 +345,7 @@ impl VarProvider for SchemaProvider {
         let value = match &param.value {
             Value::Null => ScalarValue::Null,
             Value::Float64(n) => ScalarValue::Float64(Some(*n)),
+            Value::Int64(n) => ScalarValue::Int64(Some(*n)),
             Value::Utf8(s) => ScalarValue::Utf8(Some(s.clone())),
             Value::Boolean(b) => ScalarValue::Boolean(Some(*b)),
             Value::Fn(_) => {
@@ -360,7 +362,7 @@ impl VarProvider for SchemaProvider {
                 return Err(DataFusionError::Internal(format!(
                     "Unsupported type: {:?}",
                     other
-                )))
+                )));
             }
         };
 
