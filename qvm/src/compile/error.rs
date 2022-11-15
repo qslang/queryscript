@@ -1,9 +1,8 @@
 use crate::ast;
 use crate::parser::error::ParserError;
 use crate::runtime::error::RuntimeError;
-use crate::schema::Decl;
+use crate::schema::{Decl, SType};
 use crate::types::error::TypesystemError;
-use crate::types::Type;
 use snafu::{Backtrace, Snafu};
 use std::io;
 pub type Result<T> = std::result::Result<T, CompileError>;
@@ -68,8 +67,8 @@ pub enum CompileError {
 
     #[snafu(display("Type mismatch: found {:?} not {:?}", rhs, lhs))]
     WrongType {
-        lhs: Type,
-        rhs: Type,
+        lhs: SType,
+        rhs: SType,
         backtrace: Option<Backtrace>,
     },
 
@@ -103,7 +102,7 @@ impl CompileError {
         .build();
     }
 
-    pub fn wrong_type(lhs: &Type, rhs: &Type) -> CompileError {
+    pub fn wrong_type(lhs: &SType, rhs: &SType) -> CompileError {
         return WrongTypeSnafu {
             lhs: lhs.clone(),
             rhs: rhs.clone(),

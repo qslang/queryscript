@@ -1,6 +1,7 @@
 use super::sql::SQLParam;
 use crate::runtime::error::*;
 use crate::schema;
+use crate::types;
 use datafusion::arrow::record_batch::RecordBatch;
 use dyn_clone::{clone_trait_object, DynClone};
 use sqlparser::ast as sqlast;
@@ -25,7 +26,7 @@ clone_trait_object!(FnValue);
 
 pub fn eval_params(
     schema: schema::SchemaRef,
-    params: &schema::Params,
+    params: &schema::Params<types::Type>,
 ) -> Result<HashMap<String, SQLParam>> {
     let mut param_values = HashMap::new();
     for (name, param) in params {
@@ -41,14 +42,16 @@ pub fn eval_params(
     Ok(param_values)
 }
 
-pub fn eval(schema: schema::SchemaRef, expr: &schema::TypedExpr) -> Result<Value> {
+pub fn eval(schema: schema::SchemaRef, expr: &schema::TypedExpr<types::Type>) -> Result<Value> {
     match &expr.expr {
         schema::Expr::Unknown => {
             return Err(RuntimeError::new("unresolved extern"));
         }
         schema::Expr::Decl(decl) => {
             let ret = match &decl.value {
-                crate::schema::SchemaEntry::Expr(e) => eval(schema.clone(), &e.borrow()),
+                crate::schema::SchemaEntry::Expr(e) => {
+                    eval(schema.clone(), &e.borrow().to_runtime_type()?)
+                }
                 _ => {
                     return rt_unimplemented!("evaluating a non-expression");
                 }

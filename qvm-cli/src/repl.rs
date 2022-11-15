@@ -97,7 +97,10 @@ fn run_command(repl_schema: schema::SchemaRef, cmd: &str) -> Result<(), Whatever
         Ok(ast) => {
             let compiled = compile::compile_expr(repl_schema.clone(), &ast)
                 .with_whatever_context(|e| format!("{}", e))?;
-            let value = runtime::eval(repl_schema.clone(), &compiled)
+            let expr = compiled
+                .to_runtime_type()
+                .with_whatever_context(|e| format!("{}", e))?;
+            let value = runtime::eval(repl_schema.clone(), &expr)
                 .with_whatever_context(|e| format!("{}", e))?;
             println!("{:?}", value);
         }

@@ -9,7 +9,7 @@ use crate::ast;
 use crate::compile::error::*;
 use crate::parser::parse_schema;
 use crate::schema::*;
-use crate::types::{number::parse_numeric_type, Field, FnType, Type};
+use crate::types::number::parse_numeric_type;
 
 const QVM_NAMESPACE: &str = "__qvm";
 
@@ -92,7 +92,7 @@ pub fn lookup_path(mut schema: Rc<RefCell<Schema>>, path: &ast::Path) -> Result<
     return Err(CompileError::no_such_entry(path.clone()));
 }
 
-pub fn resolve_type(schema: Rc<RefCell<Schema>>, ast: &ast::Type) -> Result<Type> {
+pub fn resolve_type(schema: Rc<RefCell<Schema>>, ast: &ast::Type) -> Result<SType> {
     match ast {
         ast::Type::Reference(path) => {
             let decl = {
@@ -140,7 +140,7 @@ pub fn resolve_type(schema: Rc<RefCell<Schema>>, ast: &ast::Type) -> Result<Type
                             return Err(CompileError::duplicate_entry(vec![nt.name.clone()]));
                         }
                         seen.insert(nt.name.clone());
-                        fields.push(Field {
+                        fields.push(SField {
                             name: nt.name.clone(),
                             type_: resolve_type(schema.clone(), &nt.def)?,
                             nullable: true, /* TODO: implement non-null types */
@@ -152,16 +152,16 @@ pub fn resolve_type(schema: Rc<RefCell<Schema>>, ast: &ast::Type) -> Result<Type
                 }
             }
 
-            Ok(Type::Struct(fields))
+            Ok(SType::Struct(fields))
         }
-        ast::Type::List(inner) => Ok(Type::List(Box::new(resolve_type(schema, inner)?))),
+        ast::Type::List(inner) => Ok(SType::List(Box::new(resolve_type(schema, inner)?))),
         ast::Type::Exclude { .. } => {
             return Err(CompileError::unimplemented("Struct exclusions"));
         }
     }
 }
 
-pub fn resolve_global_atom(name: &str) -> Result<Type> {
+pub fn resolve_global_atom(name: &str) -> Result<SType> {
     let schema = Schema::new_global_schema();
     resolve_type(schema, &ast::Type::Reference(vec![name.to_string()]))
 }
@@ -175,8 +175,8 @@ pub fn new_placeholder_name(schema: Rc<RefCell<Schema>>, kind: &str) -> String {
 pub fn intern_placeholder(
     schema: Rc<RefCell<Schema>>,
     kind: &str,
-    expr: TypedExpr,
-) -> Result<TypedSQLExpr> {
+    expr: TypedExpr<SType>,
+) -> Result<TypedSQLExpr<SType>> {
     match expr.expr {
         Expr::SQLExpr(sqlexpr) => Ok(TypedSQLExpr {
             type_: expr.type_,
@@ -199,7 +199,10 @@ pub fn intern_placeholder(
     }
 }
 
-pub fn compile_sqlarg(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Result<TypedSQLExpr> {
+pub fn compile_sqlarg(
+    schema: Rc<RefCell<Schema>>,
+    expr: &sqlast::Expr,
+) -> Result<TypedSQLExpr<SType>> {
     Ok(intern_placeholder(
         schema.clone(),
         "param",
@@ -207,7 +210,9 @@ pub fn compile_sqlarg(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Resul
     )?)
 }
 
-pub fn combine_sqlparams(all: Vec<&TypedSQLExpr>) -> Result<BTreeMap<ast::Ident, TypedExpr>> {
+pub fn combine_sqlparams(
+    all: Vec<&TypedSQLExpr<SType>>,
+) -> Result<BTreeMap<ast::Ident, TypedExpr<SType>>> {
     Ok(all
         .iter()
         .map(|t| t.expr.params.clone())
@@ -215,7 +220,10 @@ pub fn combine_sqlparams(all: Vec<&TypedSQLExpr>) -> Result<BTreeMap<ast::Ident,
         .collect())
 }
 
-pub fn compile_select(schema: Rc<RefCell<Schema>>, select: &sqlast::Select) -> Result<TypedExpr> {
+pub fn compile_select(
+    schema: Rc<RefCell<Schema>>,
+    select: &sqlast::Select,
+) -> Result<TypedExpr<SType>> {
     if select.distinct {
         return Err(CompileError::unimplemented("DISTINCT"));
     }
@@ -308,9 +316,9 @@ pub fn compile_select(schema: Rc<RefCell<Schema>>, select: &sqlast::Select) -> R
 
                     // TODO: This should unify the type with [unknown] instead
                     //
-                    if !matches!(relation.type_, Type::List { .. }) {
+                    if !matches!(relation.type_, SType::List { .. }) {
                         return Err(CompileError::wrong_type(
-                            &Type::List(Box::new(Type::Unknown)),
+                            &SType::List(Box::new(SType::Unknown)),
                             &relation.type_,
                         ));
                     }
@@ -368,7 +376,10 @@ pub fn compile_select(schema: Rc<RefCell<Schema>>, select: &sqlast::Select) -> R
     }
 }
 
-pub fn compile_sqlquery(schema: Rc<RefCell<Schema>>, query: &sqlast::Query) -> Result<TypedExpr> {
+pub fn compile_sqlquery(
+    schema: Rc<RefCell<Schema>>,
+    query: &sqlast::Query,
+) -> Result<TypedExpr<SType>> {
     if query.with.is_some() {
         return Err(CompileError::unimplemented("WITH"));
     }
@@ -404,11 +415,14 @@ pub fn compile_sqlquery(schema: Rc<RefCell<Schema>>, query: &sqlast::Query) -> R
     }
 }
 
-pub fn compile_sqlexpr(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Result<TypedExpr> {
+pub fn compile_sqlexpr(
+    schema: Rc<RefCell<Schema>>,
+    expr: &sqlast::Expr,
+) -> Result<TypedExpr<SType>> {
     match expr {
         sqlast::Expr::Value(v) => match v {
             sqlast::Value::Number(n, _) => Ok(TypedExpr {
-                type_: parse_numeric_type(n)?,
+                type_: SType::Atom(parse_numeric_type(n)?),
                 expr: Expr::SQLExpr(SQLExpr {
                     params: BTreeMap::new(),
                     expr: expr.clone(),
@@ -492,18 +506,18 @@ pub fn compile_sqlexpr(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Resu
 
             let func = compile_reference(schema.clone(), &name.0)?;
             let fn_type = match func.type_ {
-                Type::Fn(f) => f,
+                SType::Fn(f) => f,
                 _ => {
                     return Err(CompileError::wrong_type(
-                        &Type::Fn(FnType {
+                        &SType::Fn(SFnType {
                             args: Vec::new(),
-                            ret: Box::new(Type::Unknown),
+                            ret: Box::new(SType::Unknown),
                         }),
                         &func.type_,
                     ))
                 }
             };
-            let mut compiled_args: BTreeMap<String, TypedNameAndSQLExpr> = BTreeMap::new();
+            let mut compiled_args: BTreeMap<String, TypedNameAndSQLExpr<SType>> = BTreeMap::new();
             let mut pos: usize = 0;
             for arg in args {
                 let (name, expr) = match arg {
@@ -635,7 +649,7 @@ pub fn compile_sqlexpr(schema: Rc<RefCell<Schema>>, expr: &sqlast::Expr) -> Resu
     }
 }
 
-fn find_field<'a>(fields: &'a Vec<Field>, name: &str) -> Option<&'a Field> {
+fn find_field<'a>(fields: &'a Vec<SField>, name: &str) -> Option<&'a SField> {
     for f in fields.iter() {
         if f.name == name {
             return Some(f);
@@ -647,7 +661,7 @@ fn find_field<'a>(fields: &'a Vec<Field>, name: &str) -> Option<&'a Field> {
 pub fn compile_reference(
     schema: Rc<RefCell<Schema>>,
     sqlpath: &Vec<sqlast::Ident>,
-) -> Result<TypedExpr> {
+) -> Result<TypedExpr<SType>> {
     let path: Vec<_> = sqlpath.iter().map(|e| e.value.clone()).collect();
     let (decl, remainder) = lookup_path(schema.clone(), &path)?;
     let type_ = match &decl.value {
@@ -666,19 +680,19 @@ pub fn compile_reference(
     for i in 0..remainder.len() {
         let name = &remainder[i];
         match current {
-            Type::Struct(fields) => {
+            SType::Struct(fields) => {
                 if let Some(field) = find_field(fields, name) {
                     current = &field.type_;
                 } else {
                     return Err(CompileError::wrong_type(
-                        &Type::Struct(vec![Field::new_nullable(name.clone(), Type::Unknown)]),
+                        &SType::Struct(vec![SField::new_nullable(name.clone(), SType::Unknown)]),
                         current,
                     ));
                 }
             }
             _ => {
                 return Err(CompileError::wrong_type(
-                    &Type::Struct(vec![Field::new_nullable(name.clone(), Type::Unknown)]),
+                    &SType::Struct(vec![SField::new_nullable(name.clone(), SType::Unknown)]),
                     current,
                 ))
             }
@@ -712,19 +726,19 @@ pub fn compile_reference(
     })
 }
 
-pub fn compile_expr(schema: Rc<RefCell<Schema>>, expr: &ast::Expr) -> Result<TypedExpr> {
+pub fn compile_expr(schema: Rc<RefCell<Schema>>, expr: &ast::Expr) -> Result<TypedExpr<SType>> {
     match expr {
         ast::Expr::SQLQuery(q) => Ok(compile_sqlquery(schema.clone(), q)?),
         ast::Expr::SQLExpr(e) => Ok(compile_sqlexpr(schema.clone(), e)?),
     }
 }
 
-pub fn unify_types(lhs: &Type, rhs: &Type) -> Result<Type> {
-    if matches!(rhs, Type::Unknown) {
+pub fn unify_types(lhs: &SType, rhs: &SType) -> Result<SType> {
+    if matches!(rhs, SType::Unknown) {
         return Ok(lhs.clone());
     }
 
-    if matches!(lhs, Type::Unknown) {
+    if matches!(lhs, SType::Unknown) {
         return Ok(rhs.clone());
     }
 
@@ -951,7 +965,7 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                         .borrow_mut()
                         .externs
                         .insert(arg.name.clone(), type_.clone());
-                    compiled_args.push(Field::new_nullable(arg.name.clone(), type_.clone()));
+                    compiled_args.push(SField::new_nullable(arg.name.clone(), type_.clone()));
                 }
 
                 let compiled = compile_expr(inner_schema.clone(), body)?;
@@ -965,7 +979,7 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                     name.clone(),
                     false, /* extern_ */
                     SchemaEntry::Expr(mkref(TypedExpr {
-                        type_: Type::Fn(FnType {
+                        type_: SType::Fn(SFnType {
                             args: compiled_args,
                             ret: Box::new(type_.clone()),
                         }),
@@ -980,7 +994,7 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                 let lhs_type = if let Some(t) = type_ {
                     resolve_type(schema.clone(), &t)?
                 } else {
-                    Type::Unknown
+                    SType::Unknown
                 };
                 let compiled = compile_expr(schema.clone(), &body)?;
                 let type_ = unify_types(&lhs_type, &compiled.type_)?;

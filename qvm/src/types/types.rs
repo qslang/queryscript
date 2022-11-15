@@ -1,25 +1,16 @@
 use datafusion::arrow::datatypes::{DataType as ArrowDataType, IntervalUnit, TimeUnit};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 use super::error::{ts_unimplemented, Result};
 use crate::ast;
 
 pub type Ident = ast::Ident;
-pub type TypeRef = Rc<RefCell<Type>>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Type {
-    Unknown,
     Atom(AtomicType),
     Struct(Vec<Field>),
     List(Box<Type>),
-    Exclude {
-        inner: Box<Type>,
-        excluded: Vec<Ident>,
-    },
     Fn(FnType),
-    Ref(TypeRef),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
