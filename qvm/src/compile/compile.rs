@@ -152,7 +152,7 @@ pub fn resolve_type(schema: Rc<RefCell<Schema>>, ast: &ast::Type) -> Result<STyp
                 }
             }
 
-            Ok(SType::Struct(fields))
+            Ok(SType::Record(fields))
         }
         ast::Type::List(inner) => Ok(SType::List(Box::new(resolve_type(schema, inner)?))),
         ast::Type::Exclude { .. } => {
@@ -680,19 +680,19 @@ pub fn compile_reference(
     for i in 0..remainder.len() {
         let name = &remainder[i];
         match current {
-            SType::Struct(fields) => {
+            SType::Record(fields) => {
                 if let Some(field) = find_field(fields, name) {
                     current = &field.type_;
                 } else {
                     return Err(CompileError::wrong_type(
-                        &SType::Struct(vec![SField::new_nullable(name.clone(), SType::Unknown)]),
+                        &SType::Record(vec![SField::new_nullable(name.clone(), SType::Unknown)]),
                         current,
                     ));
                 }
             }
             _ => {
                 return Err(CompileError::wrong_type(
-                    &SType::Struct(vec![SField::new_nullable(name.clone(), SType::Unknown)]),
+                    &SType::Record(vec![SField::new_nullable(name.clone(), SType::Unknown)]),
                     current,
                 ))
             }

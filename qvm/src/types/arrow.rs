@@ -15,11 +15,11 @@ impl Relation for Vec<ArrowRecordBatch> {
         self
     }
 
-    fn row(&self, index: usize) -> &dyn Record {
+    fn row(&self, _index: usize) -> &dyn Record {
         panic!("Unimplemented: row()")
     }
 
-    fn column(&self, index: usize) -> &dyn List {
+    fn column(&self, _index: usize) -> &dyn List {
         panic!("Unimplemented: column()")
     }
 

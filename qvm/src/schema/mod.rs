@@ -1,4 +1,5 @@
 use crate::ast;
+use crate::runtime;
 use crate::types::{AtomicType, Field, FnType, Type};
 use sqlparser::ast as sqlast;
 use std::cell::RefCell;
@@ -36,7 +37,7 @@ impl SField {
 pub enum SType {
     Unknown,
     Atom(AtomicType),
-    Struct(Vec<SField>),
+    Record(Vec<SField>),
     List(Box<SType>),
     Exclude {
         inner: Box<SType>,
@@ -50,7 +51,7 @@ impl SType {
     pub fn to_runtime_type(&self) -> runtime::error::Result<Type> {
         match self {
             SType::Atom(a) => Ok(Type::Atom(a.clone())),
-            SType::Struct(fields) => Ok(Type::Struct(
+            SType::Record(fields) => Ok(Type::Record(
                 fields
                     .iter()
                     .map(|f| {

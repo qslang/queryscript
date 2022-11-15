@@ -3,11 +3,8 @@ use crate::runtime::error::*;
 use crate::schema;
 use crate::types;
 use crate::types::{Arc, Value};
-use datafusion::arrow::record_batch::RecordBatch;
-use dyn_clone::{clone_trait_object, DynClone};
 use sqlparser::ast as sqlast;
 use std::collections::HashMap;
-use std::fmt;
 
 pub fn eval_params(
     schema: schema::SchemaRef,

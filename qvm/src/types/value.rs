@@ -4,7 +4,6 @@ pub use std::any::Any;
 use std::fmt;
 pub use std::sync::Arc;
 
-use super::error::Result;
 use super::types::*;
 
 #[derive(Debug, Clone)]
@@ -86,6 +85,7 @@ clone_trait_object!(List);
 clone_trait_object!(FnValue);
 
 impl Value {
+    #[allow(unused)]
     fn type_(&self) -> Type {
         match self {
             Self::Null => Type::Atom(AtomicType::Null),
@@ -140,6 +140,7 @@ impl Value {
         }
     }
 
+    #[allow(unused)]
     fn as_any(&self) -> &dyn Any {
         match self {
             Self::Null => self as &dyn Any,
