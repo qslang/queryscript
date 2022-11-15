@@ -457,9 +457,8 @@ pub fn compile_sqlexpr(
             let params = combine_sqlparams(vec![&cleft, &cright])?;
             let type_ = match op {
                 sqlast::BinaryOperator::Plus => {
-                    unify_types(&mut resolve_global_atom("number")?, &mut cleft.type_)?;
-                    unify_types(&mut resolve_global_atom("number")?, &mut cright.type_)?;
-                    resolve_global_atom("number")?
+                    unify_types(&mut cleft.type_, &mut cright.type_)?;
+                    cleft.type_
                 }
                 _ => {
                     return Err(CompileError::unimplemented(

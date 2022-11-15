@@ -85,10 +85,9 @@ pub fn eval(
         }
         schema::Expr::SQLQuery(schema::SQLQuery { query, params }) => {
             let sql_params = eval_params(schema.clone(), &params)?;
-            unpack(
-                &mut super::sql::eval(schema, &query, sql_params)?,
-                &typed_expr.type_,
-            )
+            Ok(Value::Relation(super::sql::eval(
+                schema, &query, sql_params,
+            )?))
         }
         schema::Expr::SQLExpr(schema::SQLExpr { expr, params }) => {
             let sql_params = eval_params(schema.clone(), &params)?;
@@ -122,10 +121,19 @@ pub fn eval(
                 lock: None,
             };
 
-            unpack(
-                &mut super::sql::eval(schema, &query, sql_params)?,
-                &typed_expr.type_,
-            )
+            // TODO: This ownership model implies some necessary copying (below).
+            let rows = super::sql::eval(schema, &query, sql_params)?;
+
+            // TODO: These runtime checks may only be necessary in debug mode
+            if rows.num_batches() != 1 {
+                return fail!("Expected an expression to have exactly one row");
+            }
+            if rows.schema().len() != 1 {
+                return fail!("Expected an expression to have exactly one column");
+            }
+
+            let row = &rows.batch(0).records()[0];
+            Ok(row.column(0).clone())
         }
     }
 }

@@ -2226,6 +2226,7 @@ dependencies = [
  "chrono",
  "datafusion",
  "dyn-clone",
+ "half 2.1.0",
  "lazy_static",
  "object_store",
  "snafu",

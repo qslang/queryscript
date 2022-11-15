@@ -1,7 +1,10 @@
-pub use datafusion::arrow::record_batch::RecordBatch as ArrowRecordBatch;
+pub use datafusion::arrow::{
+    array::Array as ArrowArray, array::ArrayRef as ArrowArrayRef,
+    record_batch::RecordBatch as ArrowRecordBatch,
+};
 use dyn_clone::{clone_trait_object, DynClone};
 pub use std::any::Any;
-use std::fmt;
+use std::fmt::Debug;
 pub use std::sync::Arc;
 
 use super::types::*;
@@ -18,7 +21,7 @@ pub enum Value {
     UInt16(u16),
     UInt32(u32),
     UInt64(u64),
-    Float16(f32),
+    Float16(half::f16),
     Float32(f32),
     Float64(f64),
 
@@ -53,35 +56,46 @@ pub enum Value {
     Fn(Arc<dyn FnValue>),
 }
 
-pub trait Record: fmt::Debug + DynClone + Send + Sync {
+pub trait Record: Debug + Send + Sync {
     fn schema(&self) -> Vec<Field>;
     fn as_any(&self) -> &dyn Any;
+    fn column(&self, index: usize) -> &Value;
 }
 
-pub trait List: fmt::Debug + DynClone + Send + Sync {
+pub trait List: Debug + Send + Sync {
     fn data_type(&self) -> Type;
     fn as_any(&self) -> &dyn Any;
+
+    // TODO: This should eventually be changed to have the standard
+    // array-like methods (indexing, etc.)
+    fn as_vec(&self) -> Vec<Value>;
 }
 
-pub trait FnValue: fmt::Debug + DynClone + Send + Sync {
+pub trait FnValue: Debug + DynClone + Send + Sync {
     fn execute(&self, args: Vec<Value>) -> crate::runtime::error::Result<Value>;
     fn fn_type(&self) -> FnType;
     fn as_any(&self) -> &dyn Any;
 }
 
-pub trait Relation: fmt::Debug + DynClone + Send + Sync {
+pub trait Relation: Debug + Send + Sync {
     fn schema(&self) -> Vec<Field>;
     fn as_any(&self) -> &dyn Any;
 
-    fn row(&self, index: usize) -> &dyn Record;
-    fn column(&self, index: usize) -> &dyn List;
+    fn num_batches(&self) -> usize;
+    fn batch(&self, index: usize) -> &dyn RecordBatch;
 
+    // We expect to have one such function for each in-memory execution
+    // format we support. To start, this is just Apache Arrow (columnar).
     fn as_arrow_recordbatch(self: Arc<Self>) -> Arc<Vec<ArrowRecordBatch>>;
 }
 
-clone_trait_object!(Record);
-clone_trait_object!(Relation);
-clone_trait_object!(List);
+pub trait RecordBatch: Debug + Send + Sync {
+    fn schema(&self) -> Vec<Field>;
+    fn as_any(&self) -> &dyn Any;
+
+    fn records(&self) -> Vec<Arc<dyn Record>>;
+}
+
 clone_trait_object!(FnValue);
 
 impl Value {

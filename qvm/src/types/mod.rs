@@ -1,6 +1,8 @@
 pub mod arrow;
 pub mod error;
 pub mod number;
+mod primitives;
+pub mod record;
 pub mod types;
 pub mod value;
 

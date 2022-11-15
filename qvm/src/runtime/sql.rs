@@ -1,7 +1,6 @@
 // TODO: I've left some unused_imports here because they'll be useful while filling in the
 // SchemaProvider implementation
 use datafusion::arrow::{
-    array::{Float64Array, StringArray},
     datatypes::{DataType, Field as DFField, Schema as DFSchema, SchemaRef as DFSchemaRef},
     record_batch::RecordBatch,
 };
@@ -31,17 +30,17 @@ use object_store::ObjectMeta;
 use sqlparser::ast as sqlast;
 use std::{any::Any, collections::HashMap, sync::Arc};
 
-use super::error::{fail, rt_unimplemented, Result};
+use super::error::{fail, Result};
 use crate::schema;
 use crate::types;
-use crate::types::{FnValue, Value};
+use crate::types::{FnValue, Relation, Value};
 use chrono;
 
 pub fn eval(
     _schema: schema::SchemaRef,
     query: &sqlast::Query,
     params: HashMap<String, SQLParam>,
-) -> Result<Vec<Value>> {
+) -> Result<Arc<dyn Relation>> {
     let mut ctx =
         SessionContext::with_config_rt(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
 
@@ -58,7 +57,9 @@ pub fn eval(
     let runtime = tokio::runtime::Builder::new_current_thread().build()?;
     // let physical_planner = DefaultPhysicalPlanner::default();
     let records = runtime.block_on(async { execute_plan(&ctx, &plan).await })?;
+    Ok(records)
 
+    /*
     let mut ret = Vec::new();
     for batch in records.iter() {
         if batch.num_columns() != 1 {
@@ -87,12 +88,13 @@ pub fn eval(
     }
 
     Ok(ret)
+        */
 }
 
-async fn execute_plan(ctx: &SessionContext, plan: &LogicalPlan) -> Result<Vec<RecordBatch>> {
+async fn execute_plan(ctx: &SessionContext, plan: &LogicalPlan) -> Result<Arc<dyn Relation>> {
     let pplan = ctx.create_physical_plan(&plan).await?;
     let task_ctx = ctx.task_ctx();
-    let results = collect(pplan, task_ctx).await?;
+    let results = Arc::new(collect(pplan, task_ctx).await?);
     Ok(results)
 }
 

@@ -14,3 +14,4 @@ object_store = "0.5.0"
 snafu = { version = "0.7.3", features = [ "backtraces" ] }
 sqlparser = { path = "../sqlparser-rs" }
 tokio = "1.0"
+half = "2.1"
