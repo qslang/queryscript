@@ -2,7 +2,7 @@ use super::sql::SQLParam;
 use crate::runtime::error::*;
 use crate::schema;
 use crate::types;
-use crate::types::Value;
+use crate::types::{Arc, Value};
 use datafusion::arrow::record_batch::RecordBatch;
 use dyn_clone::{clone_trait_object, DynClone};
 use sqlparser::ast as sqlast;
@@ -47,7 +47,7 @@ pub fn eval(schema: schema::SchemaRef, expr: &schema::TypedExpr<types::Type>) ->
             return Err(RuntimeError::unimplemented("functions"));
         }
         schema::Expr::NativeFn(name) => match name.as_str() {
-            "load_json" => Ok(Value::Fn(Box::new(super::sql::LoadJsonFn::new(
+            "load_json" => Ok(Value::Fn(Arc::new(super::sql::LoadJsonFn::new(
                 &expr.type_,
             )?))),
             _ => return rt_unimplemented!("native function: {}", name),

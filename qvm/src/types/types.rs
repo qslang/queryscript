@@ -1,4 +1,6 @@
-use datafusion::arrow::datatypes::{DataType as ArrowDataType, IntervalUnit, TimeUnit};
+pub use datafusion::arrow::datatypes::{
+    DataType as ArrowDataType, Field as ArrowField, IntervalUnit, Schema as ArrowSchema, TimeUnit,
+};
 
 use super::error::{ts_unimplemented, Result};
 use crate::ast;
@@ -145,12 +147,18 @@ pub enum AtomicType {
     /// A 64-bit date representing the elapsed time since UNIX epoch (1970-01-01)
     /// in milliseconds (64 bits). Values are evenly divisible by 86400000.
     Date64,
+    // This is in the Arrow typesystem but not implemented in the ScalarValue enum in DataFusion
+    /*
     /// A 32-bit time representing the elapsed time since midnight in the unit of `TimeUnit`.
     Time32(TimeUnit),
+    */
     /// A 64-bit time representing the elapsed time since midnight in the unit of `TimeUnit`.
     Time64(TimeUnit),
+    // This is in the Arrow typesystem but not implemented in the ScalarValue enum in DataFusion
+    /*
     /// Measure of elapsed time in either seconds, milliseconds, microseconds or nanoseconds.
     Duration(TimeUnit),
+    */
     /// A "calendar" interval which models types that don't necessarily
     /// have a precise duration without the context of a base timestamp (e.g.
     /// days can differ in length during day light savings time transitions).
@@ -253,9 +261,7 @@ impl TryFrom<&ArrowDataType> for Type {
             Timestamp(u, s) => Type::Atom(AtomicType::Timestamp(u.clone(), s.clone())),
             Date32 => Type::Atom(AtomicType::Date32),
             Date64 => Type::Atom(AtomicType::Date64),
-            Time32(u) => Type::Atom(AtomicType::Time32(u.clone())),
             Time64(u) => Type::Atom(AtomicType::Time64(u.clone())),
-            Duration(u) => Type::Atom(AtomicType::Duration(u.clone())),
             Interval(u) => Type::Atom(AtomicType::Interval(u.clone())),
             Binary => Type::Atom(AtomicType::Binary),
             FixedSizeBinary(l) => Type::Atom(AtomicType::FixedSizeBinary(*l)),
@@ -267,20 +273,37 @@ impl TryFrom<&ArrowDataType> for Type {
             List(f) | LargeList(f) | FixedSizeList(f, _) => {
                 Type::List(Box::new(f.data_type().try_into()?))
             }
-            Struct(fields) => Type::Record(
-                fields
-                    .iter()
-                    .map(|f| {
-                        Ok(Field {
-                            name: f.name().clone(),
-                            type_: f.data_type().try_into()?,
-                            nullable: f.is_nullable(),
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?,
-            ),
-
-            Union(..) | Dictionary(..) | Map(..) => return ts_unimplemented!("union type"),
+            Struct(fields) => fields.try_into()?,
+            Union(..) | Dictionary(..) | Map(..) | Time32(..) | Duration(..) => {
+                return ts_unimplemented!("type {:?}", &t)
+            }
         })
+    }
+}
+
+pub fn try_arrow_fields_to_fields(fields: &Vec<ArrowField>) -> Result<Vec<Field>> {
+    Ok(fields
+        .iter()
+        .map(|f| {
+            Ok(Field {
+                name: f.name().clone(),
+                type_: f.data_type().try_into()?,
+                nullable: f.is_nullable(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?)
+}
+
+impl TryFrom<&Vec<ArrowField>> for Type {
+    type Error = super::error::TypesystemError;
+    fn try_from(fields: &Vec<ArrowField>) -> Result<Self> {
+        Ok(Type::Record(try_arrow_fields_to_fields(fields)?))
+    }
+}
+
+impl TryFrom<&ArrowSchema> for Type {
+    type Error = super::error::TypesystemError;
+    fn try_from(schema: &ArrowSchema) -> Result<Self> {
+        (&schema.fields).try_into()
     }
 }

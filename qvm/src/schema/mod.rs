@@ -1,5 +1,4 @@
 use crate::ast;
-use crate::runtime;
 use crate::types::{AtomicType, Field, FnType, Type};
 use sqlparser::ast as sqlast;
 use std::cell::RefCell;
@@ -109,7 +108,7 @@ impl SchemaInstance {
     }
 }
 
-pub type Value = runtime::Value;
+pub type Value = crate::types::Value;
 
 pub type Params<Ty> = BTreeMap<ast::Ident, TypedExpr<Ty>>;
 

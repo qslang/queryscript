@@ -146,10 +146,10 @@ impl LoadJsonFn {
                 Arc::new(RuntimeEnv::default()),
             );
             let task_ctx = ctx.task_ctx();
-            return DFResult::Ok(collect(plan, task_ctx).await? as Vec<RecordBatch>);
+            return DFResult::Ok(Arc::new(collect(plan, task_ctx).await? as Vec<RecordBatch>));
         })?;
 
-        Ok(Value::Records(records))
+        Ok(Value::Relation(records))
     }
 }
 
@@ -160,11 +160,30 @@ impl FnValue for LoadJsonFn {
         }
 
         let file = match &args[0] {
-            Value::String(s) => s.clone(),
+            Value::Utf8(s) => s.clone(),
             _ => return fail!("load_json expects its first argument to be a string"),
         };
 
         self.load_json(file)
+    }
+
+    fn fn_type(&self) -> types::FnType {
+        types::FnType {
+            args: vec![types::Field {
+                name: "file".to_string(),
+                type_: types::Type::Atom(types::AtomicType::Utf8),
+                nullable: false,
+            }],
+            ret: Box::new(
+                (&self.schema.fields)
+                    .try_into()
+                    .expect("Failed to convert function type back"),
+            ),
+        }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -233,10 +252,13 @@ impl SQLParam {
     pub fn register(&self, ctx: &mut SessionContext) -> DFResult<()> {
         match &self.type_ {
             DFType::Schema(s) => match &self.value {
-                Value::Records(r) => {
+                Value::Relation(r) => {
                     // XXX This copies the whole result Set
                     //
-                    let table = MemTable::try_new(Arc::new(s.clone()), vec![r.clone()])?;
+                    let table = MemTable::try_new(
+                        Arc::new(s.clone()),
+                        vec![r.clone().as_arrow_recordbatch().as_ref().clone()],
+                    )?;
                     ctx.register_table(self.name.as_str(), Arc::new(table))?;
                 }
                 _ => {
@@ -317,17 +339,23 @@ impl VarProvider for SchemaProvider {
 
         let value = match &param.value {
             Value::Null => ScalarValue::Null,
-            Value::Number(n) => ScalarValue::Float64(Some(*n)),
-            Value::String(s) => ScalarValue::Utf8(Some(s.clone())),
-            Value::Bool(b) => ScalarValue::Boolean(Some(*b)),
+            Value::Float64(n) => ScalarValue::Float64(Some(*n)),
+            Value::Utf8(s) => ScalarValue::Utf8(Some(s.clone())),
+            Value::Boolean(b) => ScalarValue::Boolean(Some(*b)),
             Value::Fn(_) => {
                 return Err(DataFusionError::Internal(format!(
                     "Cannot use function value as a scalar variable"
                 )))
             }
-            Value::Records(_) => {
+            Value::Relation(_) => {
                 return Err(DataFusionError::Internal(format!(
                     "Cannot use record set as a scalar variable"
+                )))
+            }
+            other => {
+                return Err(DataFusionError::Internal(format!(
+                    "Unsupported type: {:?}",
+                    other
                 )))
             }
         };
