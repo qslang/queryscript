@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use snafu::ErrorCompat;
 use std::fs;
 
 use qvm::compile;
@@ -32,10 +33,15 @@ fn main() {
                 parser::parse_schema(&contents).expect("Parser failed")
             );
         }
-        Commands::Compile { file } => {
-            let schema = compile::compile_schema_from_file(&file).expect("Compilation error");
-            eprintln!("{:#?}", schema);
-        }
+        Commands::Compile { file } => match compile::compile_schema_from_file(&file) {
+            Err(err) => {
+                eprintln!("{}", err);
+                if let Some(bt) = ErrorCompat::backtrace(&err) {
+                    eprintln!("{}", bt);
+                }
+            }
+            Ok(schema) => eprintln!("{:#?}", schema),
+        },
         Commands::Repl => {
             crate::repl::run();
         }

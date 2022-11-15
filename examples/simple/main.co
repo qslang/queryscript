@@ -1,7 +1,8 @@
-let foo = 123;
+type Foo record {
+    a number,
+    b number,
+}
 
-import bar from schema{
-    foo,
-};
+export let foo [Foo] = load_json('foo.json');
 
-let baz = bar;
+let bar = SELECT * FROM foo;

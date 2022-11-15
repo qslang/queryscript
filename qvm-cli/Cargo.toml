@@ -10,8 +10,8 @@ name = "qvm"
 path = "src/main.rs"
 
 [dependencies]
-qvm = { path="../qvm" }
 clap = { version = "4.0", features=["derive"] }
 home = "0.5.4"
+qvm = { path="../qvm" }
 rustyline = "10.0.0"
-snafu = "0.7.3"
+snafu = { version = "0.7.3", features = [ "backtraces" ] }

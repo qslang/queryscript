@@ -1,7 +1,7 @@
 use crate::ast;
 use crate::parser::error::ParserError;
 use crate::runtime::error::RuntimeError;
-use crate::schema::{Decl, SType};
+use crate::schema::{Decl, MType};
 use crate::types::error::TypesystemError;
 use snafu::{Backtrace, Snafu};
 use std::io;
@@ -13,43 +13,43 @@ pub enum CompileError {
     #[snafu(display("Parser error: {}", source), context(false))]
     SyntaxError {
         source: ParserError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
+
+    #[snafu(display("Internal error: {}", what))]
+    InternalError { what: String, backtrace: Backtrace },
 
     #[snafu(display("Typesystem error: {}", source), context(false))]
     TypesystemError {
         source: TypesystemError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display("Parser error: {}", source), context(false))]
     RuntimeError {
         source: RuntimeError,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(context(false))]
     FsError {
         source: io::Error,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display("Unimplemented: {}", what))]
-    Unimplemented {
-        what: String,
-        backtrace: Option<Backtrace>,
-    },
+    Unimplemented { what: String, backtrace: Backtrace },
 
     #[snafu(display("Duplicate entry: {:?}", path))]
     DuplicateEntry {
         path: ast::Path,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display("No such entry: {:?}", path))]
     NoSuchEntry {
         path: ast::Path,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display(
@@ -62,21 +62,21 @@ pub enum CompileError {
         path: ast::Path,
         expected: String,
         actual: Decl,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 
     #[snafu(display("Type mismatch: found {:?} not {:?}", rhs, lhs))]
     WrongType {
-        lhs: SType,
-        rhs: SType,
-        backtrace: Option<Backtrace>,
+        lhs: MType,
+        rhs: MType,
+        backtrace: Backtrace,
     },
 
     #[snafu(display("Error importing {:?}: {}", path, what))]
     ImportError {
         path: ast::Path,
         what: String,
-        backtrace: Option<Backtrace>,
+        backtrace: Backtrace,
     },
 }
 
@@ -102,7 +102,7 @@ impl CompileError {
         .build();
     }
 
-    pub fn wrong_type(lhs: &SType, rhs: &SType) -> CompileError {
+    pub fn wrong_type(lhs: &MType, rhs: &MType) -> CompileError {
         return WrongTypeSnafu {
             lhs: lhs.clone(),
             rhs: rhs.clone(),
@@ -113,6 +113,13 @@ impl CompileError {
     pub fn import_error(path: ast::Path, what: &str) -> CompileError {
         return ImportSnafu {
             path,
+            what: what.to_string(),
+        }
+        .build();
+    }
+
+    pub fn internal(what: &str) -> CompileError {
+        return InternalSnafu {
             what: what.to_string(),
         }
         .build();

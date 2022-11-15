@@ -24,16 +24,38 @@ pub fn eval_params(
     Ok(param_values)
 }
 
-pub fn eval(schema: schema::SchemaRef, expr: &schema::TypedExpr<types::Type>) -> Result<Value> {
-    match &expr.expr {
+pub fn unpack(values: &mut Vec<Value>, type_: &types::Type) -> Result<Value> {
+    match type_ {
+        types::Type::List(_) => {
+            return fail!("List values are unimplemented");
+        }
+        _ => {
+            if values.len() != 1 {
+                return fail!("Expected an expression to have exactly one row");
+            }
+
+            Ok(values.remove(0))
+        }
+    }
+}
+
+pub fn eval(
+    schema: schema::SchemaRef,
+    typed_expr: &schema::TypedExpr<types::Type>,
+) -> Result<Value> {
+    match &typed_expr.expr {
         schema::Expr::Unknown => {
             return Err(RuntimeError::new("unresolved extern"));
         }
-        schema::Expr::Decl(decl) => {
-            let ret = match &decl.value {
-                crate::schema::SchemaEntry::Expr(e) => {
-                    eval(schema.clone(), &e.borrow().to_runtime_type()?)
-                }
+        schema::Expr::SchemaEntry(schema::SchemaEntryExpr { entry, .. }) => {
+            let ret = match entry {
+                crate::schema::SchemaEntry::Expr(e) => eval(
+                    schema.clone(),
+                    &schema::TypedExpr {
+                        type_: typed_expr.type_.clone(),
+                        expr: e.borrow().expr.to_runtime_type()?,
+                    },
+                ),
                 _ => {
                     return rt_unimplemented!("evaluating a non-expression");
                 }
@@ -45,17 +67,28 @@ pub fn eval(schema: schema::SchemaRef, expr: &schema::TypedExpr<types::Type>) ->
         }
         schema::Expr::NativeFn(name) => match name.as_str() {
             "load_json" => Ok(Value::Fn(Arc::new(super::sql::LoadJsonFn::new(
-                &expr.type_,
+                &typed_expr.type_,
             )?))),
             _ => return rt_unimplemented!("native function: {}", name),
         },
-        schema::Expr::FnCall { .. } => {
-            return Err(RuntimeError::unimplemented("functions"));
+        schema::Expr::FnCall(schema::FnCallExpr { func, args }) => {
+            let arg_values = args
+                .iter()
+                .map(|arg| Ok(eval(schema.clone(), arg)?))
+                .collect::<Result<Vec<_>>>()?;
+            let fn_val = match eval(schema.clone(), func.as_ref())? {
+                Value::Fn(f) => f,
+                _ => return fail!("Cannot call non-function"),
+            };
+
+            fn_val.execute(arg_values)
         }
         schema::Expr::SQLQuery(schema::SQLQuery { query, params }) => {
             let sql_params = eval_params(schema.clone(), &params)?;
-            super::sql::eval(schema, &query, sql_params)?;
-            Ok(Value::Null)
+            unpack(
+                &mut super::sql::eval(schema, &query, sql_params)?,
+                &typed_expr.type_,
+            )
         }
         schema::Expr::SQLExpr(schema::SQLExpr { expr, params }) => {
             let sql_params = eval_params(schema.clone(), &params)?;
@@ -89,12 +122,10 @@ pub fn eval(schema: schema::SchemaRef, expr: &schema::TypedExpr<types::Type>) ->
                 lock: None,
             };
 
-            let mut rows = super::sql::eval(schema, &query, sql_params)?;
-            if rows.len() != 1 {
-                return fail!("Expected an expression to have exactly one row");
-            }
-
-            Ok(rows.remove(0))
+            unpack(
+                &mut super::sql::eval(schema, &query, sql_params)?,
+                &typed_expr.type_,
+            )
         }
     }
 }

@@ -43,21 +43,25 @@ pub fn lookup_schema(
         return Err(CompileError::no_such_entry(path.clone()));
     };
 
-    let imported = Rc::new(RefCell::new(ImportedSchema {
+    let imported = mkref(ImportedSchema {
         args: if v.borrow().externs.len() == 0 {
             None
         } else {
             Some(Vec::new())
         },
         schema: v.clone(),
-    }));
+    });
 
     schema.borrow_mut().imports.insert(k, imported.clone());
 
     return Ok(imported);
 }
 
-pub fn lookup_path(mut schema: Rc<RefCell<Schema>>, path: &ast::Path) -> Result<(Decl, ast::Path)> {
+pub fn lookup_path(
+    mut schema: Rc<RefCell<Schema>>,
+    path: &ast::Path,
+    import_global: bool,
+) -> Result<(Decl, ast::Path)> {
     if path.len() == 0 {
         return Err(CompileError::no_such_entry(path.clone()));
     }
@@ -81,9 +85,22 @@ pub fn lookup_path(mut schema: Rc<RefCell<Schema>>, path: &ast::Path) -> Result<
                     _ => return Ok((decl.clone(), path[i + 1..].to_vec())),
                 }
             }
-            None => {
-                return Err(CompileError::no_such_entry(path.clone()));
-            }
+            None => match &schema.borrow().parent_scope {
+                Some(parent) => {
+                    return lookup_path(parent.clone(), &path[i..].to_vec(), import_global)
+                }
+                None => {
+                    if import_global {
+                        return lookup_path(
+                            Schema::new_global_schema(),
+                            &path[i..].to_vec(),
+                            false, /* import_global */
+                        );
+                    } else {
+                        return Err(CompileError::no_such_entry(path.clone()));
+                    }
+                }
+            },
         };
 
         schema = new;
@@ -92,36 +109,13 @@ pub fn lookup_path(mut schema: Rc<RefCell<Schema>>, path: &ast::Path) -> Result<
     return Err(CompileError::no_such_entry(path.clone()));
 }
 
-pub fn resolve_type(schema: Rc<RefCell<Schema>>, ast: &ast::Type) -> Result<SType> {
+pub fn resolve_type(schema: Rc<RefCell<Schema>>, ast: &ast::Type) -> Result<MType> {
     match ast {
         ast::Type::Reference(path) => {
-            let decl = {
-                let mut current = schema.clone();
-                let mut tried_global = false;
-                let decl = loop {
-                    current = match lookup_path(current.clone(), &path) {
-                        Err(CompileError::NoSuchEntry { .. }) => {
-                            if let Some(parent_scope) = current.borrow().parent_scope.clone() {
-                                parent_scope.clone()
-                            } else if !tried_global {
-                                tried_global = true;
-                                Schema::new_global_schema()
-                            } else {
-                                return Err(CompileError::no_such_entry(path.clone()));
-                            }
-                        }
-                        Err(e) => return Err(e),
-                        Ok((d, r)) => {
-                            if r.len() > 0 {
-                                return Err(CompileError::no_such_entry(r));
-                            }
-                            break d;
-                        }
-                    }
-                };
-
-                decl
-            };
+            let (decl, r) = lookup_path(schema.clone(), &path, true /* import_global */)?;
+            if r.len() > 0 {
+                return Err(CompileError::no_such_entry(r));
+            }
 
             let t = match decl.value {
                 SchemaEntry::Type(t) => t.borrow().clone(),
@@ -140,9 +134,9 @@ pub fn resolve_type(schema: Rc<RefCell<Schema>>, ast: &ast::Type) -> Result<STyp
                             return Err(CompileError::duplicate_entry(vec![nt.name.clone()]));
                         }
                         seen.insert(nt.name.clone());
-                        fields.push(SField {
+                        fields.push(MField {
                             name: nt.name.clone(),
-                            type_: resolve_type(schema.clone(), &nt.def)?,
+                            type_: mkref(resolve_type(schema.clone(), &nt.def)?),
                             nullable: true, /* TODO: implement non-null types */
                         });
                     }
@@ -152,16 +146,16 @@ pub fn resolve_type(schema: Rc<RefCell<Schema>>, ast: &ast::Type) -> Result<STyp
                 }
             }
 
-            Ok(SType::Record(fields))
+            Ok(MType::Record(fields))
         }
-        ast::Type::List(inner) => Ok(SType::List(Box::new(resolve_type(schema, inner)?))),
+        ast::Type::List(inner) => Ok(MType::List(mkref(resolve_type(schema, inner)?))),
         ast::Type::Exclude { .. } => {
             return Err(CompileError::unimplemented("Struct exclusions"));
         }
     }
 }
 
-pub fn resolve_global_atom(name: &str) -> Result<SType> {
+pub fn resolve_global_atom(name: &str) -> Result<MType> {
     let schema = Schema::new_global_schema();
     resolve_type(schema, &ast::Type::Reference(vec![name.to_string()]))
 }
@@ -175,8 +169,8 @@ pub fn new_placeholder_name(schema: Rc<RefCell<Schema>>, kind: &str) -> String {
 pub fn intern_placeholder(
     schema: Rc<RefCell<Schema>>,
     kind: &str,
-    expr: TypedExpr<SType>,
-) -> Result<TypedSQLExpr<SType>> {
+    expr: TypedExpr<MType>,
+) -> Result<TypedSQLExpr<MType>> {
     match expr.expr {
         Expr::SQLExpr(sqlexpr) => Ok(TypedSQLExpr {
             type_: expr.type_,
@@ -202,7 +196,7 @@ pub fn intern_placeholder(
 pub fn compile_sqlarg(
     schema: Rc<RefCell<Schema>>,
     expr: &sqlast::Expr,
-) -> Result<TypedSQLExpr<SType>> {
+) -> Result<TypedSQLExpr<MType>> {
     Ok(intern_placeholder(
         schema.clone(),
         "param",
@@ -211,8 +205,8 @@ pub fn compile_sqlarg(
 }
 
 pub fn combine_sqlparams(
-    all: Vec<&TypedSQLExpr<SType>>,
-) -> Result<BTreeMap<ast::Ident, TypedExpr<SType>>> {
+    all: Vec<&TypedSQLExpr<MType>>,
+) -> Result<BTreeMap<ast::Ident, TypedExpr<MType>>> {
     Ok(all
         .iter()
         .map(|t| t.expr.params.clone())
@@ -223,7 +217,7 @@ pub fn combine_sqlparams(
 pub fn compile_select(
     schema: Rc<RefCell<Schema>>,
     select: &sqlast::Select,
-) -> Result<TypedExpr<SType>> {
+) -> Result<TypedExpr<MType>> {
     if select.distinct {
         return Err(CompileError::unimplemented("DISTINCT"));
     }
@@ -316,9 +310,9 @@ pub fn compile_select(
 
                     // TODO: This should unify the type with [unknown] instead
                     //
-                    if !matches!(relation.type_, SType::List { .. }) {
+                    if !matches!(relation.type_, MType::List { .. }) {
                         return Err(CompileError::wrong_type(
-                            &SType::List(Box::new(SType::Unknown)),
+                            &MType::List(mkref(MType::new_unknown())),
                             &relation.type_,
                         ));
                     }
@@ -379,7 +373,7 @@ pub fn compile_select(
 pub fn compile_sqlquery(
     schema: Rc<RefCell<Schema>>,
     query: &sqlast::Query,
-) -> Result<TypedExpr<SType>> {
+) -> Result<TypedExpr<MType>> {
     if query.with.is_some() {
         return Err(CompileError::unimplemented("WITH"));
     }
@@ -418,11 +412,11 @@ pub fn compile_sqlquery(
 pub fn compile_sqlexpr(
     schema: Rc<RefCell<Schema>>,
     expr: &sqlast::Expr,
-) -> Result<TypedExpr<SType>> {
+) -> Result<TypedExpr<MType>> {
     match expr {
         sqlast::Expr::Value(v) => match v {
             sqlast::Value::Number(n, _) => Ok(TypedExpr {
-                type_: SType::Atom(parse_numeric_type(n)?),
+                type_: MType::Atom(parse_numeric_type(n)?),
                 expr: Expr::SQLExpr(SQLExpr {
                     params: BTreeMap::new(),
                     expr: expr.clone(),
@@ -458,13 +452,13 @@ pub fn compile_sqlexpr(
             )),
         },
         sqlast::Expr::BinaryOp { left, op, right } => {
-            let cleft = compile_sqlarg(schema.clone(), left)?;
-            let cright = compile_sqlarg(schema.clone(), right)?;
+            let mut cleft = compile_sqlarg(schema.clone(), left)?;
+            let mut cright = compile_sqlarg(schema.clone(), right)?;
             let params = combine_sqlparams(vec![&cleft, &cright])?;
             let type_ = match op {
                 sqlast::BinaryOperator::Plus => {
-                    unify_types(&resolve_global_atom("number")?, &cleft.type_)?;
-                    unify_types(&resolve_global_atom("number")?, &cright.type_)?;
+                    unify_types(&mut resolve_global_atom("number")?, &mut cleft.type_)?;
+                    unify_types(&mut resolve_global_atom("number")?, &mut cright.type_)?;
                     resolve_global_atom("number")?
                 }
                 _ => {
@@ -506,18 +500,18 @@ pub fn compile_sqlexpr(
 
             let func = compile_reference(schema.clone(), &name.0)?;
             let fn_type = match func.type_ {
-                SType::Fn(f) => f,
+                MType::Fn(f) => f,
                 _ => {
                     return Err(CompileError::wrong_type(
-                        &SType::Fn(SFnType {
+                        &MType::Fn(MFnType {
                             args: Vec::new(),
-                            ret: Box::new(SType::Unknown),
+                            ret: mkref(MType::new_unknown()),
                         }),
                         &func.type_,
                     ))
                 }
             };
-            let mut compiled_args: BTreeMap<String, TypedNameAndSQLExpr<SType>> = BTreeMap::new();
+            let mut compiled_args: BTreeMap<String, TypedNameAndSQLExpr<MType>> = BTreeMap::new();
             let mut pos: usize = 0;
             for arg in args {
                 let (name, expr) = match arg {
@@ -559,12 +553,12 @@ pub fn compile_sqlexpr(
             }
 
             let mut arg_sqlexprs = Vec::new();
-            for arg in fn_type.args {
-                if let Some(compiled_arg) = compiled_args.get(&arg.name) {
-                    unify_types(&arg.type_, &compiled_arg.type_)?;
-                    arg_sqlexprs.push(compiled_arg);
+            for arg in &fn_type.args {
+                if let Some(compiled_arg) = compiled_args.get_mut(&arg.name) {
+                    unify_types(&mut *arg.type_.borrow_mut(), &mut compiled_arg.type_)?;
+                    arg_sqlexprs.push(compiled_arg.clone());
                 } else {
-                    return Err(CompileError::no_such_entry(vec![arg.name]));
+                    return Err(CompileError::no_such_entry(vec![arg.name.clone()]));
                 }
             }
 
@@ -575,10 +569,16 @@ pub fn compile_sqlexpr(
             let expr = if true {
                 let arg_exprs: Vec<_> = arg_sqlexprs
                     .iter()
-                    .map(|e| Expr::SQLExpr(e.expr.clone()))
+                    .map(|e| TypedExpr {
+                        type_: e.type_.clone(),
+                        expr: Expr::SQLExpr(e.expr.clone()),
+                    })
                     .collect();
                 Expr::FnCall(FnCallExpr {
-                    func: Box::new(func.expr),
+                    func: Box::new(TypedExpr {
+                        type_: MType::Fn(fn_type.clone()),
+                        expr: func.expr,
+                    }),
                     args: arg_exprs,
                 })
             } else {
@@ -598,7 +598,7 @@ pub fn compile_sqlexpr(
                     placeholder_name.clone(),
                     TypedExpr {
                         expr: func.expr,
-                        type_: *fn_type.ret.clone(),
+                        type_: fn_type.ret.borrow().clone(),
                     },
                 );
 
@@ -626,12 +626,11 @@ pub fn compile_sqlexpr(
                 })
             };
 
+            let type_ = fn_type.ret.borrow().clone();
+
             // XXX There are cases here where we could inline eagerly
             //
-            Ok(TypedExpr {
-                type_: fn_type.ret.as_ref().clone(),
-                expr,
-            })
+            Ok(TypedExpr { type_, expr })
         }
         sqlast::Expr::CompoundIdentifier(sqlpath) => {
             // XXX There are cases here where we could inline eagerly
@@ -649,7 +648,7 @@ pub fn compile_sqlexpr(
     }
 }
 
-fn find_field<'a>(fields: &'a Vec<SField>, name: &str) -> Option<&'a SField> {
+fn find_field<'a>(fields: &'a Vec<MField>, name: &str) -> Option<&'a MField> {
     for f in fields.iter() {
         if f.name == name {
             return Some(f);
@@ -658,45 +657,115 @@ fn find_field<'a>(fields: &'a Vec<SField>, name: &str) -> Option<&'a SField> {
     None
 }
 
+impl SType {
+    pub fn instantiate(&self) -> Result<MType> {
+        let variables: BTreeMap<_, _> = self
+            .variables
+            .iter()
+            .map(|n| (n.clone(), MType::new_unknown()))
+            .collect();
+
+        return Ok(self.body.substitute(&variables)?);
+    }
+}
+
+impl MType {
+    pub fn substitute(&self, variables: &BTreeMap<String, MType>) -> Result<MType> {
+        match self {
+            MType::Atom(a) => Ok(MType::Atom(a.clone())),
+            MType::Record(fields) => Ok(MType::Record(
+                fields
+                    .iter()
+                    .map(|f| {
+                        Ok(MField {
+                            name: f.name.clone(),
+                            type_: mkref(f.type_.borrow().substitute(variables)?),
+                            nullable: f.nullable,
+                        })
+                    })
+                    .collect::<Result<_>>()?,
+            )),
+            MType::List(i) => Ok(MType::List(mkref(i.borrow().substitute(variables)?))),
+            MType::Fn(MFnType { args, ret }) => Ok(MType::Fn(MFnType {
+                args: args
+                    .iter()
+                    .map(|a| {
+                        Ok(MField {
+                            name: a.name.clone(),
+                            type_: mkref(a.type_.borrow().substitute(variables)?),
+                            nullable: a.nullable,
+                        })
+                    })
+                    .collect::<Result<_>>()?,
+                ret: mkref(ret.borrow().substitute(variables)?),
+            })),
+            MType::Name(n) => Ok(variables
+                .get(n)
+                .ok_or(CompileError::no_such_entry(vec![n.clone()]))?
+                .clone()),
+
+            MType::Unknown => Ok(MType::Unknown),
+            MType::Ref(r) => match &*r.borrow() {
+                // Be careful to preserve references to shared unknown values
+                //
+                MType::Unknown => return Ok(MType::Ref(r.clone())),
+                _ => return Ok(MType::Ref(mkref(r.borrow().substitute(variables)?))),
+            },
+        }
+    }
+}
+
 pub fn compile_reference(
     schema: Rc<RefCell<Schema>>,
     sqlpath: &Vec<sqlast::Ident>,
-) -> Result<TypedExpr<SType>> {
+) -> Result<TypedExpr<MType>> {
     let path: Vec<_> = sqlpath.iter().map(|e| e.value.clone()).collect();
-    let (decl, remainder) = lookup_path(schema.clone(), &path)?;
+    let (decl, remainder) = lookup_path(schema.clone(), &path, true /* import_global */)?;
     let type_ = match &decl.value {
-        SchemaEntry::Expr(v) => v.as_ref().borrow(),
+        SchemaEntry::Expr(v) => v.as_ref(),
         _ => return Err(CompileError::wrong_kind(path.clone(), "value", &decl)),
     }
+    .borrow()
     .type_
-    .clone();
+    .instantiate()?;
 
     let top_level_ref = TypedExpr {
         type_: type_.clone(),
-        expr: Expr::Decl(decl),
+        expr: Expr::SchemaEntry(SchemaEntryExpr {
+            debug_name: decl.name.clone(),
+            entry: decl.value,
+        }),
     };
 
-    let mut current = &type_;
+    let mut current = Rc::new(RefCell::new(type_));
     for i in 0..remainder.len() {
         let name = &remainder[i];
-        match current {
-            SType::Record(fields) => {
-                if let Some(field) = find_field(fields, name) {
-                    current = &field.type_;
+        let next = match &*current.borrow() {
+            MType::Record(fields) => {
+                if let Some(field) = find_field(&fields, name) {
+                    field.type_.clone()
                 } else {
                     return Err(CompileError::wrong_type(
-                        &SType::Record(vec![SField::new_nullable(name.clone(), SType::Unknown)]),
-                        current,
+                        &MType::Record(vec![MField::new_nullable(
+                            name.clone(),
+                            MType::new_unknown(),
+                        )]),
+                        &*current.borrow(),
                     ));
                 }
             }
             _ => {
                 return Err(CompileError::wrong_type(
-                    &SType::Record(vec![SField::new_nullable(name.clone(), SType::Unknown)]),
-                    current,
+                    &MType::Record(vec![MField::new_nullable(
+                        name.clone(),
+                        MType::new_unknown(),
+                    )]),
+                    &*current.borrow(),
                 ))
             }
-        }
+        };
+
+        current = next;
     }
 
     Ok(match remainder.len() {
@@ -716,7 +785,7 @@ pub fn compile_reference(
             }));
 
             TypedExpr {
-                type_: current.clone(),
+                type_: current.borrow().clone(),
                 expr: Expr::SQLExpr(SQLExpr {
                     params: placeholder.expr.params,
                     expr: sqlast::Expr::CompoundIdentifier(full_name),
@@ -726,36 +795,125 @@ pub fn compile_reference(
     })
 }
 
-pub fn compile_expr(schema: Rc<RefCell<Schema>>, expr: &ast::Expr) -> Result<TypedExpr<SType>> {
+pub fn compile_expr(schema: Rc<RefCell<Schema>>, expr: &ast::Expr) -> Result<TypedExpr<MType>> {
     match expr {
         ast::Expr::SQLQuery(q) => Ok(compile_sqlquery(schema.clone(), q)?),
         ast::Expr::SQLExpr(e) => Ok(compile_sqlexpr(schema.clone(), e)?),
     }
 }
 
-pub fn unify_types(lhs: &SType, rhs: &SType) -> Result<SType> {
-    if matches!(rhs, SType::Unknown) {
-        return Ok(lhs.clone());
+pub fn unify_fields(lhs: &mut Vec<MField>, rhs: &mut Vec<MField>) -> Result<()> {
+    let err = CompileError::wrong_type(&MType::Record(lhs.clone()), &MType::Record(rhs.clone()));
+    if lhs.len() != rhs.len() {
+        return Err(err);
     }
 
-    if matches!(lhs, SType::Unknown) {
-        return Ok(rhs.clone());
+    for i in 0..lhs.len() {
+        if lhs[i].name != rhs[i].name {
+            return Err(err);
+        }
+
+        if !lhs[i].nullable && rhs[i].nullable {
+            return Err(err);
+        }
+
+        unify_types(
+            &mut *lhs[i].type_.borrow_mut(),
+            &mut *rhs[i].type_.borrow_mut(),
+        )?;
     }
 
-    if *lhs != *rhs {
-        return Err(CompileError::wrong_type(lhs, rhs));
+    Ok(())
+}
+
+pub fn internalize(type_: &mut MType) {
+    let t = match type_ {
+        MType::Ref(t) => {
+            match &*t.borrow() {
+                MType::Unknown => return,
+                _ => {}
+            }
+
+            internalize(&mut t.borrow_mut());
+            t.borrow().clone()
+        }
+        _ => return,
+    };
+
+    *type_ = t;
+}
+
+pub fn unify_types(lhs: &mut MType, rhs: &mut MType) -> Result<()> {
+    internalize(lhs);
+    internalize(rhs);
+
+    if !lhs.is_known() && rhs.is_known() {
+        unify_types(rhs, lhs)?;
+    } else {
+        match rhs {
+            MType::Atom(ra) => match lhs {
+                MType::Atom(la) => {
+                    if ra != la {
+                        return Err(CompileError::wrong_type(lhs, rhs));
+                    }
+                }
+                _ => return Err(CompileError::wrong_type(lhs, rhs)),
+            },
+            MType::Record(rfields) => match lhs {
+                MType::Record(lfields) => unify_fields(lfields, rfields)?,
+                _ => return Err(CompileError::wrong_type(lhs, rhs)),
+            },
+            MType::List(rinner) => match lhs {
+                MType::List(linner) => {
+                    unify_types(&mut *linner.borrow_mut(), &mut *rinner.borrow_mut())?
+                }
+                _ => return Err(CompileError::wrong_type(lhs, rhs)),
+            },
+            MType::Fn(MFnType {
+                args: rargs,
+                ret: rret,
+            }) => match lhs {
+                MType::Fn(MFnType {
+                    args: largs,
+                    ret: lret,
+                }) => {
+                    unify_fields(largs, rargs)?;
+                    unify_types(&mut lret.borrow_mut(), &mut *rret.borrow_mut())?;
+                }
+                _ => return Err(CompileError::wrong_type(lhs, rhs)),
+            },
+            MType::Ref(rref) => {
+                *rref = match lhs {
+                    MType::Ref(lref) => lref.clone(),
+                    _ => mkref(lhs.clone()),
+                }
+            }
+            MType::Name(name) => {
+                return Err(CompileError::internal(
+                    format!("Encountered free type variable: {}", name).as_str(),
+                ))
+            }
+            MType::Unknown => {
+                return Err(CompileError::internal(
+                    "Type unknown should always be behind a reference",
+                ))
+            }
+        }
     }
 
-    return Ok(lhs.clone());
+    Ok(())
 }
 
 pub fn rebind_decl(_schema: SchemaInstance, decl: &Decl) -> Result<SchemaEntry> {
     match &decl.value {
         SchemaEntry::Schema(s) => Ok(SchemaEntry::Schema(s.clone())),
         SchemaEntry::Type(t) => Ok(SchemaEntry::Type(t.clone())),
-        SchemaEntry::Expr(e) => Ok(SchemaEntry::Expr(mkref(TypedExpr {
+        SchemaEntry::Expr(e) => Ok(SchemaEntry::Expr(mkref(STypedExpr {
             type_: e.borrow().type_.clone(),
-            expr: Expr::Decl(decl.clone()),
+            expr: Expr::SchemaEntry(SchemaEntryExpr {
+                debug_name: decl.name.clone(),
+                entry: decl.value.clone(),
+            }),
         }))),
     }
 }
@@ -805,7 +963,7 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                 let checked = match args {
                     None => None,
                     Some(args) => {
-                        let externs = imported.borrow().schema.borrow().externs.clone();
+                        let mut externs = imported.borrow().schema.borrow().externs.clone();
                         let mut checked = BTreeMap::new();
                         for arg in args {
                             let expr = match &arg.expr {
@@ -822,15 +980,15 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                                 return Err(CompileError::duplicate_entry(vec![arg.name.clone()]));
                             }
 
-                            if let Some(extern_) = externs.get(&arg.name) {
-                                let compiled = compile_expr(schema.clone(), &expr)?;
+                            if let Some(extern_) = externs.get_mut(&arg.name) {
+                                let mut compiled = compile_expr(schema.clone(), &expr)?;
 
-                                let type_ = unify_types(extern_, &compiled.type_)?;
+                                unify_types(extern_, &mut compiled.type_)?;
                                 checked.insert(
                                     arg.name.clone(),
                                     TypedNameAndExpr {
                                         name: arg.name.clone(),
-                                        type_,
+                                        type_: extern_.clone(),
                                         expr: compiled.expr,
                                     },
                                 );
@@ -900,7 +1058,11 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                                 return Err(CompileError::unimplemented("path imports"));
                             }
 
-                            let (decl, r) = lookup_path(imported.borrow().schema.clone(), &item)?;
+                            let (decl, r) = lookup_path(
+                                imported.borrow().schema.clone(),
+                                &item,
+                                false, /* import_global */
+                            )?;
                             if r.len() > 0 {
                                 return Err(CompileError::no_such_entry(r.clone()));
                             }
@@ -955,8 +1117,8 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                             public: true,
                             extern_: true,
                             name: arg.name.clone(),
-                            value: SchemaEntry::Expr(mkref(TypedExpr {
-                                type_: type_.clone(),
+                            value: SchemaEntry::Expr(mkref(STypedExpr {
+                                type_: SType::new_mono(type_.clone()),
                                 expr: Expr::Unknown,
                             })),
                         },
@@ -965,24 +1127,25 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                         .borrow_mut()
                         .externs
                         .insert(arg.name.clone(), type_.clone());
-                    compiled_args.push(SField::new_nullable(arg.name.clone(), type_.clone()));
+                    compiled_args.push(MField::new_nullable(arg.name.clone(), type_.clone()));
                 }
 
-                let compiled = compile_expr(inner_schema.clone(), body)?;
-                let type_ = if let Some(ret) = ret {
-                    unify_types(&resolve_type(inner_schema.clone(), ret)?, &compiled.type_)?
-                } else {
-                    compiled.type_
-                };
+                let mut compiled = compile_expr(inner_schema.clone(), body)?;
+                if let Some(ret) = ret {
+                    unify_types(
+                        &mut resolve_type(inner_schema.clone(), ret)?,
+                        &mut compiled.type_,
+                    )?
+                }
 
                 vec![(
                     name.clone(),
                     false, /* extern_ */
-                    SchemaEntry::Expr(mkref(TypedExpr {
-                        type_: SType::Fn(SFnType {
+                    SchemaEntry::Expr(mkref(STypedExpr {
+                        type_: SType::new_mono(MType::Fn(MFnType {
                             args: compiled_args,
-                            ret: Box::new(type_.clone()),
-                        }),
+                            ret: mkref(compiled.type_.clone()),
+                        })),
                         expr: Expr::Fn(FnExpr {
                             inner_schema: inner_schema.clone(),
                             body: Box::new(compiled.expr),
@@ -991,18 +1154,18 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                 )]
             }
             ast::StmtBody::Let { name, type_, body } => {
-                let lhs_type = if let Some(t) = type_ {
+                let mut lhs_type = if let Some(t) = type_ {
                     resolve_type(schema.clone(), &t)?
                 } else {
-                    SType::Unknown
+                    MType::new_unknown()
                 };
-                let compiled = compile_expr(schema.clone(), &body)?;
-                let type_ = unify_types(&lhs_type, &compiled.type_)?;
+                let mut compiled = compile_expr(schema.clone(), &body)?;
+                unify_types(&mut lhs_type, &mut compiled.type_)?;
                 vec![(
                     name.clone(),
                     false, /* extern_ */
-                    SchemaEntry::Expr(mkref(TypedExpr {
-                        type_,
+                    SchemaEntry::Expr(mkref(STypedExpr {
+                        type_: SType::new_mono(lhs_type),
                         expr: compiled.expr,
                     })),
                 )]
@@ -1010,8 +1173,8 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
             ast::StmtBody::Extern { name, type_ } => vec![(
                 name.clone(),
                 true, /* extern_ */
-                SchemaEntry::Expr(mkref(TypedExpr {
-                    type_: resolve_type(schema.clone(), type_)?,
+                SchemaEntry::Expr(mkref(STypedExpr {
+                    type_: SType::new_mono(resolve_type(schema.clone(), type_)?),
                     expr: Expr::Unknown,
                 })),
             )],
@@ -1038,7 +1201,7 @@ pub fn compile_schema_entries(schema: Rc<RefCell<Schema>>, ast: &ast::Schema) ->
                         schema
                             .borrow_mut()
                             .externs
-                            .insert(name.clone(), e.borrow().type_.clone());
+                            .insert(name.clone(), e.borrow().type_.instantiate()?);
                     }
                     _ => return Err(CompileError::unimplemented("type externs")),
                 }

@@ -1,8 +1,8 @@
 // TODO: I've left some unused_imports here because they'll be useful while filling in the
 // SchemaProvider implementation
 use datafusion::arrow::{
-    array::Float64Array,
-    datatypes::{DataType, Field as DFField, Schema as DFSchema},
+    array::{Float64Array, StringArray},
+    datatypes::{DataType, Field as DFField, Schema as DFSchema, SchemaRef as DFSchemaRef},
     record_batch::RecordBatch,
 };
 use datafusion::common::{DataFusionError, Result as DFResult, ScalarValue, Statistics};
@@ -16,7 +16,7 @@ use datafusion::datasource::object_store::ObjectStoreUrl;
 use datafusion::datasource::{TableProvider, TableType};
 use datafusion::execution::context::{SessionConfig, SessionContext};
 use datafusion::execution::runtime_env::RuntimeEnv;
-use datafusion::logical_expr::{AggregateUDF, LogicalPlan, ScalarUDF, TableSource};
+use datafusion::logical_expr::{LogicalPlan, TableSource};
 use datafusion::physical_expr::var_provider::{VarProvider, VarType};
 use datafusion::physical_plan::collect;
 use datafusion::physical_plan::file_format::FileScanConfig;
@@ -29,7 +29,7 @@ use datafusion::sql::{
 use object_store::path::Path;
 use object_store::ObjectMeta;
 use sqlparser::ast as sqlast;
-use std::{collections::HashMap, sync::Arc};
+use std::{any::Any, collections::HashMap, sync::Arc};
 
 use super::error::{fail, rt_unimplemented, Result};
 use crate::schema;
@@ -48,7 +48,8 @@ pub fn eval(
     let schema_provider = Arc::new(SchemaProvider::new(params));
     register_params(schema_provider.clone(), &mut ctx)?;
 
-    let sql_to_rel = SqlToRel::new(schema_provider.as_ref());
+    let state = ctx.state();
+    let sql_to_rel = SqlToRel::new(&state);
 
     let mut ctes = HashMap::new(); // We may eventually want to parse/support these
     let plan = sql_to_rel.query_to_plan(query.clone(), &mut ctes)?;
@@ -73,7 +74,15 @@ pub fn eval(
                     None => Value::Null,
                 }));
             }
-            dt => return rt_unimplemented!("Arrays of type {:?}", dt),
+            DataType::Utf8 => {
+                let arr: &StringArray = col.as_any().downcast_ref().expect("Arrow cast");
+                // XXX Avoid copying
+                ret.extend(arr.iter().map(|i| match i {
+                    Some(i) => Value::Utf8(i.to_string()),
+                    None => Value::Null,
+                }));
+            }
+            dt => return rt_unimplemented!("Arrays of type {:?} (query: {})", dt, query.clone()),
         }
     }
 
@@ -259,6 +268,7 @@ impl SQLParam {
                         Arc::new(s.clone()),
                         vec![r.clone().as_arrow_recordbatch().as_ref().clone()],
                     )?;
+                    eprintln!("registering table: {}", self.name);
                     ctx.register_table(self.name.as_str(), Arc::new(table))?;
                 }
                 _ => {
@@ -271,6 +281,30 @@ impl SQLParam {
         };
 
         Ok(())
+    }
+
+    pub fn get_table_source(&self) -> DFResult<Arc<dyn TableSource>> {
+        match &self.type_ {
+            DFType::Schema(s) => Ok(Arc::new(SQLTableParam { schema: s.clone() })),
+            _ => Err(DataFusionError::Execution(format!(
+                "Not a table: {}",
+                self.name
+            ))),
+        }
+    }
+}
+
+struct SQLTableParam {
+    schema: DFSchema,
+}
+
+impl TableSource for SQLTableParam {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn schema(&self) -> DFSchemaRef {
+        Arc::new(self.schema.clone())
     }
 }
 
@@ -292,38 +326,6 @@ fn register_params(schema: Arc<SchemaProvider>, ctx: &mut SessionContext) -> Res
     }
 
     Ok(())
-}
-
-impl ContextProvider for SchemaProvider {
-    fn get_table_provider(&self, name: TableReference) -> DFResult<Arc<dyn TableSource>> {
-        Err(DataFusionError::Plan(format!(
-            "Table not found: {}",
-            name.table()
-        )))
-    }
-
-    fn get_function_meta(&self, _name: &str) -> Option<Arc<ScalarUDF>> {
-        None
-    }
-
-    fn get_aggregate_meta(&self, _name: &str) -> Option<Arc<AggregateUDF>> {
-        None
-    }
-
-    fn get_variable_type(&self, names: &[String]) -> Option<DataType> {
-        if names.len() != 1 {
-            return None;
-        }
-
-        if let Some(p) = self.params.get(&names[0]) {
-            match &p.type_ {
-                DFType::DataType(t) => Some(t.clone()),
-                _ => None,
-            }
-        } else {
-            None
-        }
-    }
 }
 
 impl VarProvider for SchemaProvider {
@@ -363,8 +365,18 @@ impl VarProvider for SchemaProvider {
         Ok(value)
     }
 
-    /// Return the type of the given variable
     fn get_type(&self, var_names: &[String]) -> Option<DataType> {
-        self.get_variable_type(var_names)
+        if var_names.len() != 1 {
+            return None;
+        }
+
+        if let Some(p) = self.params.get(&var_names[0]) {
+            match &p.type_ {
+                DFType::DataType(t) => Some(t.clone()),
+                _ => None,
+            }
+        } else {
+            None
+        }
     }
 }
