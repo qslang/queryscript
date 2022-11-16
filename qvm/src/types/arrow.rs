@@ -1,5 +1,5 @@
 use datafusion::arrow::array::{
-    as_boolean_array, as_null_array, as_primitive_array, PrimitiveArray,
+    FixedSizeBinaryArray, GenericBinaryArray, LargeStringArray, PrimitiveArray, StringArray,
 };
 use datafusion::arrow::datatypes::ArrowPrimitiveType;
 
@@ -73,6 +73,7 @@ impl<T: ArrowArray + 'static> List for T {
 
     fn as_vec(&self) -> Vec<Value> {
         use super::ArrowDataType::*;
+        use datafusion::arrow::array::*;
         use datafusion::arrow::datatypes::*;
         let vec_list: VecList = match T::data_type(self) {
             Null => VecList(
@@ -104,17 +105,22 @@ impl<T: ArrowArray + 'static> List for T {
             Float32 => as_primitive_array::<Float32Type>(self).into(),
             Float64 => as_primitive_array::<Float64Type>(self).into(),
 
+            Utf8 => as_string_array(self).to_vec(),
+            LargeUtf8 => as_largestring_array(self).to_vec(),
+            Binary => as_generic_binary_array::<i32>(self).to_vec(),
+            LargeBinary => as_generic_binary_array::<i64>(self).to_vec(),
+            FixedSizeBinary(_) => self
+                .as_any()
+                .downcast_ref::<FixedSizeBinaryArray>()
+                .unwrap()
+                .to_vec(),
+
             /*
             Timestamp(u, s) => Type::Atom(AtomicType::Timestamp(u.clone(), s.clone())),
             Date32 => Type::Atom(AtomicType::Date32),
             Date64 => Type::Atom(AtomicType::Date64),
             Time64(u) => Type::Atom(AtomicType::Time64(u.clone())),
             Interval(u) => Type::Atom(AtomicType::Interval(u.clone())),
-            Binary => Type::Atom(AtomicType::Binary),
-            FixedSizeBinary(l) => Type::Atom(AtomicType::FixedSizeBinary(*l)),
-            LargeBinary => Type::Atom(AtomicType::LargeBinary),
-            Utf8 => Type::Atom(AtomicType::Utf8),
-            LargeUtf8 => Type::Atom(AtomicType::LargeUtf8),
             Decimal128(p, s) => Type::Atom(AtomicType::Decimal128(*p, *s)),
             Decimal256(p, s) => Type::Atom(AtomicType::Decimal256(*p, *s)),
             List(f) | LargeList(f) | FixedSizeList(f, _) => {
@@ -149,3 +155,30 @@ where
         )
     }
 }
+
+trait ArrayConvert {
+    fn to_vec(&self) -> VecList;
+}
+
+macro_rules! array_conversion {
+    ($array_ty:ty, $arm:tt) => {
+        impl ArrayConvert for $array_ty {
+            fn to_vec(&self) -> VecList {
+                VecList(
+                    self.iter()
+                        .map(|x| match x {
+                            Some(v) => Value::$arm(v.into()),
+                            None => Value::Null,
+                        })
+                        .collect(),
+                )
+            }
+        }
+    };
+}
+
+array_conversion!(StringArray, Utf8);
+array_conversion!(LargeStringArray, Utf8);
+array_conversion!(GenericBinaryArray<i32>, Binary);
+array_conversion!(GenericBinaryArray<i64>, Binary);
+array_conversion!(FixedSizeBinaryArray, Binary);

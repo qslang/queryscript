@@ -5,7 +5,7 @@ macro_rules! primitive_conversion {
     ($native_ty:ty, $arm:tt) => {
         impl From<$native_ty> for Value {
             fn from(val: $native_ty) -> Self {
-                Value::$arm(val)
+                Value::$arm(val.into())
             }
         }
     };
@@ -24,11 +24,4 @@ primitive_conversion!(half::f16, Float16);
 primitive_conversion!(f32, Float32);
 primitive_conversion!(f64, Float64);
 primitive_conversion!(String, Utf8);
-
-/*
-impl From<i16> for Value {
-    fn from(val: i16) -> Self {
-        Value::Int16(val)
-    }
-}
-*/
+primitive_conversion!(&[u8], Binary);
