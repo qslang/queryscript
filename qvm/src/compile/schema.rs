@@ -1,4 +1,8 @@
 use crate::ast;
+use crate::compile::{
+    error::{CompileError, Result},
+    inference::{mkcref, CRef, Constrainable, Constrained},
+};
 use crate::runtime;
 use crate::types::{AtomicType, Field, FnType, Type};
 use sqlparser::ast as sqlast;
@@ -9,21 +13,21 @@ use std::rc::Rc;
 
 pub type Ident = ast::Ident;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 pub struct MFnType {
     pub args: Vec<MField>,
-    pub ret: Ref<MType>,
+    pub ret: CRef<MType>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 pub struct MField {
     pub name: String,
-    pub type_: Ref<MType>,
+    pub type_: CRef<MType>,
     pub nullable: bool,
 }
 
 impl MField {
-    pub fn new_nullable(name: String, type_: Ref<MType>) -> MField {
+    pub fn new_nullable(name: String, type_: CRef<MType>) -> MField {
         MField {
             name,
             type_,
@@ -32,29 +36,18 @@ impl MField {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 pub enum MType {
     Atom(AtomicType),
     Record(Vec<MField>),
-    List(Ref<MType>),
+    List(CRef<MType>),
     Fn(MFnType),
     Name(String),
-
-    Unknown,
-    Ref(Ref<MType>),
 }
 
 impl MType {
-    pub fn new_unknown() -> Ref<MType> {
-        mkref(MType::Ref(mkref(MType::Unknown)))
-    }
-
-    pub fn is_known(&self) -> bool {
-        match self {
-            MType::Unknown => false,
-            MType::Ref(r) => r.borrow().is_known(),
-            _ => true,
-        }
+    pub fn new_unknown() -> CRef<MType> {
+        CRef::new_unknown()
     }
 
     pub fn to_runtime_type(&self) -> runtime::error::Result<Type> {
@@ -66,42 +59,161 @@ impl MType {
                     .map(|f| {
                         Ok(Field {
                             name: f.name.clone(),
-                            type_: f.type_.borrow().to_runtime_type()?,
+                            type_: f.type_.must()?.borrow().to_runtime_type()?,
                             nullable: f.nullable,
                         })
                     })
                     .collect::<runtime::error::Result<Vec<_>>>()?,
             )),
-            MType::List(inner) => Ok(Type::List(Box::new(inner.borrow().to_runtime_type()?))),
+            MType::List(inner) => Ok(Type::List(Box::new(
+                inner.must()?.borrow().to_runtime_type()?,
+            ))),
             MType::Fn(MFnType { args, ret }) => Ok(Type::Fn(FnType {
                 args: args
                     .iter()
                     .map(|a| {
                         Ok(Field {
                             name: a.name.clone(),
-                            type_: a.type_.borrow().to_runtime_type()?,
+                            type_: a.type_.must()?.borrow().to_runtime_type()?,
                             nullable: a.nullable,
                         })
                     })
                     .collect::<runtime::error::Result<Vec<_>>>()?,
-                ret: Box::new(ret.borrow().to_runtime_type()?),
+                ret: Box::new(ret.must()?.borrow().to_runtime_type()?),
             })),
-            MType::Ref(r) => Ok(r.borrow().to_runtime_type()?),
-            _ => runtime::error::fail!("Unresolved type cannot exist at runtime: {:?}", self),
+            MType::Name(_) => {
+                runtime::error::fail!("Unresolved type name cannot exist at runtime: {:?}", self)
+            }
+        }
+    }
+
+    pub fn substitute(&self, variables: &BTreeMap<String, CRef<MType>>) -> Result<CRef<MType>> {
+        let type_ = match self {
+            MType::Atom(a) => mkcref(MType::Atom(a.clone())),
+            MType::Record(fields) => mkcref(MType::Record(
+                fields
+                    .iter()
+                    .map(|f| {
+                        Ok(MField {
+                            name: f.name.clone(),
+                            type_: f.type_.substitute(variables)?,
+                            nullable: f.nullable,
+                        })
+                    })
+                    .collect::<Result<_>>()?,
+            )),
+            MType::List(i) => mkcref(MType::List(i.substitute(variables)?)),
+            MType::Fn(MFnType { args, ret }) => mkcref(MType::Fn(MFnType {
+                args: args
+                    .iter()
+                    .map(|a| {
+                        Ok(MField {
+                            name: a.name.clone(),
+                            type_: a.type_.substitute(variables)?,
+                            nullable: a.nullable,
+                        })
+                    })
+                    .collect::<Result<_>>()?,
+                ret: ret.substitute(variables)?,
+            })),
+            MType::Name(n) => variables
+                .get(n)
+                .ok_or_else(|| CompileError::no_such_entry(vec![n.clone()]))?
+                .clone(),
+        };
+
+        Ok(type_)
+    }
+}
+
+impl Constrainable for MType {
+    fn unify(&self, other: &MType) -> Result<()> {
+        match self {
+            MType::Atom(ra) => match other {
+                MType::Atom(la) => {
+                    if ra != la {
+                        return Err(CompileError::wrong_type(self, other));
+                    }
+                }
+                _ => return Err(CompileError::wrong_type(self, other)),
+            },
+            MType::Record(rfields) => match other {
+                MType::Record(lfields) => lfields.unify(rfields)?,
+                _ => return Err(CompileError::wrong_type(self, other)),
+            },
+            MType::List(rinner) => match other {
+                MType::List(linner) => linner.unify(rinner)?,
+                _ => return Err(CompileError::wrong_type(self, other)),
+            },
+            MType::Fn(MFnType {
+                args: rargs,
+                ret: rret,
+            }) => match other {
+                MType::Fn(MFnType {
+                    args: largs,
+                    ret: lret,
+                }) => {
+                    largs.unify(rargs)?;
+                    lret.unify(rret)?;
+                }
+                _ => return Err(CompileError::wrong_type(self, other)),
+            },
+            MType::Name(name) => {
+                return Err(CompileError::internal(
+                    format!("Encountered free type variable: {}", name).as_str(),
+                ))
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Constrainable for Vec<MField> {
+    fn unify(&self, other: &Vec<MField>) -> Result<()> {
+        let err = || {
+            CompileError::wrong_type(&MType::Record(self.clone()), &MType::Record(other.clone()))
+        };
+        if self.len() != other.len() {
+            return Err(err());
+        }
+
+        for i in 0..self.len() {
+            if self[i].name != other[i].name {
+                return Err(err());
+            }
+
+            if self[i].nullable != other[i].nullable {
+                return Err(err());
+            }
+
+            self[i].type_.unify(&other[i].type_)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl CRef<MType> {
+    pub fn substitute(&self, variables: &BTreeMap<String, CRef<MType>>) -> Result<CRef<MType>> {
+        match &*self.borrow() {
+            Constrained::Known(t) => t.borrow().substitute(variables),
+            Constrained::Unknown { .. } => Ok(self.clone()),
+            Constrained::Ref(r) => r.substitute(variables),
         }
     }
 }
 
 pub type Ref<T> = Rc<RefCell<T>>;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 pub struct SType {
     pub variables: BTreeSet<String>,
-    pub body: Ref<MType>,
+    pub body: CRef<MType>,
 }
 
 impl SType {
-    pub fn new_mono(body: Ref<MType>) -> Ref<SType> {
+    pub fn new_mono(body: CRef<MType>) -> Ref<SType> {
         mkref(SType {
             variables: BTreeSet::new(),
             body,
@@ -109,7 +221,7 @@ impl SType {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct SchemaInstance {
     pub schema: SchemaRef,
     pub id: Option<usize>,
@@ -138,27 +250,27 @@ impl SchemaInstance {
 
 pub type Value = crate::types::Value;
 
-pub type Params<Ty> = BTreeMap<ast::Ident, TypedExpr<Ty>>;
+pub type Params<TypeRef> = BTreeMap<ast::Ident, TypedExpr<TypeRef>>;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SQLExpr<Ty> {
-    pub params: Params<Ty>,
+#[derive(Clone, Debug)]
+pub struct SQLExpr<TypeRef> {
+    pub params: Params<TypeRef>,
     pub expr: sqlast::Expr,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SQLQuery<Ty> {
-    pub params: Params<Ty>,
+#[derive(Clone, Debug)]
+pub struct SQLQuery<TypeRef> {
+    pub params: Params<TypeRef>,
     pub query: sqlast::Query,
 }
 
-#[derive(Clone, Eq, PartialEq)]
-pub struct FnExpr<Ty> {
+#[derive(Clone)]
+pub struct FnExpr<TypeRef> {
     pub inner_schema: Ref<Schema>,
-    pub body: Rc<Expr<Ty>>,
+    pub body: Rc<Expr<TypeRef>>,
 }
 
-impl<Ty: fmt::Debug> fmt::Debug for FnExpr<Ty> {
+impl<TypeRef: fmt::Debug> fmt::Debug for FnExpr<TypeRef> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Ok(f.debug_struct("FnExpr")
             .field("body", &self.body)
@@ -166,13 +278,13 @@ impl<Ty: fmt::Debug> fmt::Debug for FnExpr<Ty> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FnCallExpr<Ty> {
-    pub func: Rc<TypedExpr<Ty>>,
-    pub args: Vec<TypedExpr<Ty>>,
+#[derive(Clone, Debug)]
+pub struct FnCallExpr<TypeRef> {
+    pub func: Rc<TypedExpr<TypeRef>>,
+    pub args: Vec<TypedExpr<TypeRef>>,
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct SchemaEntryExpr {
     pub debug_name: String,
     pub entry: SchemaEntry,
@@ -186,19 +298,19 @@ impl fmt::Debug for SchemaEntryExpr {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Expr<Ty> {
-    SQLQuery(Rc<SQLQuery<Ty>>),
-    SQLExpr(Rc<SQLExpr<Ty>>),
+#[derive(Clone, Debug)]
+pub enum Expr<TypeRef> {
+    SQLQuery(Rc<SQLQuery<TypeRef>>),
+    SQLExpr(Rc<SQLExpr<TypeRef>>),
     SchemaEntry(SchemaEntryExpr),
-    Fn(FnExpr<Ty>),
-    FnCall(FnCallExpr<Ty>),
+    Fn(FnExpr<TypeRef>),
+    FnCall(FnCallExpr<TypeRef>),
     NativeFn(String),
     Unknown,
 }
 
-impl Expr<MType> {
-    pub fn to_runtime_type(&self) -> runtime::error::Result<Expr<Type>> {
+impl Expr<CRef<MType>> {
+    pub fn to_runtime_type(&self) -> runtime::error::Result<Expr<Ref<Type>>> {
         match self {
             Expr::SQLQuery(q) => {
                 let SQLQuery { params, query } = q.as_ref();
@@ -238,53 +350,60 @@ impl Expr<MType> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TypedNameAndSQLExpr<Ty> {
+#[derive(Clone, Debug)]
+pub struct TypedNameAndSQLExpr<TypeRef> {
     pub name: String,
-    pub type_: Ref<Ty>,
-    pub expr: Rc<SQLExpr<Ty>>,
+    pub type_: TypeRef,
+    pub expr: Rc<SQLExpr<TypeRef>>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TypedSQLExpr<Ty> {
-    pub type_: Ref<Ty>,
-    pub expr: Rc<SQLExpr<Ty>>,
+#[derive(Clone, Debug)]
+pub struct TypedSQLExpr<TypeRef> {
+    pub type_: TypeRef,
+    pub expr: Rc<SQLExpr<TypeRef>>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TypedExpr<Ty> {
-    pub type_: Ref<Ty>,
-    pub expr: Rc<Expr<Ty>>,
+#[derive(Clone, Debug)]
+pub struct TypedExpr<TypeRef> {
+    pub type_: TypeRef,
+    pub expr: Rc<Expr<TypeRef>>,
 }
 
-impl TypedExpr<MType> {
-    pub fn to_runtime_type(&self) -> runtime::error::Result<TypedExpr<Type>> {
-        Ok(TypedExpr::<Type> {
-            type_: mkref(self.type_.borrow().to_runtime_type()?),
+impl TypedExpr<CRef<MType>> {
+    pub fn to_runtime_type(&self) -> runtime::error::Result<TypedExpr<Ref<Type>>> {
+        Ok(TypedExpr::<Ref<Type>> {
+            type_: mkref(self.type_.must()?.borrow().to_runtime_type()?),
             expr: Rc::new(self.expr.to_runtime_type()?),
         })
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct STypedExpr {
     pub type_: Ref<SType>,
-    pub expr: Rc<Expr<MType>>,
+    pub expr: Rc<Expr<CRef<MType>>>,
 }
 
 impl STypedExpr {
-    pub fn to_runtime_type(&self) -> runtime::error::Result<TypedExpr<Type>> {
-        Ok(TypedExpr::<Type> {
-            type_: mkref(self.type_.borrow().body.borrow().to_runtime_type()?),
+    pub fn to_runtime_type(&self) -> runtime::error::Result<TypedExpr<Ref<Type>>> {
+        Ok(TypedExpr::<Ref<Type>> {
+            type_: mkref(
+                self.type_
+                    .borrow()
+                    .body
+                    .must()?
+                    .borrow()
+                    .to_runtime_type()?,
+            ),
             expr: Rc::new(self.expr.to_runtime_type()?),
         })
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum SchemaEntry {
     Schema(ast::Path),
-    Type(Ref<MType>),
+    Type(CRef<MType>),
     Expr(Ref<STypedExpr>),
 }
 
@@ -292,7 +411,7 @@ pub fn mkref<T>(t: T) -> Ref<T> {
     Rc::new(RefCell::new(t))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Decl {
     pub public: bool,
     pub extern_: bool,
@@ -300,35 +419,35 @@ pub struct Decl {
     pub value: SchemaEntry,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TypedNameAndExpr<Ty> {
+#[derive(Clone, Debug)]
+pub struct TypedNameAndExpr<TypeRef> {
     pub name: String,
-    pub type_: Ref<Ty>,
-    pub expr: Rc<Expr<Ty>>,
+    pub type_: TypeRef,
+    pub expr: Rc<Expr<TypeRef>>,
 }
 
 pub type SchemaRef = Ref<Schema>;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TypedName<Ty> {
+#[derive(Clone, Debug)]
+pub struct TypedName<TypeRef> {
     pub name: String,
-    pub type_: Ty,
+    pub type_: TypeRef,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ImportedSchema {
-    pub args: Option<Vec<BTreeMap<String, TypedNameAndExpr<MType>>>>,
+    pub args: Option<Vec<BTreeMap<String, TypedNameAndExpr<CRef<MType>>>>>,
     pub schema: SchemaRef,
 }
 
 // XXX We should implement a cheaper Eq / PartialEq over Schema, because it's
 // currently used to check if two types are equal.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Schema {
     pub folder: Option<String>,
     pub parent_scope: Option<Ref<Schema>>,
     pub next_placeholder: usize,
-    pub externs: BTreeMap<String, Ref<MType>>,
+    pub externs: BTreeMap<String, CRef<MType>>,
     pub decls: BTreeMap<String, Decl>,
     pub imports: BTreeMap<ast::Path, Ref<ImportedSchema>>,
 }
@@ -354,7 +473,7 @@ impl Schema {
                     public: true,
                     extern_: false,
                     name: "number".to_string(),
-                    value: SchemaEntry::Type(mkref(MType::Atom(AtomicType::Float64))),
+                    value: SchemaEntry::Type(mkcref(MType::Atom(AtomicType::Float64))),
                 },
             ),
             (
@@ -363,7 +482,7 @@ impl Schema {
                     public: true,
                     extern_: false,
                     name: "string".to_string(),
-                    value: SchemaEntry::Type(mkref(MType::Atom(AtomicType::Utf8))),
+                    value: SchemaEntry::Type(mkcref(MType::Atom(AtomicType::Utf8))),
                 },
             ),
             (
@@ -372,7 +491,7 @@ impl Schema {
                     public: true,
                     extern_: false,
                     name: "string".to_string(),
-                    value: SchemaEntry::Type(mkref(MType::Atom(AtomicType::Boolean))),
+                    value: SchemaEntry::Type(mkcref(MType::Atom(AtomicType::Boolean))),
                 },
             ),
             (
@@ -381,7 +500,7 @@ impl Schema {
                     public: true,
                     extern_: false,
                     name: "string".to_string(),
-                    value: SchemaEntry::Type(mkref(MType::Atom(AtomicType::Null))),
+                    value: SchemaEntry::Type(mkcref(MType::Atom(AtomicType::Null))),
                 },
             ),
             (
@@ -393,13 +512,13 @@ impl Schema {
                     value: SchemaEntry::Expr(mkref(STypedExpr {
                         type_: mkref(SType {
                             variables: BTreeSet::from(["R".to_string()]),
-                            body: mkref(MType::Fn(MFnType {
+                            body: mkcref(MType::Fn(MFnType {
                                 args: vec![MField {
                                     name: "file".to_string(),
-                                    type_: mkref(MType::Atom(AtomicType::Utf8)),
+                                    type_: mkcref(MType::Atom(AtomicType::Utf8)),
                                     nullable: false,
                                 }],
-                                ret: mkref(MType::List(mkref(MType::Name("R".to_string())))),
+                                ret: mkcref(MType::List(mkcref(MType::Name("R".to_string())))),
                             })),
                         }),
                         expr: Rc::new(Expr::NativeFn("load_json".to_string())),

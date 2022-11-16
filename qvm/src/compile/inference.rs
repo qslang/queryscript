@@ -1,27 +1,71 @@
 use crate::compile::error::*;
-use crate::compile::schema::Ref;
+use crate::compile::schema::{mkref, Ref};
+use crate::runtime;
+use std::fmt;
 use std::rc::Rc;
 
-pub trait Constrainable: Clone {}
+pub trait Constrainable: Clone + fmt::Debug {
+    fn unify(&self, other: &Self) -> Result<()>;
+}
 
-pub type Constraint<T> = fn(Ref<T>) -> Result<()>;
+pub trait Constraint<T: Constrainable>: FnMut(Ref<T>) -> Result<()> {}
+pub trait Then<T: Constrainable>: FnMut(Ref<T>) -> Result<CRef<T>> {}
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+impl<T, F> Constraint<T> for F
+where
+    T: Constrainable,
+    F: FnMut(Ref<T>) -> Result<()>,
+{
+}
+
+impl<T, F> Then<T> for F
+where
+    T: Constrainable,
+    F: FnMut(Ref<T>) -> Result<CRef<T>>,
+{
+}
+
 pub enum Constrained<T>
 where
     T: Constrainable,
 {
     Known(Ref<T>),
-    Unknown { constraints: Vec<Constraint<T>> },
+    Unknown {
+        constraints: Vec<Box<dyn Constraint<T>>>,
+    },
     Ref(CRef<T>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+impl<T: Constrainable> fmt::Debug for Constrained<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Constrained::Known(t) => f.debug_tuple("Known").field(t).finish(),
+            Constrained::Unknown { .. } => f.debug_struct("Unknown").finish_non_exhaustive(),
+            Constrained::Ref(r) => r.fmt(f),
+        }
+    }
+}
+
+pub fn mkcref<T: 'static + Constrainable>(t: T) -> CRef<T> {
+    CRef::new_known(mkref(t))
+}
+
+#[derive(Debug, Clone)]
 pub struct CRef<T>(Ref<Constrained<T>>)
 where
     T: Constrainable;
 
-impl<T: Constrainable> CRef<T> {
+impl<T: 'static + Constrainable> CRef<T> {
+    pub fn new_unknown() -> CRef<T> {
+        CRef(mkref(Constrained::Unknown {
+            constraints: Vec::new(),
+        }))
+    }
+
+    pub fn new_known(t: Ref<T>) -> CRef<T> {
+        CRef(mkref(Constrained::Known(t)))
+    }
+
     pub fn borrow(&self) -> std::cell::Ref<Constrained<T>> {
         self.0.borrow()
     }
@@ -30,7 +74,15 @@ impl<T: Constrainable> CRef<T> {
         self.0.borrow_mut()
     }
 
-    pub fn is_known(&mut self) -> Result<bool> {
+    pub fn must(&self) -> runtime::error::Result<Ref<T>> {
+        match &*self.find().borrow() {
+            Constrained::Known(t) => Ok(t.clone()),
+            Constrained::Unknown { .. } => runtime::error::fail!("Unknown cannot exist at runtime"),
+            Constrained::Ref(_) => runtime::error::fail!("Canon value should never be a ref"),
+        }
+    }
+
+    pub fn is_known(&self) -> Result<bool> {
         match &*self.find().borrow() {
             Constrained::Unknown { .. } => Ok(false),
             Constrained::Known(_) => Ok(true),
@@ -38,7 +90,46 @@ impl<T: Constrainable> CRef<T> {
         }
     }
 
-    pub fn then(&mut self, constraint: Constraint<T>) -> Result<CRef<T>> {
+    pub fn constrain<F: 'static + Clone + FnMut(Ref<T>) -> Result<()>>(
+        &self,
+        constraint: F,
+    ) -> Result<()> {
+        self.add_constraint(Box::new(constraint.clone()))
+    }
+
+    pub fn then<F: 'static + Clone + Then<T>>(&self, mut callback: F) -> Result<CRef<T>> {
+        let slot = CRef::<T>::new_unknown();
+        let ret = CRef::<T>::new_unknown();
+        ret.unify(&slot)?;
+        let constraint = move |t: Ref<T>| -> Result<()> {
+            slot.union(&callback(t)?)?;
+            Ok(())
+        };
+        self.constrain(constraint)?;
+
+        Ok(ret)
+    }
+
+    pub fn unify(&self, other: &CRef<T>) -> Result<()> {
+        let us = self.find();
+        let them = other.find();
+
+        if Rc::ptr_eq(&us.0, &them.0) {
+            return Ok(());
+        }
+
+        if !us.is_known()? || !them.is_known()? {
+            us.union(&them)?;
+        }
+
+        us.must()?.borrow().unify(&*them.must()?.borrow())?;
+
+        Ok(())
+    }
+
+    // Private methods
+    //
+    fn add_constraint(&self, mut constraint: Box<dyn Constraint<T>>) -> Result<()> {
         match &mut *self.find().borrow_mut() {
             Constrained::Known(t) => {
                 constraint(t.clone())?;
@@ -49,32 +140,32 @@ impl<T: Constrainable> CRef<T> {
             _ => return Err(CompileError::internal("Canon value should never be a ref")),
         }
 
-        Ok(self.clone())
+        Ok(())
     }
 
-    pub fn find(&mut self) -> CRef<T> {
+    fn find(&self) -> CRef<T> {
         let new = match &mut *self.borrow_mut() {
             Constrained::Ref(r) => r.find(),
             _ => return self.clone(),
         };
 
-        self.0 = new.0.clone();
+        *self.0.borrow_mut() = Constrained::Ref(new.clone());
         return new;
     }
 
-    pub fn union(&mut self, other: &mut CRef<T>) -> Result<()> {
+    fn union(&self, other: &CRef<T>) -> Result<()> {
         if !self.is_known()? && other.is_known()? {
             return other.union(self);
         }
 
-        let mut us = self.find();
+        let us = self.find();
         let them = other.find();
 
         if !Rc::ptr_eq(&us.0, &them.0) {
             match &mut *them.borrow_mut() {
                 Constrained::Unknown { constraints } => {
                     for constraint in constraints.drain(..) {
-                        us.then(constraint)?;
+                        us.add_constraint(constraint)?;
                     }
                 }
                 _ => {}

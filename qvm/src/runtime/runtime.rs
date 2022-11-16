@@ -7,9 +7,11 @@ use sqlparser::ast as sqlast;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+type TypeRef = schema::Ref<types::Type>;
+
 pub fn eval_params(
     schema: schema::SchemaRef,
-    params: &schema::Params<types::Type>,
+    params: &schema::Params<TypeRef>,
 ) -> Result<HashMap<String, SQLParam>> {
     let mut param_values = HashMap::new();
     for (name, param) in params {
@@ -25,25 +27,7 @@ pub fn eval_params(
     Ok(param_values)
 }
 
-pub fn unpack(values: &mut Vec<Value>, type_: &types::Type) -> Result<Value> {
-    match type_ {
-        types::Type::List(_) => {
-            return fail!("List values are unimplemented");
-        }
-        _ => {
-            if values.len() != 1 {
-                return fail!("Expected an expression to have exactly one row");
-            }
-
-            Ok(values.remove(0))
-        }
-    }
-}
-
-pub fn eval(
-    schema: schema::SchemaRef,
-    typed_expr: &schema::TypedExpr<types::Type>,
-) -> Result<Value> {
+pub fn eval(schema: schema::SchemaRef, typed_expr: &schema::TypedExpr<TypeRef>) -> Result<Value> {
     match &*typed_expr.expr.as_ref() {
         schema::Expr::Unknown => {
             return Err(RuntimeError::new("unresolved extern"));
