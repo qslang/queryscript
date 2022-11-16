@@ -1,7 +1,7 @@
 use crate::ast;
+use crate::compile::schema::{Decl, MType};
 use crate::parser::error::ParserError;
 use crate::runtime::error::RuntimeError;
-use crate::schema::{Decl, MType};
 use crate::types::error::TypesystemError;
 use snafu::{Backtrace, Snafu};
 use std::io;

@@ -31,16 +31,11 @@ use sqlparser::ast as sqlast;
 use std::{any::Any, collections::HashMap, sync::Arc};
 
 use super::error::{fail, Result};
-use crate::schema;
 use crate::types;
 use crate::types::{FnValue, Relation, Value};
 use chrono;
 
-pub fn eval(
-    _schema: schema::SchemaRef,
-    query: &sqlast::Query,
-    params: HashMap<String, SQLParam>,
-) -> Result<Arc<dyn Relation>> {
+pub fn eval(query: &sqlast::Query, params: HashMap<String, SQLParam>) -> Result<Arc<dyn Relation>> {
     let mut ctx =
         SessionContext::with_config_rt(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
 

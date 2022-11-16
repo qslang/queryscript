@@ -6,8 +6,8 @@ use std::rc::Rc;
 
 use crate::ast;
 use crate::compile::error::*;
+use crate::compile::schema::*;
 use crate::parser::parse_schema;
-use crate::schema::*;
 use crate::types::number::parse_numeric_type;
 
 const QVM_NAMESPACE: &str = "__qvm";

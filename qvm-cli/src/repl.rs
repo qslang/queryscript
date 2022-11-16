@@ -2,9 +2,9 @@ use rustyline::{error::ReadlineError, Editor};
 use snafu::{prelude::*, Whatever};
 
 use qvm::compile;
+use qvm::compile::schema;
 use qvm::parser;
 use qvm::runtime;
-use qvm::schema;
 
 pub fn run() {
     let cwd = std::env::current_dir()

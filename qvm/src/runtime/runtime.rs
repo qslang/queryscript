@@ -1,6 +1,6 @@
 use super::sql::SQLParam;
+use crate::compile::schema;
 use crate::runtime::error::*;
-use crate::schema;
 use crate::types;
 use crate::types::{Arc, Value};
 use sqlparser::ast as sqlast;
@@ -50,7 +50,7 @@ pub fn eval(
         }
         schema::Expr::SchemaEntry(schema::SchemaEntryExpr { entry, .. }) => {
             let ret = match entry {
-                crate::schema::SchemaEntry::Expr(e) => eval(
+                schema::SchemaEntry::Expr(e) => eval(
                     schema.clone(),
                     &schema::TypedExpr {
                         type_: typed_expr.type_.clone(),
@@ -87,9 +87,7 @@ pub fn eval(
         schema::Expr::SQLQuery(q) => {
             let schema::SQLQuery { query, params } = q.as_ref();
             let sql_params = eval_params(schema.clone(), &params)?;
-            Ok(Value::Relation(super::sql::eval(
-                schema, &query, sql_params,
-            )?))
+            Ok(Value::Relation(super::sql::eval(&query, sql_params)?))
         }
         schema::Expr::SQLExpr(e) => {
             let schema::SQLExpr { expr, params } = e.as_ref();
@@ -125,7 +123,7 @@ pub fn eval(
             };
 
             // TODO: This ownership model implies some necessary copying (below).
-            let rows = super::sql::eval(schema, &query, sql_params)?;
+            let rows = super::sql::eval(&query, sql_params)?;
 
             // TODO: These runtime checks may only be necessary in debug mode
             if rows.num_batches() != 1 {
