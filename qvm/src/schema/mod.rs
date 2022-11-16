@@ -12,21 +12,21 @@ pub type Ident = ast::Ident;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MFnType {
     pub args: Vec<MField>,
-    pub ret: Rc<RefCell<MType>>,
+    pub ret: Ref<MType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MField {
     pub name: String,
-    pub type_: Rc<RefCell<MType>>,
+    pub type_: Ref<MType>,
     pub nullable: bool,
 }
 
 impl MField {
-    pub fn new_nullable(name: String, type_: MType) -> MField {
+    pub fn new_nullable(name: String, type_: Ref<MType>) -> MField {
         MField {
             name,
-            type_: mkref(type_),
+            type_,
             nullable: true,
         }
     }
@@ -36,17 +36,17 @@ impl MField {
 pub enum MType {
     Atom(AtomicType),
     Record(Vec<MField>),
-    List(Rc<RefCell<MType>>),
+    List(Ref<MType>),
     Fn(MFnType),
     Name(String),
 
     Unknown,
-    Ref(Rc<RefCell<MType>>),
+    Ref(Ref<MType>),
 }
 
 impl MType {
-    pub fn new_unknown() -> MType {
-        MType::Ref(mkref(MType::Unknown))
+    pub fn new_unknown() -> Ref<MType> {
+        mkref(MType::Ref(mkref(MType::Unknown)))
     }
 
     pub fn is_known(&self) -> bool {
@@ -92,18 +92,20 @@ impl MType {
     }
 }
 
+pub type Ref<T> = Rc<RefCell<T>>;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SType {
     pub variables: BTreeSet<String>,
-    pub body: MType,
+    pub body: Ref<MType>,
 }
 
 impl SType {
-    pub fn new_mono(body: MType) -> SType {
-        SType {
+    pub fn new_mono(body: Ref<MType>) -> Ref<SType> {
+        mkref(SType {
             variables: BTreeSet::new(),
             body,
-        }
+        })
     }
 }
 
@@ -152,8 +154,8 @@ pub struct SQLQuery<Ty> {
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct FnExpr<Ty> {
-    pub inner_schema: Rc<RefCell<Schema>>,
-    pub body: Box<Expr<Ty>>,
+    pub inner_schema: Ref<Schema>,
+    pub body: Rc<Expr<Ty>>,
 }
 
 impl<Ty: fmt::Debug> fmt::Debug for FnExpr<Ty> {
@@ -166,7 +168,7 @@ impl<Ty: fmt::Debug> fmt::Debug for FnExpr<Ty> {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FnCallExpr<Ty> {
-    pub func: Box<TypedExpr<Ty>>,
+    pub func: Rc<TypedExpr<Ty>>,
     pub args: Vec<TypedExpr<Ty>>,
 }
 
@@ -186,8 +188,8 @@ impl fmt::Debug for SchemaEntryExpr {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Expr<Ty> {
-    SQLQuery(SQLQuery<Ty>),
-    SQLExpr(SQLExpr<Ty>),
+    SQLQuery(Rc<SQLQuery<Ty>>),
+    SQLExpr(Rc<SQLExpr<Ty>>),
     SchemaEntry(SchemaEntryExpr),
     Fn(FnExpr<Ty>),
     FnCall(FnCallExpr<Ty>),
@@ -198,26 +200,32 @@ pub enum Expr<Ty> {
 impl Expr<MType> {
     pub fn to_runtime_type(&self) -> runtime::error::Result<Expr<Type>> {
         match self {
-            Expr::SQLQuery(SQLQuery { params, query }) => Ok(Expr::SQLQuery(SQLQuery {
-                params: params
-                    .iter()
-                    .map(|(name, param)| Ok((name.clone(), param.to_runtime_type()?)))
-                    .collect::<runtime::error::Result<_>>()?,
-                query: query.clone(),
-            })),
-            Expr::SQLExpr(SQLExpr { params, expr }) => Ok(Expr::SQLExpr(SQLExpr {
-                params: params
-                    .iter()
-                    .map(|(name, param)| Ok((name.clone(), param.to_runtime_type()?)))
-                    .collect::<runtime::error::Result<_>>()?,
-                expr: expr.clone(),
-            })),
+            Expr::SQLQuery(q) => {
+                let SQLQuery { params, query } = q.as_ref();
+                Ok(Expr::SQLQuery(Rc::new(SQLQuery {
+                    params: params
+                        .iter()
+                        .map(|(name, param)| Ok((name.clone(), param.to_runtime_type()?)))
+                        .collect::<runtime::error::Result<_>>()?,
+                    query: query.clone(),
+                })))
+            }
+            Expr::SQLExpr(e) => {
+                let SQLExpr { params, expr } = e.as_ref();
+                Ok(Expr::SQLExpr(Rc::new(SQLExpr {
+                    params: params
+                        .iter()
+                        .map(|(name, param)| Ok((name.clone(), param.to_runtime_type()?)))
+                        .collect::<runtime::error::Result<_>>()?,
+                    expr: expr.clone(),
+                })))
+            }
             Expr::Fn(FnExpr { inner_schema, body }) => Ok(Expr::Fn(FnExpr {
                 inner_schema: inner_schema.clone(),
-                body: Box::new(body.to_runtime_type()?),
+                body: Rc::new(body.to_runtime_type()?),
             })),
             Expr::FnCall(FnCallExpr { func, args }) => Ok(Expr::FnCall(FnCallExpr {
-                func: Box::new(func.to_runtime_type()?),
+                func: Rc::new(func.to_runtime_type()?),
                 args: args
                     .iter()
                     .map(|a| Ok(a.to_runtime_type()?))
@@ -233,42 +241,42 @@ impl Expr<MType> {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TypedNameAndSQLExpr<Ty> {
     pub name: String,
-    pub type_: MType,
-    pub expr: SQLExpr<Ty>,
+    pub type_: Ref<Ty>,
+    pub expr: Rc<SQLExpr<Ty>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TypedSQLExpr<Ty> {
-    pub type_: MType,
-    pub expr: SQLExpr<Ty>,
+    pub type_: Ref<Ty>,
+    pub expr: Rc<SQLExpr<Ty>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TypedExpr<Ty> {
-    pub type_: Ty,
-    pub expr: Expr<Ty>,
+    pub type_: Ref<Ty>,
+    pub expr: Rc<Expr<Ty>>,
 }
 
 impl TypedExpr<MType> {
     pub fn to_runtime_type(&self) -> runtime::error::Result<TypedExpr<Type>> {
         Ok(TypedExpr::<Type> {
-            type_: self.type_.to_runtime_type()?,
-            expr: self.expr.to_runtime_type()?,
+            type_: mkref(self.type_.borrow().to_runtime_type()?),
+            expr: Rc::new(self.expr.to_runtime_type()?),
         })
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct STypedExpr {
-    pub type_: SType,
-    pub expr: Expr<MType>,
+    pub type_: Ref<SType>,
+    pub expr: Rc<Expr<MType>>,
 }
 
 impl STypedExpr {
     pub fn to_runtime_type(&self) -> runtime::error::Result<TypedExpr<Type>> {
         Ok(TypedExpr::<Type> {
-            type_: self.type_.body.to_runtime_type()?,
-            expr: self.expr.to_runtime_type()?,
+            type_: mkref(self.type_.borrow().body.borrow().to_runtime_type()?),
+            expr: Rc::new(self.expr.to_runtime_type()?),
         })
     }
 }
@@ -276,11 +284,11 @@ impl STypedExpr {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SchemaEntry {
     Schema(ast::Path),
-    Type(Rc<RefCell<MType>>),
-    Expr(Rc<RefCell<STypedExpr>>),
+    Type(Ref<MType>),
+    Expr(Ref<STypedExpr>),
 }
 
-pub fn mkref<T>(t: T) -> Rc<RefCell<T>> {
+pub fn mkref<T>(t: T) -> Ref<T> {
     Rc::new(RefCell::new(t))
 }
 
@@ -295,11 +303,11 @@ pub struct Decl {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TypedNameAndExpr<Ty> {
     pub name: String,
-    pub type_: Ty,
-    pub expr: Expr<Ty>,
+    pub type_: Ref<Ty>,
+    pub expr: Rc<Expr<Ty>>,
 }
 
-pub type SchemaRef = Rc<RefCell<Schema>>;
+pub type SchemaRef = Ref<Schema>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TypedName<Ty> {
@@ -318,15 +326,15 @@ pub struct ImportedSchema {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Schema {
     pub folder: Option<String>,
-    pub parent_scope: Option<Rc<RefCell<Schema>>>,
+    pub parent_scope: Option<Ref<Schema>>,
     pub next_placeholder: usize,
-    pub externs: BTreeMap<String, MType>,
+    pub externs: BTreeMap<String, Ref<MType>>,
     pub decls: BTreeMap<String, Decl>,
-    pub imports: BTreeMap<ast::Path, Rc<RefCell<ImportedSchema>>>,
+    pub imports: BTreeMap<ast::Path, Ref<ImportedSchema>>,
 }
 
 impl Schema {
-    pub fn new(folder: Option<String>) -> Rc<RefCell<Schema>> {
+    pub fn new(folder: Option<String>) -> Ref<Schema> {
         mkref(Schema {
             folder,
             parent_scope: None,
@@ -337,7 +345,7 @@ impl Schema {
         })
     }
 
-    pub fn new_global_schema() -> Rc<RefCell<Schema>> {
+    pub fn new_global_schema() -> Ref<Schema> {
         let ret = Schema::new(None);
         ret.borrow_mut().decls = BTreeMap::from([
             (
@@ -383,18 +391,18 @@ impl Schema {
                     extern_: false,
                     name: "load_json".to_string(),
                     value: SchemaEntry::Expr(mkref(STypedExpr {
-                        type_: SType {
+                        type_: mkref(SType {
                             variables: BTreeSet::from(["R".to_string()]),
-                            body: MType::Fn(MFnType {
+                            body: mkref(MType::Fn(MFnType {
                                 args: vec![MField {
                                     name: "file".to_string(),
                                     type_: mkref(MType::Atom(AtomicType::Utf8)),
                                     nullable: false,
                                 }],
                                 ret: mkref(MType::List(mkref(MType::Name("R".to_string())))),
-                            }),
-                        },
-                        expr: Expr::NativeFn("load_json".to_string()),
+                            })),
+                        }),
+                        expr: Rc::new(Expr::NativeFn("load_json".to_string())),
                     })),
                 },
             ),

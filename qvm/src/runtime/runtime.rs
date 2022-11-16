@@ -5,6 +5,7 @@ use crate::types;
 use crate::types::{Arc, Value};
 use sqlparser::ast as sqlast;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 pub fn eval_params(
     schema: schema::SchemaRef,
@@ -13,11 +14,11 @@ pub fn eval_params(
     let mut param_values = HashMap::new();
     for (name, param) in params {
         eprintln!("expr: {:?}", &param.expr);
-        let value = eval(schema.clone(), &param)?;
+        let value = eval(schema.clone(), param)?;
         eprintln!("evaluated value: {:?}", value);
         param_values.insert(
             name.clone(),
-            SQLParam::new(name.clone(), value, &param.type_),
+            SQLParam::new(name.clone(), value, &param.type_.borrow()),
         );
     }
 
@@ -43,7 +44,7 @@ pub fn eval(
     schema: schema::SchemaRef,
     typed_expr: &schema::TypedExpr<types::Type>,
 ) -> Result<Value> {
-    match &typed_expr.expr {
+    match &*typed_expr.expr.as_ref() {
         schema::Expr::Unknown => {
             return Err(RuntimeError::new("unresolved extern"));
         }
@@ -53,7 +54,7 @@ pub fn eval(
                     schema.clone(),
                     &schema::TypedExpr {
                         type_: typed_expr.type_.clone(),
-                        expr: e.borrow().expr.to_runtime_type()?,
+                        expr: Rc::new(e.borrow().expr.to_runtime_type()?),
                     },
                 ),
                 _ => {
@@ -67,7 +68,7 @@ pub fn eval(
         }
         schema::Expr::NativeFn(name) => match name.as_str() {
             "load_json" => Ok(Value::Fn(Arc::new(super::sql::LoadJsonFn::new(
-                &typed_expr.type_,
+                &*typed_expr.type_.borrow(),
             )?))),
             _ => return rt_unimplemented!("native function: {}", name),
         },
@@ -83,13 +84,15 @@ pub fn eval(
 
             fn_val.execute(arg_values)
         }
-        schema::Expr::SQLQuery(schema::SQLQuery { query, params }) => {
+        schema::Expr::SQLQuery(q) => {
+            let schema::SQLQuery { query, params } = q.as_ref();
             let sql_params = eval_params(schema.clone(), &params)?;
             Ok(Value::Relation(super::sql::eval(
                 schema, &query, sql_params,
             )?))
         }
-        schema::Expr::SQLExpr(schema::SQLExpr { expr, params }) => {
+        schema::Expr::SQLExpr(e) => {
+            let schema::SQLExpr { expr, params } = e.as_ref();
             let sql_params = eval_params(schema.clone(), &params)?;
             let query = sqlast::Query {
                 with: None,
