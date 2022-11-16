@@ -36,7 +36,7 @@ impl MField {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum MType {
     Atom(AtomicType),
     Record(Vec<MField>),
@@ -126,6 +126,48 @@ impl MType {
     }
 }
 
+struct DebugMFields<'a>(&'a Vec<MField>);
+
+impl<'a> fmt::Debug for DebugMFields<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("{")?;
+        for i in 0..self.0.len() {
+            if i > 0 {
+                f.write_str(", ")?;
+            }
+            f.write_str(self.0[i].name.as_str())?;
+            f.write_str(" ")?;
+            self.0[i].type_.fmt(f)?;
+            if !self.0[i].nullable {
+                f.write_str(" not null")?;
+            }
+        }
+        f.write_str("}")?;
+        Ok(())
+    }
+}
+
+impl fmt::Debug for MType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MType::Atom(atom) => atom.fmt(f),
+            MType::Record(fields) => DebugMFields(fields).fmt(f),
+            MType::List(inner) => {
+                f.write_str("[")?;
+                inner.fmt(f)?;
+                f.write_str("]")?;
+                Ok(())
+            }
+            MType::Fn(func) => f
+                .debug_struct("Fn")
+                .field("args", &DebugMFields(&func.args))
+                .field("ret", &func.ret)
+                .finish(),
+            MType::Name(n) => n.fmt(f),
+        }
+    }
+}
+
 impl Constrainable for MType {
     fn unify(&self, other: &MType) -> Result<()> {
         match self {
@@ -206,7 +248,7 @@ impl CRef<MType> {
 
 pub type Ref<T> = Rc<RefCell<T>>;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SType {
     pub variables: BTreeSet<String>,
     pub body: CRef<MType>,
@@ -218,6 +260,22 @@ impl SType {
             variables: BTreeSet::new(),
             body,
         })
+    }
+}
+
+impl fmt::Debug for SType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.variables.len() > 0 {
+            f.write_str("∀ ")?;
+            for (i, variable) in self.variables.iter().enumerate() {
+                if i > 0 {
+                    f.write_str(", ")?;
+                }
+                f.write_str(variable)?;
+            }
+            f.write_str(" ")?;
+        }
+        self.body.fmt(f)
     }
 }
 
@@ -252,16 +310,34 @@ pub type Value = crate::types::Value;
 
 pub type Params<TypeRef> = BTreeMap<ast::Ident, TypedExpr<TypeRef>>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SQLExpr<TypeRef> {
     pub params: Params<TypeRef>,
     pub expr: sqlast::Expr,
 }
 
-#[derive(Clone, Debug)]
+impl<T: fmt::Debug> fmt::Debug for SQLExpr<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SQLExpr")
+            .field("params", &self.params)
+            .field("expr", &self.expr.to_string())
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 pub struct SQLQuery<TypeRef> {
     pub params: Params<TypeRef>,
     pub query: sqlast::Query,
+}
+
+impl<T: fmt::Debug> fmt::Debug for SQLQuery<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SQLQuery")
+            .field("params", &self.params)
+            .field("query", &self.query.to_string())
+            .finish()
+    }
 }
 
 #[derive(Clone)]
@@ -378,7 +454,7 @@ impl TypedExpr<CRef<MType>> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct STypedExpr {
     pub type_: Ref<SType>,
     pub expr: Rc<Expr<CRef<MType>>>,
@@ -397,6 +473,15 @@ impl STypedExpr {
             ),
             expr: Rc::new(self.expr.to_runtime_type()?),
         })
+    }
+}
+
+impl fmt::Debug for STypedExpr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("STypedExpr")
+            .field("type_", &*self.type_.borrow())
+            .field("expr", &self.expr)
+            .finish()
     }
 }
 

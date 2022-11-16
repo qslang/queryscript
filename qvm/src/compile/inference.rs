@@ -39,7 +39,7 @@ where
 impl<T: Constrainable> fmt::Debug for Constrained<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Constrained::Known(t) => f.debug_tuple("Known").field(t).finish(),
+            Constrained::Known(t) => t.borrow().fmt(f),
             Constrained::Unknown { .. } => f.debug_struct("Unknown").finish_non_exhaustive(),
             Constrained::Ref(r) => r.fmt(f),
         }
@@ -50,10 +50,16 @@ pub fn mkcref<T: 'static + Constrainable>(t: T) -> CRef<T> {
     CRef::new_known(mkref(t))
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CRef<T>(Ref<Constrained<T>>)
 where
     T: Constrainable;
+
+impl<T: Constrainable> fmt::Debug for CRef<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.borrow().fmt(f)
+    }
+}
 
 impl<T: 'static + Constrainable> CRef<T> {
     pub fn new_unknown() -> CRef<T> {
