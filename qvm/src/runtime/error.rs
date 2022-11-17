@@ -19,6 +19,12 @@ pub enum RuntimeError {
     },
 
     #[snafu(context(false))]
+    TypesystemError {
+        source: crate::types::error::TypesystemError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(context(false))]
     DataFusionError {
         source: datafusion::common::DataFusionError,
         backtrace: Option<Backtrace>,

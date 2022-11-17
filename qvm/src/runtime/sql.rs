@@ -1,30 +1,20 @@
-// TODO: I've left some unused_imports here because they'll be useful while filling in the
-// SchemaProvider implementation
 use datafusion::arrow::{
-    datatypes::{DataType, Field as DFField, Schema as DFSchema, SchemaRef as DFSchemaRef},
+    datatypes::{DataType as DFDataType, Schema as DFSchema, SchemaRef as DFSchemaRef},
     record_batch::RecordBatch,
 };
 use datafusion::common::{DataFusionError, Result as DFResult, ScalarValue, Statistics};
 use datafusion::config::ConfigOptions;
 use datafusion::datasource::file_format::json::JsonFormat;
 use datafusion::datasource::file_format::FileFormat;
-#[allow(unused_imports)]
 use datafusion::datasource::memory::MemTable;
 use datafusion::datasource::object_store::ObjectStoreUrl;
-#[allow(unused_imports)]
-use datafusion::datasource::{TableProvider, TableType};
 use datafusion::execution::context::{SessionConfig, SessionContext};
 use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::logical_expr::{LogicalPlan, TableSource};
 use datafusion::physical_expr::var_provider::{VarProvider, VarType};
 use datafusion::physical_plan::collect;
 use datafusion::physical_plan::file_format::FileScanConfig;
-#[allow(unused_imports)]
-use datafusion::sql::{
-    planner::{ContextProvider, SqlToRel},
-    sqlparser::{dialect::GenericDialect, parser::Parser},
-    TableReference,
-};
+use datafusion::sql::planner::SqlToRel;
 use object_store::path::Path;
 use object_store::ObjectMeta;
 use sqlparser::ast as sqlast;
@@ -32,7 +22,7 @@ use std::{any::Any, collections::HashMap, sync::Arc};
 
 use super::error::{fail, Result};
 use crate::types;
-use crate::types::{FnValue, Relation, Value};
+use crate::types::{FnValue, Relation, Type, Value};
 use chrono;
 
 pub fn eval(query: &sqlast::Query, params: HashMap<String, SQLParam>) -> Result<Arc<dyn Relation>> {
@@ -74,10 +64,10 @@ impl LoadJsonFn {
             _ => return fail!("Type of load_json is not a function"),
         };
 
-        let schema = Arc::new(match to_dftype(ret_type) {
-            DFType::Schema(s) => s,
+        let schema = match ret_type.as_ref().try_into()? {
+            DFDataType::Struct(s) => Arc::new(DFSchema::new(s)),
             _ => return fail!("Return type of load_json is not a list of records"),
-        });
+        };
 
         Ok(LoadJsonFn { schema })
     }
@@ -162,58 +152,11 @@ impl FnValue for LoadJsonFn {
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum DFType {
-    DataType(DataType),
-    Schema(DFSchema),
-    Unknown,
-}
-
 #[derive(Debug)]
 pub struct SQLParam {
     pub name: String,
     pub value: Value,
-    pub type_: DFType,
-}
-
-fn to_dfdatatype(type_: &types::Type) -> Option<DataType> {
-    match type_ {
-        types::Type::Atom(a) => match a {
-            types::AtomicType::Null => Some(DataType::Null),
-            types::AtomicType::Boolean => Some(DataType::Boolean),
-            types::AtomicType::Int64 => Some(DataType::Int64),
-            types::AtomicType::Float64 => Some(DataType::Float64),
-            types::AtomicType::Utf8 => Some(DataType::Utf8),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-fn to_dftype(type_: &types::Type) -> DFType {
-    match type_ {
-        types::Type::Atom(_) => match to_dfdatatype(type_) {
-            Some(dt) => DFType::DataType(dt),
-            None => DFType::Unknown,
-        },
-        types::Type::List(inner) => match inner.as_ref() {
-            types::Type::Record(fields) => DFType::Schema(DFSchema {
-                fields: fields
-                    .iter()
-                    .map(|x| {
-                        DFField::new(
-                            x.name.as_str(),
-                            to_dfdatatype(&x.type_).unwrap_or(DataType::Null),
-                            x.nullable,
-                        )
-                    })
-                    .collect(),
-                metadata: HashMap::new(),
-            }),
-            _ => DFType::Unknown,
-        },
-        _ => DFType::Unknown,
-    }
+    pub type_: Type,
 }
 
 impl SQLParam {
@@ -221,43 +164,29 @@ impl SQLParam {
         SQLParam {
             name,
             value,
-            type_: to_dftype(type_),
+            type_: type_.clone(), // TODO: We should make this a reference that lives as long as
+                                  // the SQLParam
         }
     }
 
     pub fn register(&self, ctx: &mut SessionContext) -> DFResult<()> {
-        match &self.type_ {
-            DFType::Schema(s) => match &self.value {
-                Value::Relation(r) => {
-                    // XXX This copies the whole result Set
-                    //
-                    let table = MemTable::try_new(
-                        Arc::new(s.clone()),
-                        vec![r.clone().as_arrow_recordbatch().as_ref().clone()],
-                    )?;
-                    eprintln!("registering table: {}", self.name);
-                    ctx.register_table(self.name.as_str(), Arc::new(table))?;
-                }
-                _ => {
-                    return Err(DataFusionError::Internal(format!(
-                        "Relations must be represented as record batches"
-                    )));
-                }
-            },
-            _ => {}
+        let schema: Arc<DFSchema> = match (&self.type_).try_into() {
+            Ok(schema) => Arc::new(schema),
+            Err(msg) => return Err(DataFusionError::Internal(format!("{:?}", msg))),
         };
+        let record_batch = match &self.value {
+            Value::Relation(r) => r.clone().as_arrow_recordbatch(),
+            other => {
+                return Err(DataFusionError::Internal(format!(
+                    "Unexpected non-relation {:?}",
+                    other
+                )))
+            }
+        };
+        let table = MemTable::try_new(schema, vec![record_batch.as_ref().clone()])?;
+        ctx.register_table(self.name.as_str(), Arc::new(table))?;
 
         Ok(())
-    }
-
-    pub fn get_table_source(&self) -> DFResult<Arc<dyn TableSource>> {
-        match &self.type_ {
-            DFType::Schema(s) => Ok(Arc::new(SQLTableParam { schema: s.clone() })),
-            _ => Err(DataFusionError::Execution(format!(
-                "Not a table: {}",
-                self.name
-            ))),
-        }
     }
 }
 
@@ -333,16 +262,13 @@ impl VarProvider for SchemaProvider {
         Ok(value)
     }
 
-    fn get_type(&self, var_names: &[String]) -> Option<DataType> {
+    fn get_type(&self, var_names: &[String]) -> Option<DFDataType> {
         if var_names.len() != 1 {
             return None;
         }
 
         if let Some(p) = self.params.get(&var_names[0]) {
-            match &p.type_ {
-                DFType::DataType(t) => Some(t.clone()),
-                _ => None,
-            }
+            (&p.type_).try_into().ok()
         } else {
             None
         }

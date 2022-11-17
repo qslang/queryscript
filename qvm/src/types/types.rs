@@ -364,3 +364,17 @@ impl TryInto<ArrowField> for &Field {
         ))
     }
 }
+
+impl TryInto<ArrowSchema> for &Type {
+    type Error = super::error::TypesystemError;
+    fn try_into(self) -> Result<ArrowSchema> {
+        match self {
+            Type::Record(s) => Ok(ArrowSchema::new(
+                s.iter()
+                    .map(|f| Ok(f.try_into()?))
+                    .collect::<Result<Vec<ArrowField>>>()?,
+            )),
+            t => ts_fail!("Cannot convert type {:?} to record", t),
+        }
+    }
+}
