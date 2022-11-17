@@ -53,37 +53,6 @@ pub fn eval(query: &sqlast::Query, params: HashMap<String, SQLParam>) -> Result<
     // let physical_planner = DefaultPhysicalPlanner::default();
     let records = runtime.block_on(async { execute_plan(&ctx, &plan).await })?;
     Ok(records)
-
-    /*
-    let mut ret = Vec::new();
-    for batch in records.iter() {
-        if batch.num_columns() != 1 {
-            return fail!("More than 1 column: {}", batch.num_columns());
-        }
-
-        let col = batch.column(0);
-        match col.data_type() {
-            DataType::Float64 => {
-                let arr: &Float64Array = col.as_any().downcast_ref().expect("Arrow cast");
-                ret.extend(arr.iter().map(|i| match i {
-                    Some(i) => Value::Float64(i as f64),
-                    None => Value::Null,
-                }));
-            }
-            DataType::Utf8 => {
-                let arr: &StringArray = col.as_any().downcast_ref().expect("Arrow cast");
-                // XXX Avoid copying
-                ret.extend(arr.iter().map(|i| match i {
-                    Some(i) => Value::Utf8(i.to_string()),
-                    None => Value::Null,
-                }));
-            }
-            dt => return rt_unimplemented!("Arrays of type {:?} (query: {})", dt, query.clone()),
-        }
-    }
-
-    Ok(ret)
-        */
 }
 
 async fn execute_plan(ctx: &SessionContext, plan: &LogicalPlan) -> Result<Arc<dyn Relation>> {
