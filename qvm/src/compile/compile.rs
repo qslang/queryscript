@@ -26,16 +26,8 @@ pub fn lookup_schema(schema: Ref<Schema>, path: &ast::Path) -> Result<Ref<Import
         file_path_buf.set_extension("co");
         let file_path = file_path_buf.as_path();
 
-        match file_path.to_str() {
-            Some(file_path_str) => match compile_schema_from_file(file_path_str) {
-                Ok(s) => (path.clone(), s.clone()),
-                Err(CompileError::FsError { .. }) => {
-                    return Err(CompileError::no_such_entry(path.clone()))
-                }
-                Err(e) => return Err(e),
-            },
-            None => return Err(CompileError::no_such_entry(path.clone())),
-        }
+        let s = compile_schema_from_file(file_path)?;
+        (path.clone(), s.clone())
     } else {
         return Err(CompileError::no_such_entry(path.clone()));
     };
@@ -788,7 +780,7 @@ pub fn compile_schema_from_string(contents: &str) -> Result<Ref<Schema>> {
     compile_schema(None, &ast)
 }
 
-pub fn compile_schema_from_file(file_path: &str) -> Result<Ref<Schema>> {
+pub fn compile_schema_from_file(file_path: &FilePath) -> Result<Ref<Schema>> {
     let parsed_path = FilePath::new(file_path).canonicalize()?;
     if !parsed_path.exists() {
         return Err(CompileError::no_such_entry(

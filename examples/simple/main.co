@@ -1,8 +1,0 @@
-type Foo record {
-    a number,
-    b number,
-}
-
-export let foo [Foo] = load_json('foo.json');
-
-let bar = SELECT * FROM foo;
