@@ -25,3 +25,17 @@ primitive_conversion!(f32, Float32);
 primitive_conversion!(f64, Float64);
 primitive_conversion!(String, Utf8);
 primitive_conversion!(&[u8], Binary);
+primitive_conversion!(i128, Decimal128);
+primitive_conversion!(i256, Decimal256);
+
+impl<T> From<Option<T>> for Value
+where
+    T: Into<Value>,
+{
+    fn from(val: Option<T>) -> Self {
+        match val {
+            Some(v) => v.into(),
+            None => Value::Null,
+        }
+    }
+}

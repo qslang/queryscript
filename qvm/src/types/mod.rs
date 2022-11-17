@@ -1,5 +1,6 @@
 pub mod arrow;
 pub mod error;
+pub mod list;
 pub mod number;
 mod primitives;
 pub mod record;

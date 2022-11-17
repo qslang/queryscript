@@ -2223,6 +2223,7 @@ dependencies = [
 name = "qvm"
 version = "0.1.0"
 dependencies = [
+ "arrow-buffer",
  "chrono",
  "datafusion",
  "dyn-clone",

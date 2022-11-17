@@ -147,11 +147,8 @@ pub enum AtomicType {
     /// A 64-bit date representing the elapsed time since UNIX epoch (1970-01-01)
     /// in milliseconds (64 bits). Values are evenly divisible by 86400000.
     Date64,
-    // This is in the Arrow typesystem but not implemented in the ScalarValue enum in DataFusion
-    /*
     /// A 32-bit time representing the elapsed time since midnight in the unit of `TimeUnit`.
     Time32(TimeUnit),
-    */
     /// A 64-bit time representing the elapsed time since midnight in the unit of `TimeUnit`.
     Time64(TimeUnit),
     // This is in the Arrow typesystem but not implemented in the ScalarValue enum in DataFusion

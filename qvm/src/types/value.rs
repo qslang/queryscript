@@ -1,5 +1,11 @@
+pub use arrow_buffer::i256;
 pub use datafusion::arrow::{
-    array::Array as ArrowArray, array::ArrayRef as ArrowArrayRef,
+    array::Array as ArrowArray,
+    array::ArrayRef as ArrowArrayRef,
+    datatypes::{
+        DECIMAL128_MAX_PRECISION, DECIMAL128_MAX_SCALE, DECIMAL256_MAX_PRECISION,
+        DECIMAL256_MAX_SCALE,
+    },
     record_batch::RecordBatch as ArrowRecordBatch,
 };
 use dyn_clone::{clone_trait_object, DynClone};
@@ -25,6 +31,9 @@ pub enum Value {
     Float32(f32),
     Float64(f64),
 
+    Decimal128(i128),
+    Decimal256(i256),
+
     Utf8(String),
     LargeUtf8(String),
     Binary(Vec<u8>),
@@ -42,8 +51,10 @@ pub enum Value {
     Date32(i32),
     Date64(i64),
 
-    // DataFusion does not seem to have a Time32 implementation
-    Time64(i64),
+    Time32Second(i32),
+    Time32Millisecond(i32),
+    Time64Microsecond(i64),
+    Time64Nanosecond(i64),
 
     IntervalYearMonth(i32),
     IntervalDayTime(i64),
@@ -115,6 +126,14 @@ impl Value {
             Self::Float16(_) => Type::Atom(AtomicType::Float16),
             Self::Float32(_) => Type::Atom(AtomicType::Float32),
             Self::Float64(_) => Type::Atom(AtomicType::Float64),
+            Self::Decimal128(_) => Type::Atom(AtomicType::Decimal128(
+                DECIMAL128_MAX_PRECISION,
+                DECIMAL128_MAX_SCALE,
+            )),
+            Self::Decimal256(_) => Type::Atom(AtomicType::Decimal128(
+                DECIMAL256_MAX_PRECISION,
+                DECIMAL256_MAX_SCALE,
+            )),
             Self::Utf8(_) => Type::Atom(AtomicType::Utf8),
             Self::LargeUtf8(_) => Type::Atom(AtomicType::LargeUtf8),
             Self::Binary(_) => Type::Atom(AtomicType::Binary),
@@ -135,9 +154,10 @@ impl Value {
             Self::Date32(..) => Type::Atom(AtomicType::Date32),
             Self::Date64(..) => Type::Atom(AtomicType::Date64),
 
-            // DataFusion does not seem to have a Time32 implementation
-            // The Time64 type is nanonseconds according to a comment in ScalarValue
-            Self::Time64(..) => Type::Atom(AtomicType::Time64(TimeUnit::Nanosecond)),
+            Self::Time32Second(..) => Type::Atom(AtomicType::Time32(TimeUnit::Second)),
+            Self::Time32Millisecond(..) => Type::Atom(AtomicType::Time32(TimeUnit::Millisecond)),
+            Self::Time64Microsecond(..) => Type::Atom(AtomicType::Time64(TimeUnit::Nanosecond)),
+            Self::Time64Nanosecond(..) => Type::Atom(AtomicType::Time64(TimeUnit::Nanosecond)),
 
             Self::IntervalYearMonth(..) => {
                 Type::Atom(AtomicType::Interval(IntervalUnit::YearMonth))
@@ -170,6 +190,8 @@ impl Value {
             Self::Float16(x) => x as &dyn Any,
             Self::Float32(x) => x as &dyn Any,
             Self::Float64(x) => x as &dyn Any,
+            Self::Decimal128(x) => x as &dyn Any,
+            Self::Decimal256(x) => x as &dyn Any,
             Self::Utf8(x) => x as &dyn Any,
             Self::LargeUtf8(x) => x as &dyn Any,
             Self::Binary(x) => x as &dyn Any,
@@ -181,7 +203,10 @@ impl Value {
             Self::TimestampNanosecond(..) => self as &dyn Any,
             Self::Date32(x) => x as &dyn Any,
             Self::Date64(x) => x as &dyn Any,
-            Self::Time64(x) => x as &dyn Any,
+            Self::Time32Second(x) => x as &dyn Any,
+            Self::Time32Millisecond(x) => x as &dyn Any,
+            Self::Time64Microsecond(x) => x as &dyn Any,
+            Self::Time64Nanosecond(x) => x as &dyn Any,
             Self::IntervalYearMonth(x) => x as &dyn Any,
             Self::IntervalDayTime(x) => x as &dyn Any,
             Self::IntervalMonthDayNano(x) => x as &dyn Any,
