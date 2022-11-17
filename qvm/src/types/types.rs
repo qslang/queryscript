@@ -2,7 +2,7 @@ pub use datafusion::arrow::datatypes::{
     DataType as ArrowDataType, Field as ArrowField, IntervalUnit, Schema as ArrowSchema, TimeUnit,
 };
 
-use super::error::{ts_unimplemented, Result};
+use super::error::{ts_fail, ts_unimplemented, Result};
 use crate::ast;
 
 pub type Ident = ast::Ident;
@@ -278,6 +278,55 @@ impl TryFrom<&ArrowDataType> for Type {
     }
 }
 
+impl TryInto<ArrowDataType> for &Type {
+    type Error = super::error::TypesystemError;
+
+    fn try_into(self) -> Result<ArrowDataType> {
+        use AtomicType::*;
+        use Type::*;
+        Ok(match self {
+            Atom(Null) => ArrowDataType::Null,
+            Atom(Boolean) => ArrowDataType::Boolean,
+            Atom(Int8) => ArrowDataType::Int8,
+            Atom(Int16) => ArrowDataType::Int16,
+            Atom(Int32) => ArrowDataType::Int32,
+            Atom(Int64) => ArrowDataType::Int64,
+            Atom(UInt8) => ArrowDataType::UInt8,
+            Atom(UInt16) => ArrowDataType::UInt16,
+            Atom(UInt32) => ArrowDataType::UInt32,
+            Atom(UInt64) => ArrowDataType::UInt64,
+            Atom(Float16) => ArrowDataType::Float16,
+            Atom(Float32) => ArrowDataType::Float32,
+            Atom(Float64) => ArrowDataType::Float64,
+            Atom(Timestamp(tu, tz)) => ArrowDataType::Timestamp(tu.clone(), tz.clone()),
+            Atom(Date32) => ArrowDataType::Date32,
+            Atom(Date64) => ArrowDataType::Date64,
+            Atom(Time32(tu)) => ArrowDataType::Time32(tu.clone()),
+            Atom(Time64(tu)) => ArrowDataType::Time64(tu.clone()),
+            Atom(Interval(iu)) => ArrowDataType::Interval(iu.clone()),
+            Atom(Binary) => ArrowDataType::Binary,
+            Atom(FixedSizeBinary(len)) => ArrowDataType::FixedSizeBinary(*len),
+            Atom(LargeBinary) => ArrowDataType::LargeBinary,
+            Atom(Utf8) => ArrowDataType::Utf8,
+            Atom(LargeUtf8) => ArrowDataType::LargeUtf8,
+            Atom(Decimal128(p, s)) => ArrowDataType::Decimal128(*p, *s),
+            Atom(Decimal256(p, s)) => ArrowDataType::Decimal256(*p, *s),
+            Record(fields) => ArrowDataType::Struct(
+                fields
+                    .iter()
+                    .map(|x| Ok(x.try_into()?))
+                    .collect::<Result<Vec<ArrowField>>>()?,
+            ),
+            List(data_type) => ArrowDataType::List(Box::new(ArrowField::new(
+                "",
+                data_type.as_ref().try_into()?,
+                true,
+            ))),
+            Fn(_) => return ts_fail!("Arrow does not support function types"),
+        })
+    }
+}
+
 pub fn try_arrow_fields_to_fields(fields: &Vec<ArrowField>) -> Result<Vec<Field>> {
     Ok(fields
         .iter()
@@ -302,5 +351,16 @@ impl TryFrom<&ArrowSchema> for Type {
     type Error = super::error::TypesystemError;
     fn try_from(schema: &ArrowSchema) -> Result<Self> {
         (&schema.fields).try_into()
+    }
+}
+
+impl TryInto<ArrowField> for &Field {
+    type Error = super::error::TypesystemError;
+    fn try_into(self) -> Result<ArrowField> {
+        Ok(ArrowField::new(
+            &self.name,
+            (&self.type_).try_into()?,
+            self.nullable,
+        ))
     }
 }
