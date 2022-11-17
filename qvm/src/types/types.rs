@@ -365,6 +365,13 @@ impl TryInto<ArrowField> for &Field {
     }
 }
 
+pub fn try_fields_to_arrow_fields(fields: &Vec<Field>) -> Result<Vec<ArrowField>> {
+    fields
+        .iter()
+        .map(|f| f.try_into())
+        .collect::<Result<Vec<ArrowField>>>()
+}
+
 impl TryInto<ArrowSchema> for &Type {
     type Error = super::error::TypesystemError;
     fn try_into(self) -> Result<ArrowSchema> {

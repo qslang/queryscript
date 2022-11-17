@@ -172,7 +172,7 @@ impl SQLParam {
     pub fn register(&self, ctx: &mut SessionContext) -> DFResult<()> {
         let schema: Arc<DFSchema> = match (&self.type_).try_into() {
             Ok(schema) => Arc::new(schema),
-            Err(msg) => return Err(DataFusionError::Internal(format!("{:?}", msg))),
+            Err(_) => return Ok(()), // Registering a non-table is a no-op
         };
         let record_batch = match &self.value {
             Value::Relation(r) => r.clone().as_arrow_recordbatch(),
@@ -235,26 +235,12 @@ impl VarProvider for SchemaProvider {
 
         let param = self.params.get(&var_names[0]).unwrap();
 
-        let value = match &param.value {
-            Value::Null => ScalarValue::Null,
-            Value::Float64(n) => ScalarValue::Float64(Some(*n)),
-            Value::Int64(n) => ScalarValue::Int64(Some(*n)),
-            Value::Utf8(s) => ScalarValue::Utf8(Some(s.clone())),
-            Value::Boolean(b) => ScalarValue::Boolean(Some(*b)),
-            Value::Fn(_) => {
+        let value = match param.value.clone().try_into() {
+            Ok(v) => v,
+            Err(e) => {
                 return Err(DataFusionError::Internal(format!(
-                    "Cannot use function value as a scalar variable"
-                )))
-            }
-            Value::Relation(_) => {
-                return Err(DataFusionError::Internal(format!(
-                    "Cannot use record set as a scalar variable"
-                )))
-            }
-            other => {
-                return Err(DataFusionError::Internal(format!(
-                    "Unsupported type: {:?}",
-                    other
+                    "Unsupported conversion: {:?}",
+                    e
                 )));
             }
         };
