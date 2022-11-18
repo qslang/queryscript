@@ -9,7 +9,7 @@ pub trait Constrainable: Clone + fmt::Debug {
 }
 
 pub trait Constraint<T: Constrainable>: FnMut(Ref<T>) -> Result<()> {}
-pub trait Then<T: Constrainable>: FnMut(Ref<T>) -> Result<CRef<T>> {}
+pub trait Then<T: Constrainable, R: Constrainable>: FnMut(Ref<T>) -> Result<CRef<R>> {}
 
 impl<T, F> Constraint<T> for F
 where
@@ -18,10 +18,11 @@ where
 {
 }
 
-impl<T, F> Then<T> for F
+impl<T, R, F> Then<T, R> for F
 where
     T: Constrainable,
-    F: FnMut(Ref<T>) -> Result<CRef<T>>,
+    R: Constrainable,
+    F: FnMut(Ref<T>) -> Result<CRef<R>>,
 {
 }
 
@@ -31,6 +32,7 @@ where
 {
     Known(Ref<T>),
     Unknown {
+        debug_name: String,
         constraints: Vec<Box<dyn Constraint<T>>>,
     },
     Ref(CRef<T>),
@@ -40,7 +42,9 @@ impl<T: Constrainable> fmt::Debug for Constrained<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Constrained::Known(t) => t.borrow().fmt(f),
-            Constrained::Unknown { .. } => f.debug_struct("Unknown").finish_non_exhaustive(),
+            Constrained::Unknown { debug_name, .. } => {
+                f.write_str(format!("Unknown({:?})", debug_name).as_str())
+            }
             Constrained::Ref(r) => r.fmt(f),
         }
     }
@@ -62,8 +66,9 @@ impl<T: Constrainable> fmt::Debug for CRef<T> {
 }
 
 impl<T: 'static + Constrainable> CRef<T> {
-    pub fn new_unknown() -> CRef<T> {
+    pub fn new_unknown(debug_name: &str) -> CRef<T> {
         CRef(mkref(Constrained::Unknown {
+            debug_name: debug_name.to_string(),
             constraints: Vec::new(),
         }))
     }
@@ -103,12 +108,15 @@ impl<T: 'static + Constrainable> CRef<T> {
         self.add_constraint(Box::new(constraint.clone()))
     }
 
-    pub fn then<F: 'static + Clone + Then<T>>(&self, mut callback: F) -> Result<CRef<T>> {
-        let slot = CRef::<T>::new_unknown();
-        let ret = CRef::<T>::new_unknown();
+    pub fn then<R: 'static + Constrainable, F: 'static + Clone + Then<T, R>>(
+        &self,
+        mut callback: F,
+    ) -> Result<CRef<R>> {
+        let slot = CRef::<R>::new_unknown("slot");
+        let ret = CRef::<R>::new_unknown("then");
         ret.unify(&slot)?;
         let constraint = move |t: Ref<T>| -> Result<()> {
-            slot.union(&callback(t)?)?;
+            slot.unify(&callback(t)?)?;
             Ok(())
         };
         self.constrain(constraint)?;
@@ -126,9 +134,9 @@ impl<T: 'static + Constrainable> CRef<T> {
 
         if !us.is_known()? || !them.is_known()? {
             us.union(&them)?;
+        } else {
+            us.must()?.borrow().unify(&*them.must()?.borrow())?;
         }
-
-        us.must()?.borrow().unify(&*them.must()?.borrow())?;
 
         Ok(())
     }
@@ -140,7 +148,7 @@ impl<T: 'static + Constrainable> CRef<T> {
             Constrained::Known(t) => {
                 constraint(t.clone())?;
             }
-            Constrained::Unknown { constraints } => {
+            Constrained::Unknown { constraints, .. } => {
                 constraints.push(constraint);
             }
             _ => return Err(CompileError::internal("Canon value should never be a ref")),
@@ -169,7 +177,7 @@ impl<T: 'static + Constrainable> CRef<T> {
 
         if !Rc::ptr_eq(&us.0, &them.0) {
             match &mut *them.borrow_mut() {
-                Constrained::Unknown { constraints } => {
+                Constrained::Unknown { constraints, .. } => {
                     for constraint in constraints.drain(..) {
                         us.add_constraint(constraint)?;
                     }

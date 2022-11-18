@@ -1,3 +1,8 @@
-Int64(
-    1,
-)
+{
+    "__test_output": Int64(
+        1,
+    ),
+    "types": {
+        "let __test_output": Int64,
+    },
+}

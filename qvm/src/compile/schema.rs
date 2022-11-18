@@ -46,8 +46,8 @@ pub enum MType {
 }
 
 impl MType {
-    pub fn new_unknown() -> CRef<MType> {
-        CRef::new_unknown()
+    pub fn new_unknown(debug_name: &str) -> CRef<MType> {
+        CRef::new_unknown(debug_name)
     }
 
     pub fn to_runtime_type(&self) -> runtime::error::Result<Type> {
@@ -150,50 +150,51 @@ impl<'a> fmt::Debug for DebugMFields<'a> {
 impl fmt::Debug for MType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MType::Atom(atom) => atom.fmt(f),
-            MType::Record(fields) => DebugMFields(fields).fmt(f),
+            MType::Atom(atom) => atom.fmt(f)?,
+            MType::Record(fields) => DebugMFields(fields).fmt(f)?,
             MType::List(inner) => {
                 f.write_str("[")?;
                 inner.fmt(f)?;
                 f.write_str("]")?;
-                Ok(())
             }
-            MType::Fn(func) => f
-                .debug_struct("Fn")
-                .field("args", &DebugMFields(&func.args))
-                .field("ret", &func.ret)
-                .finish(),
-            MType::Name(n) => n.fmt(f),
+            MType::Fn(func) => {
+                f.write_str("λ ")?;
+                DebugMFields(&func.args).fmt(f)?;
+                f.write_str(" -> ")?;
+                func.ret.fmt(f)?;
+            }
+            MType::Name(n) => n.fmt(f)?,
         }
+        Ok(())
     }
 }
 
 impl Constrainable for MType {
     fn unify(&self, other: &MType) -> Result<()> {
         match self {
-            MType::Atom(ra) => match other {
-                MType::Atom(la) => {
-                    if ra != la {
+            MType::Atom(la) => match other {
+                MType::Atom(ra) => {
+                    if la != ra {
                         return Err(CompileError::wrong_type(self, other));
                     }
                 }
                 _ => return Err(CompileError::wrong_type(self, other)),
             },
-            MType::Record(rfields) => match other {
-                MType::Record(lfields) => lfields.unify(rfields)?,
+            MType::Record(lfields) => match other {
+                MType::Record(rfields) => lfields.unify(rfields)?,
                 _ => return Err(CompileError::wrong_type(self, other)),
             },
-            MType::List(rinner) => match other {
-                MType::List(linner) => linner.unify(rinner)?,
+            MType::List(linner) => match other {
+                MType::List(rinner) => linner.unify(rinner)?,
                 _ => return Err(CompileError::wrong_type(self, other)),
             },
             MType::Fn(MFnType {
-                args: rargs,
-                ret: rret,
+                args: largs,
+                ret: lret,
             }) => match other {
                 MType::Fn(MFnType {
-                    args: largs,
-                    ret: lret,
+                    args: rargs,
+                    ret: rret,
                 }) => {
                     largs.unify(rargs)?;
                     lret.unify(rret)?;
@@ -255,8 +256,8 @@ pub struct SType {
 }
 
 impl SType {
-    pub fn new_mono(body: CRef<MType>) -> Ref<SType> {
-        mkref(SType {
+    pub fn new_mono(body: CRef<MType>) -> CRef<SType> {
+        mkcref(SType {
             variables: BTreeSet::new(),
             body,
         })
@@ -271,11 +272,23 @@ impl fmt::Debug for SType {
                 if i > 0 {
                     f.write_str(", ")?;
                 }
-                f.write_str(variable)?;
+                variable.fmt(f)?;
             }
             f.write_str(" ")?;
         }
         self.body.fmt(f)
+    }
+}
+
+impl Constrainable for SType {
+    fn unify(&self, other: &SType) -> Result<()> {
+        return Err(CompileError::internal(
+            format!(
+                "Polymorphic types cannot be unified:\n{:#?}\n{:#?}",
+                self, other
+            )
+            .as_str(),
+        ));
     }
 }
 
@@ -454,17 +467,30 @@ impl TypedExpr<CRef<MType>> {
     }
 }
 
+impl Constrainable for TypedExpr<CRef<MType>> {
+    fn unify(&self, other: &TypedExpr<CRef<MType>>) -> Result<()> {
+        return Err(CompileError::internal(
+            format!("Typed exprs cannot be unified:\n{:#?}\n{:#?}", self, other).as_str(),
+        ));
+    }
+}
+
 #[derive(Clone)]
 pub struct STypedExpr {
-    pub type_: Ref<SType>,
+    pub type_: CRef<SType>,
     pub expr: Rc<Expr<CRef<MType>>>,
 }
 
 impl STypedExpr {
+    pub fn new_unknown(debug_name: &str) -> CRef<STypedExpr> {
+        CRef::new_unknown(debug_name)
+    }
+
     pub fn to_runtime_type(&self) -> runtime::error::Result<TypedExpr<Ref<Type>>> {
         Ok(TypedExpr::<Ref<Type>> {
             type_: mkref(
                 self.type_
+                    .must()?
                     .borrow()
                     .body
                     .must()?
@@ -485,11 +511,19 @@ impl fmt::Debug for STypedExpr {
     }
 }
 
+impl Constrainable for STypedExpr {
+    fn unify(&self, other: &STypedExpr) -> Result<()> {
+        return Err(CompileError::internal(
+            format!("Declarations cannot be unified:\n{:#?}\n{:#?}", self, other).as_str(),
+        ));
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum SchemaEntry {
     Schema(ast::Path),
     Type(CRef<MType>),
-    Expr(Ref<STypedExpr>),
+    Expr(CRef<STypedExpr>),
 }
 
 pub fn mkref<T>(t: T) -> Ref<T> {
@@ -594,8 +628,8 @@ impl Schema {
                     public: true,
                     extern_: false,
                     name: "load_json".to_string(),
-                    value: SchemaEntry::Expr(mkref(STypedExpr {
-                        type_: mkref(SType {
+                    value: SchemaEntry::Expr(mkcref(STypedExpr {
+                        type_: mkcref(SType {
                             variables: BTreeSet::from(["R".to_string()]),
                             body: mkcref(MType::Fn(MFnType {
                                 args: vec![MField {

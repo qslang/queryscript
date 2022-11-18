@@ -38,7 +38,7 @@ pub fn eval(schema: schema::SchemaRef, typed_expr: &schema::TypedExpr<TypeRef>) 
                     schema.clone(),
                     &schema::TypedExpr {
                         type_: typed_expr.type_.clone(),
-                        expr: Rc::new(e.borrow().expr.to_runtime_type()?),
+                        expr: Rc::new(e.must()?.borrow().expr.to_runtime_type()?),
                     },
                 ),
                 _ => {

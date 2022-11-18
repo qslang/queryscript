@@ -203,10 +203,9 @@ pub fn combine_sqlparams(
         .collect())
 }
 
-pub fn compile_select(
-    schema: Ref<Schema>,
-    select: &sqlast::Select,
-) -> Result<TypedExpr<CRef<MType>>> {
+type CTypedExpr = TypedExpr<CRef<MType>>;
+
+pub fn compile_select(schema: Ref<Schema>, select: &sqlast::Select) -> Result<CTypedExpr> {
     if select.distinct {
         return Err(CompileError::unimplemented("DISTINCT"));
     }
@@ -297,14 +296,10 @@ pub fn compile_select(
 
                     let relation = compile_reference(schema.clone(), &name.0)?;
 
-                    // TODO: This should unify the type with [unknown] instead
-                    //
-                    if !matches!(&*relation.type_.must()?.borrow(), MType::List { .. }) {
-                        return Err(CompileError::wrong_type(
-                            &MType::List(MType::new_unknown()),
-                            &*relation.type_.must()?.borrow(),
-                        ));
-                    }
+                    let list_type = mkcref(MType::List(MType::new_unknown(
+                        format!("FROM {}", name.to_string()).as_str(),
+                    )));
+                    list_type.unify(&relation.type_)?;
 
                     let placeholder_name = QVM_NAMESPACE.to_string()
                         + new_placeholder_name(schema.clone(), "rel").as_str();
@@ -359,10 +354,7 @@ pub fn compile_select(
     }
 }
 
-pub fn compile_sqlquery(
-    schema: Ref<Schema>,
-    query: &sqlast::Query,
-) -> Result<TypedExpr<CRef<MType>>> {
+pub fn compile_sqlquery(schema: Ref<Schema>, query: &sqlast::Query) -> Result<CTypedExpr> {
     if query.with.is_some() {
         return Err(CompileError::unimplemented("WITH"));
     }
@@ -398,7 +390,7 @@ pub fn compile_sqlquery(
     }
 }
 
-pub fn compile_sqlexpr(schema: Ref<Schema>, expr: &sqlast::Expr) -> Result<TypedExpr<CRef<MType>>> {
+pub fn compile_sqlexpr(schema: Ref<Schema>, expr: &sqlast::Expr) -> Result<CTypedExpr> {
     let ret = match expr {
         sqlast::Expr::Value(v) => match v {
             sqlast::Value::Number(n, _) => TypedExpr {
@@ -492,7 +484,7 @@ pub fn compile_sqlexpr(schema: Ref<Schema>, expr: &sqlast::Expr) -> Result<Typed
                     return Err(CompileError::wrong_type(
                         &MType::Fn(MFnType {
                             args: Vec::new(),
-                            ret: MType::new_unknown(),
+                            ret: MType::new_unknown("ret"),
                         }),
                         &*func.type_.must()?.borrow(),
                     ))
@@ -654,7 +646,7 @@ impl SType {
         let variables: BTreeMap<_, _> = self
             .variables
             .iter()
-            .map(|n| (n.clone(), MType::new_unknown()))
+            .map(|n| (n.clone(), MType::new_unknown(n.as_str())))
             .collect();
 
         return Ok(self.body.substitute(&variables)?);
@@ -677,7 +669,7 @@ pub fn typecheck_path(type_: CRef<MType>, path: &[String]) -> Result<CRef<MType>
                 return Err(CompileError::wrong_type(
                     &MType::Record(vec![MField::new_nullable(
                         name.clone(),
-                        MType::new_unknown(),
+                        MType::new_unknown("field"),
                     )]),
                     &*type_.borrow(),
                 ));
@@ -687,7 +679,7 @@ pub fn typecheck_path(type_: CRef<MType>, path: &[String]) -> Result<CRef<MType>
             return Err(CompileError::wrong_type(
                 &MType::Record(vec![MField::new_nullable(
                     name.clone(),
-                    MType::new_unknown(),
+                    MType::new_unknown("field"),
                 )]),
                 &*type_.borrow(),
             ))
@@ -695,49 +687,51 @@ pub fn typecheck_path(type_: CRef<MType>, path: &[String]) -> Result<CRef<MType>
     })
 }
 
-pub fn compile_reference(
-    schema: Ref<Schema>,
-    sqlpath: &Vec<sqlast::Ident>,
-) -> Result<TypedExpr<CRef<MType>>> {
+pub fn compile_reference(schema: Ref<Schema>, sqlpath: &Vec<sqlast::Ident>) -> Result<CTypedExpr> {
     let path: Vec<_> = sqlpath.iter().map(|e| e.value.clone()).collect();
     let (decl, remainder) = lookup_path(schema.clone(), &path, true /* import_global */)?;
-    let type_ = match &decl.value {
-        SchemaEntry::Expr(v) => v.as_ref(),
+
+    let entry = decl.value.clone();
+    let remainder_cpy = remainder.clone();
+
+    let type_ = match &entry {
+        SchemaEntry::Expr(v) => v.clone(),
         _ => return Err(CompileError::wrong_kind(path.clone(), "value", &decl)),
     }
-    .borrow()
-    .type_
-    .borrow()
-    .instantiate()?;
+    .then(move |typed: Ref<STypedExpr>| -> Result<CRef<MType>> {
+        let type_ = typed
+            .borrow()
+            .type_
+            .then(|t: Ref<SType>| Ok(t.borrow().instantiate()?))?;
+        typecheck_path(type_.clone(), remainder_cpy.as_slice())
+    })?;
 
     let top_level_ref = TypedExpr {
         type_: type_.clone(),
         expr: Rc::new(Expr::SchemaEntry(SchemaEntryExpr {
             debug_name: decl.name.clone(),
-            entry: decl.value,
+            entry: entry.clone(),
         })),
     };
 
     let r = match remainder.len() {
         0 => top_level_ref,
         _ => {
-            let path_type = typecheck_path(type_.clone(), remainder.as_slice())?;
-
             // Turn the top level reference into a SQL placeholder, and return
             // a path accessing it
-            let placeholder = intern_placeholder(schema, "param", top_level_ref)?;
+            let placeholder = intern_placeholder(schema.clone(), "param", top_level_ref)?;
             let placeholder_name = match &placeholder.expr.expr {
                 sqlast::Expr::Identifier(i) => i,
                 _ => panic!("placeholder expected to be an identifier"),
             };
             let mut full_name = vec![placeholder_name.clone()];
-            full_name.extend(remainder.into_iter().map(|n| sqlast::Ident {
+            full_name.extend(remainder.clone().into_iter().map(|n| sqlast::Ident {
                 value: n,
                 quote_style: None,
             }));
 
             TypedExpr {
-                type_: path_type,
+                type_,
                 expr: Rc::new(Expr::SQLExpr(Rc::new(SQLExpr {
                     params: placeholder.expr.params.clone(),
                     expr: sqlast::Expr::CompoundIdentifier(full_name),
@@ -749,7 +743,7 @@ pub fn compile_reference(
     Ok(r)
 }
 
-pub fn compile_expr(schema: Ref<Schema>, expr: &ast::Expr) -> Result<TypedExpr<CRef<MType>>> {
+pub fn compile_expr(schema: Ref<Schema>, expr: &ast::Expr) -> Result<CTypedExpr> {
     match expr {
         ast::Expr::SQLQuery(q) => Ok(compile_sqlquery(schema.clone(), q)?),
         ast::Expr::SQLExpr(e) => Ok(compile_sqlexpr(schema.clone(), e)?),
@@ -764,8 +758,8 @@ pub fn rebind_decl(_schema: SchemaInstance, decl: &Decl) -> Result<SchemaEntry> 
     match &decl.value {
         SchemaEntry::Schema(s) => Ok(SchemaEntry::Schema(s.clone())),
         SchemaEntry::Type(t) => Ok(SchemaEntry::Type(t.clone())),
-        SchemaEntry::Expr(e) => Ok(SchemaEntry::Expr(mkref(STypedExpr {
-            type_: e.borrow().type_.clone(),
+        SchemaEntry::Expr(e) => Ok(SchemaEntry::Expr(mkcref(STypedExpr {
+            type_: e.then(|e: Ref<STypedExpr>| Ok(e.borrow().type_.clone()))?,
             expr: Rc::new(Expr::SchemaEntry(SchemaEntryExpr {
                 debug_name: decl.name.clone(),
                 entry: decl.value.clone(),
@@ -804,82 +798,92 @@ pub fn compile_schema_from_file(file_path: &FilePath) -> Result<Ref<Schema>> {
 
 pub fn compile_schema(folder: Option<String>, ast: &ast::Schema) -> Result<Ref<Schema>> {
     let schema = Schema::new(folder);
+    declare_schema_entries(schema.clone(), ast)?;
     compile_schema_entries(schema.clone(), ast)?;
+    gather_schema_externs(schema.clone())?;
     Ok(schema)
 }
 
-pub fn compile_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<()> {
+pub fn declare_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<()> {
     for stmt in &ast.stmts {
         let entries: Vec<(String, bool, SchemaEntry)> = match &stmt.body {
             ast::StmtBody::Noop => continue,
-            ast::StmtBody::Import { path, list, args } => {
+            ast::StmtBody::Import { path, list, .. } => {
                 let imported = lookup_schema(schema.clone(), &path)?;
+                if imported.borrow().args.is_some() {
+                    return Err(CompileError::unimplemented("Importing with arguments"));
+                }
+
+                // XXX Importing schemas with extern values is currently broken, because we don't
+                // actually "inject" any meaningful reference to imported_schema's id into the decl
+                // during rebind_decl.  We should figure out how to generate a new set of decls for
+                // the imported schema (w/ the imported args)
+                //
+                // let checked = match args {
+                //     None => None,
+                //     Some(args) => {
+                //         let mut externs = imported.borrow().schema.borrow().externs.clone();
+                //         let mut checked = BTreeMap::new();
+                //         for arg in args {
+                //             let expr = match &arg.expr {
+                //                 None => ast::Expr::SQLExpr(sqlast::Expr::CompoundIdentifier(vec![
+                //                     sqlast::Ident {
+                //                         value: arg.name.clone(),
+                //                         quote_style: None,
+                //                     },
+                //                 ])),
+                //                 Some(expr) => expr.clone(),
+                //             };
+
+                //             if checked.get(&arg.name).is_some() {
+                //                 return Err(CompileError::duplicate_entry(vec![arg.name.clone()]));
+                //             }
+
+                //             if let Some(extern_) = externs.get_mut(&arg.name) {
+                //                 let compiled = compile_expr(schema.clone(), &expr)?;
+
+                //                 unify_types(&extern_, &compiled.type_)?;
+                //                 checked.insert(
+                //                     arg.name.clone(),
+                //                     TypedNameAndExpr {
+                //                         name: arg.name.clone(),
+                //                         type_: extern_.clone(),
+                //                         expr: compiled.expr,
+                //                     },
+                //                 );
+                //             } else {
+                //                 return Err(CompileError::no_such_entry(vec![arg.name.clone()]));
+                //             }
+                //         }
+
+                //         Some(checked)
+                //     }
+                // };
+
+                // let id = {
+                //     let imported_args = &mut imported.borrow_mut().args;
+                //     if let Some(imported_args) = imported_args {
+                //         if let Some(checked) = checked {
+                //             let id = imported_args.len();
+                //             imported_args.push(checked);
+                //             Some(id)
+                //         } else {
+                //             return Err(CompileError::import_error(
+                //                 path.clone(),
+                //                 "Arguments are not provided to module with extern declarations",
+                //             ));
+                //         }
+                //     } else if args.is_some() {
+                //         return Err(CompileError::import_error(
+                //               path.clone(),
+                //             "Arguments should not be provided to module without extern declarations",
+                //         ));
+                //     } else {
+                //         None
+                //     }
+                // };
 
                 let mut imports = Vec::new();
-                let checked = match args {
-                    None => None,
-                    Some(args) => {
-                        let mut externs = imported.borrow().schema.borrow().externs.clone();
-                        let mut checked = BTreeMap::new();
-                        for arg in args {
-                            let expr = match &arg.expr {
-                                None => ast::Expr::SQLExpr(sqlast::Expr::CompoundIdentifier(vec![
-                                    sqlast::Ident {
-                                        value: arg.name.clone(),
-                                        quote_style: None,
-                                    },
-                                ])),
-                                Some(expr) => expr.clone(),
-                            };
-
-                            if checked.get(&arg.name).is_some() {
-                                return Err(CompileError::duplicate_entry(vec![arg.name.clone()]));
-                            }
-
-                            if let Some(extern_) = externs.get_mut(&arg.name) {
-                                let compiled = compile_expr(schema.clone(), &expr)?;
-
-                                unify_types(&extern_, &compiled.type_)?;
-                                checked.insert(
-                                    arg.name.clone(),
-                                    TypedNameAndExpr {
-                                        name: arg.name.clone(),
-                                        type_: extern_.clone(),
-                                        expr: compiled.expr,
-                                    },
-                                );
-                            } else {
-                                return Err(CompileError::no_such_entry(vec![arg.name.clone()]));
-                            }
-                        }
-
-                        Some(checked)
-                    }
-                };
-
-                let id = {
-                    let imported_args = &mut imported.borrow_mut().args;
-                    if let Some(imported_args) = imported_args {
-                        if let Some(checked) = checked {
-                            let id = imported_args.len();
-                            imported_args.push(checked);
-                            Some(id)
-                        } else {
-                            return Err(CompileError::import_error(
-                                path.clone(),
-                                "Arguments are not provided to module with extern declarations",
-                            ));
-                        }
-                    } else if args.is_some() {
-                        return Err(CompileError::import_error(
-                              path.clone(),
-                            "Arguments should not be provided to module without extern declarations",
-                        ));
-                    } else {
-                        None
-                    }
-                };
-
                 match list {
                     ast::ImportList::None => {
                         imports.push((
@@ -899,7 +903,7 @@ pub fn compile_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
                         {
                             let imported_schema = SchemaInstance {
                                 schema: imported.borrow().schema.clone(),
-                                id,
+                                id: None,
                             };
                             imports.push((
                                 k.clone(),
@@ -925,12 +929,9 @@ pub fn compile_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
 
                             let imported_schema = SchemaInstance {
                                 schema: schema.clone(),
-                                id,
+                                id: None,
                             };
-                            // XXX This is currently broken, because we don't actually "inject"
-                            // any meaningful reference to imported_schema's id into the decl.
-                            // We should figure out how to generate a new set of decls for the
-                            // imported schema (w/ the imported args)
+
                             imports.push((
                                 item[0].clone(),
                                 false, /* extern_ */
@@ -945,8 +946,112 @@ pub fn compile_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
             ast::StmtBody::TypeDef(nt) => vec![(
                 nt.name.clone(),
                 false, /* extern_ */
-                SchemaEntry::Type(resolve_type(schema.clone(), &nt.def)?),
+                SchemaEntry::Type(MType::new_unknown(nt.name.as_str())),
             )],
+            ast::StmtBody::FnDef { name, .. } => {
+                vec![(
+                    name.clone(),
+                    false, /* extern_ */
+                    SchemaEntry::Expr(STypedExpr::new_unknown(name.as_str())),
+                )]
+            }
+            ast::StmtBody::Let { name, .. } => {
+                vec![(
+                    name.clone(),
+                    false, /* extern_ */
+                    SchemaEntry::Expr(STypedExpr::new_unknown(name.as_str())),
+                )]
+            }
+            ast::StmtBody::Extern { name, .. } => vec![(
+                name.clone(),
+                true, /* extern_ */
+                SchemaEntry::Expr(STypedExpr::new_unknown(name.as_str())),
+            )],
+        };
+
+        for (name, extern_, value) in &entries {
+            if schema.borrow().decls.contains_key(name) {
+                return Err(CompileError::duplicate_entry(vec![name.clone()]));
+            }
+
+            schema.borrow_mut().decls.insert(
+                name.clone(),
+                Decl {
+                    public: stmt.export,
+                    extern_: *extern_,
+                    name: name.clone(),
+                    value: value.clone(),
+                },
+            );
+        }
+    }
+
+    Ok(())
+}
+
+pub fn unify_type_decl(schema: Ref<Schema>, name: &str, type_: CRef<MType>) -> Result<()> {
+    let s = schema.borrow();
+    let decl = s.decls.get(name).ok_or_else(|| {
+        CompileError::internal(
+            format!(
+                "Could not find type declaration {} during reprocessing",
+                name
+            )
+            .as_str(),
+        )
+    })?;
+    match &decl.value {
+        SchemaEntry::Type(t) => t.unify(&type_)?,
+        _ => {
+            return Err(CompileError::internal(
+                format!(
+                    "Expected {} to be a type declaration during reprocessing",
+                    name
+                )
+                .as_str(),
+            ))
+        }
+    }
+
+    Ok(())
+}
+
+pub fn unify_expr_decl(schema: Ref<Schema>, name: &str, value: CRef<STypedExpr>) -> Result<()> {
+    let s = schema.borrow();
+    let decl = s.decls.get(name).ok_or_else(|| {
+        CompileError::internal(
+            format!(
+                "Could not find type declaration {} during reprocessing",
+                name
+            )
+            .as_str(),
+        )
+    })?;
+    match &decl.value {
+        SchemaEntry::Expr(e) => e.unify(&value)?,
+        _ => {
+            return Err(CompileError::internal(
+                format!(
+                    "Expected {} to be a type declaration during reprocessing",
+                    name
+                )
+                .as_str(),
+            ))
+        }
+    }
+
+    Ok(())
+}
+
+pub fn compile_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<()> {
+    for stmt in &ast.stmts {
+        match &stmt.body {
+            ast::StmtBody::Noop => continue,
+            ast::StmtBody::Import { .. } => continue,
+            ast::StmtBody::TypeDef(nt) => {
+                let type_ = resolve_type(schema.clone(), &nt.def)?;
+                unify_type_decl(schema.clone(), nt.name.as_str(), type_)?;
+            }
             ast::StmtBody::FnDef {
                 name,
                 generics,
@@ -973,7 +1078,7 @@ pub fn compile_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
                             public: true,
                             extern_: true,
                             name: arg.name.clone(),
-                            value: SchemaEntry::Expr(mkref(STypedExpr {
+                            value: SchemaEntry::Expr(mkcref(STypedExpr {
                                 type_: SType::new_mono(type_.clone()),
                                 expr: Rc::new(Expr::Unknown),
                             })),
@@ -991,10 +1096,10 @@ pub fn compile_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
                     unify_types(&resolve_type(inner_schema.clone(), ret)?, &compiled.type_)?
                 }
 
-                vec![(
-                    name.clone(),
-                    false, /* extern_ */
-                    SchemaEntry::Expr(mkref(STypedExpr {
+                unify_expr_decl(
+                    schema.clone(),
+                    name.as_str(),
+                    mkcref(STypedExpr {
                         type_: SType::new_mono(mkcref(MType::Fn(MFnType {
                             args: compiled_args,
                             ret: compiled.type_.clone(),
@@ -1003,61 +1108,57 @@ pub fn compile_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
                             inner_schema: inner_schema.clone(),
                             body: compiled.expr.clone(),
                         })),
-                    })),
-                )]
+                    }),
+                )?;
             }
             ast::StmtBody::Let { name, type_, body } => {
                 let lhs_type = if let Some(t) = type_ {
                     resolve_type(schema.clone(), &t)?
                 } else {
-                    MType::new_unknown()
+                    MType::new_unknown(format!("typeof {}", name).as_str())
                 };
                 let compiled = compile_expr(schema.clone(), &body)?;
                 unify_types(&lhs_type, &compiled.type_)?;
-                vec![(
-                    name.clone(),
-                    false, /* extern_ */
-                    SchemaEntry::Expr(mkref(STypedExpr {
+                unify_expr_decl(
+                    schema.clone(),
+                    name.as_str(),
+                    mkcref(STypedExpr {
                         type_: SType::new_mono(lhs_type),
                         expr: compiled.expr,
-                    })),
-                )]
+                    }),
+                )?;
             }
-            ast::StmtBody::Extern { name, type_ } => vec![(
-                name.clone(),
-                true, /* extern_ */
-                SchemaEntry::Expr(mkref(STypedExpr {
-                    type_: SType::new_mono(resolve_type(schema.clone(), type_)?),
-                    expr: Rc::new(Expr::Unknown),
-                })),
-            )],
+            ast::StmtBody::Extern { name, type_ } => {
+                unify_expr_decl(
+                    schema.clone(),
+                    name.as_str(),
+                    mkcref(STypedExpr {
+                        type_: SType::new_mono(resolve_type(schema.clone(), type_)?),
+                        expr: Rc::new(Expr::Unknown),
+                    }),
+                )?;
+            }
         };
+    }
 
-        for (name, extern_, value) in &entries {
-            if schema.borrow().decls.contains_key(name) {
-                return Err(CompileError::duplicate_entry(vec![name.clone()]));
-            }
+    Ok(())
+}
 
-            schema.borrow_mut().decls.insert(
-                name.clone(),
-                Decl {
-                    public: stmt.export,
-                    extern_: *extern_,
-                    name: name.clone(),
-                    value: value.clone(),
-                },
-            );
-
-            if *extern_ {
-                match value {
-                    SchemaEntry::Expr(e) => {
-                        schema
-                            .borrow_mut()
-                            .externs
-                            .insert(name.clone(), e.borrow().type_.borrow().instantiate()?);
-                    }
-                    _ => return Err(CompileError::unimplemented("type externs")),
+pub fn gather_schema_externs(schema: Ref<Schema>) -> Result<()> {
+    let s = schema.borrow();
+    for (name, decl) in &s.decls {
+        if decl.extern_ {
+            match &decl.value {
+                SchemaEntry::Expr(e) => {
+                    schema.borrow_mut().externs.insert(
+                        name.clone(),
+                        e.must()?
+                            .borrow()
+                            .type_
+                            .then(|t: Ref<SType>| Ok(t.borrow().instantiate()?))?,
+                    );
                 }
+                _ => return Err(CompileError::unimplemented("type externs")),
             }
         }
     }
