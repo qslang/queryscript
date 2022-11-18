@@ -8,6 +8,7 @@ mod tests {
 
     use crate::compile;
     use crate::runtime;
+    use crate::types;
 
     fn test_directory(dir: &PathBuf) {
         println!("Running tests in {}", dir.display());
@@ -26,14 +27,14 @@ mod tests {
 
     fn test_schema(path: &PathBuf) {
         let schema = compile::compile_schema_from_file(path).expect("Failed to compile schema");
-        let mut types = BTreeMap::<String, Box<dyn fmt::Debug>>::new();
+        let mut decls = BTreeMap::<String, Box<dyn fmt::Debug>>::new();
         for (name, decl) in &schema.borrow().decls {
             match &decl.value {
                 compile::schema::SchemaEntry::Type(t) => {
-                    types.insert(format!("type {}", name), Box::new(t.clone()));
+                    decls.insert(format!("type {}", name), Box::new(t.clone()));
                 }
                 compile::schema::SchemaEntry::Expr(e) => {
-                    types.insert(
+                    decls.insert(
                         format!("let {}", name),
                         Box::new(
                             e.must()
@@ -48,24 +49,30 @@ mod tests {
             }
         }
 
-        let mut result = BTreeMap::<String, Box<dyn fmt::Debug>>::new();
-        result.insert("types".to_string(), Box::new(types));
-
-        if let Some(test_output) = schema.borrow().decls.get("__test_output") {
-            if !test_output.extern_ {
-                if let compile::schema::SchemaEntry::Expr(expr_decl) = &test_output.value {
-                    let expr = expr_decl
-                        .must()
-                        .expect(format!("Expression is unknown {:?}", expr_decl).as_str())
-                        .borrow()
-                        .to_runtime_type()
-                        .expect(format!("Could not convert expression {:?}", expr_decl).as_str());
-                    let eval_result = runtime::eval(schema.clone(), &expr)
-                        .expect(format!("Could not run expression {:?}", expr).as_str());
-                    result.insert("__test_output".to_string(), Box::new(eval_result));
-                }
+        let mut queries = Vec::new();
+        for query in &schema.borrow().queries {
+            #[derive(Debug)]
+            #[allow(dead_code)]
+            struct TypedValue {
+                pub type_: types::Type,
+                pub value: types::Value,
             }
+
+            let query = query
+                .to_runtime_type()
+                .expect(format!("Could not convert expression {:?}", query).as_str());
+            let value = runtime::eval(schema.clone(), &query)
+                .expect(format!("Could not run expression {:?}", query).as_str());
+
+            queries.push(TypedValue {
+                type_: query.type_.borrow().clone(),
+                value,
+            });
         }
+
+        let mut result = BTreeMap::<String, Box<dyn fmt::Debug>>::new();
+        result.insert("decls".to_string(), Box::new(decls));
+        result.insert("queries".to_string(), Box::new(queries));
 
         let result_str = format!("{:#?}", result);
 

@@ -39,11 +39,10 @@ impl<'a> Parser<'a> {
         Ok(self.sqlparser.expect_token(expected)?)
     }
 
-    pub fn consume_keyword(&mut self, expected: &str) -> bool {
+    pub fn peek_keyword(&mut self, expected: &str) -> bool {
         match self.peek_token().token {
             Token::Word(w) => {
                 if w.value.to_lowercase() == expected.to_lowercase() {
-                    self.next_token();
                     true
                 } else {
                     false
@@ -51,6 +50,13 @@ impl<'a> Parser<'a> {
             }
             _ => false,
         }
+    }
+    pub fn consume_keyword(&mut self, expected: &str) -> bool {
+        if self.peek_keyword(expected) {
+            self.next_token();
+            return true;
+        }
+        return false;
     }
 
     pub fn expect_keyword(&mut self, expected: &str) -> Result<()> {
@@ -104,6 +110,8 @@ impl<'a> Parser<'a> {
             self.parse_typedef()?
         } else if self.consume_keyword("import") || export {
             self.parse_import()?
+        } else if self.peek_keyword("select") {
+            self.parse_query()?
         } else {
             return unexpected_token!(
                 self.peek_token(),
@@ -311,6 +319,13 @@ impl<'a> Parser<'a> {
         self.expect_token(&Token::SemiColon)?;
 
         Ok(StmtBody::Let { name, type_, body })
+    }
+
+    pub fn parse_query(&mut self) -> Result<StmtBody> {
+        let query = self.sqlparser.parse_query()?;
+        self.expect_token(&Token::SemiColon)?;
+
+        Ok(StmtBody::Query { query })
     }
 
     pub fn parse_typedef(&mut self) -> Result<StmtBody> {

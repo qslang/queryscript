@@ -1,1 +1,2 @@
-let __test_output = 1;
+SELECT 1;
+SELECT 2;

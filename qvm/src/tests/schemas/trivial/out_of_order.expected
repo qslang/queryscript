@@ -1,7 +1,8 @@
 {
-    "types": {
+    "decls": {
         "let bar": [{a Float64, b Float64, c Float64}],
         "let foo": [{a Float64, b Float64, c Float64}],
         "type Bar": {a Float64, b Float64, c Float64},
     },
+    "queries": [],
 }

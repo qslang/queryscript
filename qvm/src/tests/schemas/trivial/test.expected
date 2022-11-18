@@ -1,8 +1,21 @@
 {
-    "__test_output": Int64(
-        1,
-    ),
-    "types": {
-        "let __test_output": Int64,
-    },
+    "decls": {},
+    "queries": [
+        TypedValue {
+            type_: Atom(
+                Int64,
+            ),
+            value: Int64(
+                1,
+            ),
+        },
+        TypedValue {
+            type_: Atom(
+                Int64,
+            ),
+            value: Int64(
+                2,
+            ),
+        },
+    ],
 }

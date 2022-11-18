@@ -453,6 +453,12 @@ pub struct TypedSQLExpr<TypeRef> {
 }
 
 #[derive(Clone, Debug)]
+pub struct TypedSQLQuery<TypeRef> {
+    pub type_: TypeRef,
+    pub query: Rc<SQLQuery<TypeRef>>,
+}
+
+#[derive(Clone, Debug)]
 pub struct TypedExpr<TypeRef> {
     pub type_: TypeRef,
     pub expr: Rc<Expr<TypeRef>>,
@@ -569,6 +575,7 @@ pub struct Schema {
     pub externs: BTreeMap<String, CRef<MType>>,
     pub decls: BTreeMap<String, Decl>,
     pub imports: BTreeMap<ast::Path, Ref<ImportedSchema>>,
+    pub queries: Vec<TypedExpr<CRef<MType>>>,
 }
 
 impl Schema {
@@ -580,6 +587,7 @@ impl Schema {
             externs: BTreeMap::new(),
             decls: BTreeMap::new(),
             imports: BTreeMap::new(),
+            queries: Vec::new(),
         })
     }
 
