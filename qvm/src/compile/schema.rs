@@ -126,6 +126,8 @@ impl MType {
     }
 }
 
+pub type CTypedExpr = TypedExpr<CRef<MType>>;
+
 struct DebugMFields<'a>(&'a Vec<MField>);
 
 impl<'a> fmt::Debug for DebugMFields<'a> {
