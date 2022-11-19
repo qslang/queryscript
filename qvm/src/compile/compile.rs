@@ -565,10 +565,8 @@ pub fn compile_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
         match &stmt.body {
             ast::StmtBody::Noop => continue,
             ast::StmtBody::Query { query } => {
-                schema
-                    .borrow_mut()
-                    .queries
-                    .push(compile_sqlquery(schema.clone(), query)?);
+                let compiled = compile_sqlquery(schema.clone(), query)?;
+                schema.borrow_mut().queries.push(compiled);
             }
             ast::StmtBody::Import { .. } => continue,
             ast::StmtBody::TypeDef(nt) => {
