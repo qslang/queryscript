@@ -81,7 +81,7 @@ fn run_command(repl_schema: schema::SchemaRef, cmd: &str) -> Result<(), Whatever
 
     match parser.parse_schema() {
         Ok(ast) => {
-            compile::compile_schema_entries(repl_schema.clone(), &ast)
+            compile::compile_schema_ast(repl_schema.clone(), &ast)
                 .with_whatever_context(|e| format!("{}", e))?;
             return Ok(());
         }

@@ -309,10 +309,15 @@ pub fn compile_schema_from_file(file_path: &FilePath) -> Result<Ref<Schema>> {
 
 pub fn compile_schema(folder: Option<String>, ast: &ast::Schema) -> Result<Ref<Schema>> {
     let schema = Schema::new(folder);
+    compile_schema_ast(schema.clone(), ast)?;
+    Ok(schema)
+}
+
+pub fn compile_schema_ast(schema: Ref<Schema>, ast: &ast::Schema) -> Result<()> {
     declare_schema_entries(schema.clone(), ast)?;
     compile_schema_entries(schema.clone(), ast)?;
-    gather_schema_externs(schema.clone())?;
-    Ok(schema)
+    gather_schema_externs(schema)?;
+    Ok(())
 }
 
 pub fn declare_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<()> {

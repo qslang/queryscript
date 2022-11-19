@@ -3,7 +3,7 @@ use crate::compile::compile::{compile_reference, resolve_global_atom};
 use crate::compile::error::{CompileError, Result};
 use crate::compile::inference::*;
 use crate::compile::schema::*;
-use crate::types::number::parse_numeric_type;
+use crate::types::{number::parse_numeric_type, AtomicType};
 use sqlparser::ast as sqlast;
 
 use std::collections::BTreeMap;
@@ -291,6 +291,29 @@ pub fn compile_sqlexpr(schema: Ref<Schema>, expr: &sqlast::Expr) -> Result<CType
                 ))
             }
         },
+        sqlast::Expr::Array(sqlast::Array { elem, .. }) => {
+            let c_elems: Vec<CTypedExpr> = elem
+                .iter()
+                .map(|e| compile_sqlexpr(schema.clone(), e))
+                .collect::<Result<Vec<_>>>()?;
+            let mut c_elem_iter = c_elems.iter();
+            let data_type = if let Some(first) = c_elem_iter.next() {
+                for next in c_elem_iter {
+                    first.type_.unify(&next.type_)?;
+                }
+                first.type_.clone()
+            } else {
+                mkcref(MType::Atom(AtomicType::Null))
+            };
+
+            TypedExpr {
+                type_: data_type,
+                expr: Rc::new(Expr::SQLExpr(Rc::new(SQLExpr {
+                    params: BTreeMap::new(),
+                    expr: expr.clone(),
+                }))),
+            }
+        }
         sqlast::Expr::BinaryOp { left, op, right } => {
             let cleft = compile_sqlarg(schema.clone(), left)?;
             let cright = compile_sqlarg(schema.clone(), right)?;
@@ -484,7 +507,7 @@ pub fn compile_sqlexpr(schema: Ref<Schema>, expr: &sqlast::Expr) -> Result<CType
         }
         _ => {
             return Err(CompileError::unimplemented(
-                format!("Expression: {}", expr).as_str(),
+                format!("Expression: {:?}", expr).as_str(),
             ))
         }
     };
