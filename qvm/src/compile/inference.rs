@@ -5,7 +5,17 @@ use std::fmt;
 use std::rc::Rc;
 
 pub trait Constrainable: Clone + fmt::Debug {
-    fn unify(&self, other: &Self) -> Result<()>;
+    fn unify(&self, other: &Self) -> Result<()> {
+        return Err(CompileError::internal(
+            format!(
+                "{} cannot be unified:\n{:#?}\n{:#?}",
+                std::any::type_name::<Self>(),
+                self,
+                other
+            )
+            .as_str(),
+        ));
+    }
 }
 
 pub trait Constraint<T: Constrainable>: FnMut(Ref<T>) -> Result<()> {}

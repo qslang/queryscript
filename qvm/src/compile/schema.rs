@@ -126,7 +126,11 @@ impl MType {
     }
 }
 
-pub type CTypedExpr = TypedExpr<CRef<MType>>;
+#[derive(Clone, Debug)]
+pub struct CTypedExpr {
+    pub type_: CRef<MType>,
+    pub expr: CRef<Expr<CRef<MType>>>,
+}
 
 struct DebugMFields<'a>(&'a Vec<MField>);
 
@@ -282,17 +286,7 @@ impl fmt::Debug for SType {
     }
 }
 
-impl Constrainable for SType {
-    fn unify(&self, other: &SType) -> Result<()> {
-        return Err(CompileError::internal(
-            format!(
-                "Polymorphic types cannot be unified:\n{:#?}\n{:#?}",
-                self, other
-            )
-            .as_str(),
-        ));
-    }
-}
+impl Constrainable for SType {}
 
 #[derive(Clone)]
 pub struct SchemaInstance {
@@ -324,6 +318,8 @@ impl SchemaInstance {
 pub type Value = crate::types::Value;
 
 pub type Params<TypeRef> = BTreeMap<ast::Ident, TypedExpr<TypeRef>>;
+
+impl<TypeRef: Clone + fmt::Debug> Constrainable for BTreeMap<ast::Ident, TypedExpr<TypeRef>> {}
 
 #[derive(Clone)]
 pub struct SQLExpr<TypeRef> {
@@ -441,24 +437,7 @@ impl Expr<CRef<MType>> {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct TypedNameAndSQLExpr<TypeRef> {
-    pub name: String,
-    pub type_: TypeRef,
-    pub expr: Rc<SQLExpr<TypeRef>>,
-}
-
-#[derive(Clone, Debug)]
-pub struct TypedSQLExpr<TypeRef> {
-    pub type_: TypeRef,
-    pub expr: Rc<SQLExpr<TypeRef>>,
-}
-
-#[derive(Clone, Debug)]
-pub struct TypedSQLQuery<TypeRef> {
-    pub type_: TypeRef,
-    pub query: Rc<SQLQuery<TypeRef>>,
-}
+impl<Ty: Clone + fmt::Debug> Constrainable for Expr<Ty> {}
 
 #[derive(Clone, Debug)]
 pub struct TypedExpr<TypeRef> {
@@ -475,13 +454,7 @@ impl TypedExpr<CRef<MType>> {
     }
 }
 
-impl Constrainable for TypedExpr<CRef<MType>> {
-    fn unify(&self, other: &TypedExpr<CRef<MType>>) -> Result<()> {
-        return Err(CompileError::internal(
-            format!("Typed exprs cannot be unified:\n{:#?}\n{:#?}", self, other).as_str(),
-        ));
-    }
-}
+impl Constrainable for TypedExpr<CRef<MType>> {}
 
 #[derive(Clone)]
 pub struct STypedExpr {
@@ -519,13 +492,7 @@ impl fmt::Debug for STypedExpr {
     }
 }
 
-impl Constrainable for STypedExpr {
-    fn unify(&self, other: &STypedExpr) -> Result<()> {
-        return Err(CompileError::internal(
-            format!("Declarations cannot be unified:\n{:#?}\n{:#?}", self, other).as_str(),
-        ));
-    }
-}
+impl Constrainable for STypedExpr {}
 
 #[derive(Clone, Debug)]
 pub enum SchemaEntry {

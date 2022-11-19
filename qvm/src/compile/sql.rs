@@ -1,5 +1,5 @@
 use crate::ast;
-use crate::compile::compile::{compile_reference, resolve_global_atom};
+use crate::compile::compile::{lookup_path, resolve_global_atom, typecheck_path};
 use crate::compile::error::{CompileError, Result};
 use crate::compile::inference::*;
 use crate::compile::schema::*;
@@ -7,9 +7,93 @@ use crate::types::{number::parse_numeric_type, AtomicType};
 use sqlparser::ast as sqlast;
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::rc::Rc;
 
 const QVM_NAMESPACE: &str = "__qvm";
+
+#[derive(Clone, Debug)]
+pub struct TypedNameAndSQLExpr {
+    pub name: String,
+    pub type_: CRef<MType>,
+    pub expr: Rc<SQLExpr<CRef<MType>>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TypedSQLExpr {
+    pub type_: CRef<MType>,
+    pub expr: CRef<SQLExpr<CRef<MType>>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TypedSQLQuery {
+    pub type_: CRef<MType>,
+    pub query: CRef<SQLQuery<CRef<MType>>>,
+}
+
+impl<Ty: Clone + fmt::Debug> Constrainable for SQLExpr<Ty> {}
+impl<Ty: Clone + fmt::Debug> Constrainable for SQLQuery<Ty> {}
+impl Constrainable for TypedSQLExpr {}
+impl Constrainable for TypedSQLQuery {}
+
+pub fn compile_reference(schema: Ref<Schema>, sqlpath: &Vec<sqlast::Ident>) -> Result<CTypedExpr> {
+    let path: Vec<_> = sqlpath.iter().map(|e| e.value.clone()).collect();
+    let (decl, remainder) = lookup_path(schema.clone(), &path, true /* import_global */)?;
+
+    let entry = decl.value.clone();
+    let remainder_cpy = remainder.clone();
+
+    let type_ = match &entry {
+        SchemaEntry::Expr(v) => v.clone(),
+        _ => return Err(CompileError::wrong_kind(path.clone(), "value", &decl)),
+    }
+    .then(move |typed: Ref<STypedExpr>| -> Result<CRef<MType>> {
+        let type_ = typed
+            .borrow()
+            .type_
+            .then(|t: Ref<SType>| Ok(t.borrow().instantiate()?))?;
+        typecheck_path(type_.clone(), remainder_cpy.as_slice())
+    })?;
+
+    let top_level_ref = CTypedExpr {
+        type_: type_.clone(),
+        expr: mkcref(Expr::SchemaEntry(SchemaEntryExpr {
+            debug_name: decl.name.clone(),
+            entry: entry.clone(),
+        })),
+    };
+
+    let r = match remainder.len() {
+        0 => top_level_ref,
+        _ => {
+            // Turn the top level reference into a SQL placeholder, and return
+            // a path accessing it
+            let placeholder = intern_placeholder(schema.clone(), "param", top_level_ref)?;
+            let expr = placeholder
+                .expr
+                .then(move |expr: Ref<SQLExpr<CRef<MType>>>| {
+                    let placeholder_name = match &expr.borrow().expr {
+                        sqlast::Expr::Identifier(i) => i,
+                        _ => panic!("placeholder expected to be an identifier"),
+                    };
+                    let mut full_name = vec![placeholder_name.clone()];
+                    full_name.extend(remainder.clone().into_iter().map(|n| sqlast::Ident {
+                        value: n,
+                        quote_style: None,
+                    }));
+
+                    Ok(mkcref(Expr::SQLExpr(Rc::new(SQLExpr {
+                        params: expr.borrow().params.clone(),
+                        expr: sqlast::Expr::CompoundIdentifier(full_name),
+                    }))))
+                })?;
+
+            CTypedExpr { type_, expr }
+        }
+    };
+
+    Ok(r)
+}
 
 pub fn new_placeholder_name(schema: Ref<Schema>, kind: &str) -> String {
     let placeholder = schema.borrow().next_placeholder;
@@ -20,50 +104,83 @@ pub fn new_placeholder_name(schema: Ref<Schema>, kind: &str) -> String {
 pub fn intern_placeholder(
     schema: Ref<Schema>,
     kind: &str,
-    expr: TypedExpr<CRef<MType>>,
-) -> Result<TypedSQLExpr<CRef<MType>>> {
-    match &*expr.expr {
-        Expr::SQLExpr(sqlexpr) => Ok(TypedSQLExpr {
-            type_: expr.type_,
-            expr: sqlexpr.clone(),
-        }),
-        _ => {
-            let placeholder_name = "@".to_string() + new_placeholder_name(schema, kind).as_str();
+    expr: CTypedExpr,
+) -> Result<TypedSQLExpr> {
+    let type_ = expr.type_;
+    let sqlexpr = expr
+        .expr
+        .then(move |expr: Ref<Expr<CRef<MType>>>| match &*expr.borrow() {
+            Expr::SQLExpr(sqlexpr) => Ok(mkcref(sqlexpr.as_ref().clone())),
+            _ => {
+                let placeholder_name =
+                    "@".to_string() + new_placeholder_name(schema.clone(), kind).as_str();
 
-            Ok(TypedSQLExpr {
-                type_: expr.type_.clone(),
-                expr: Rc::new(SQLExpr {
-                    params: Params::from([(placeholder_name.clone(), expr)]),
+                Ok(mkcref(SQLExpr {
+                    params: Params::from([(
+                        placeholder_name.clone(),
+                        TypedExpr {
+                            type_: type_.clone(),
+                            expr: Rc::new(expr.borrow().clone()),
+                        },
+                    )]),
                     expr: sqlast::Expr::Identifier(sqlast::Ident {
                         value: placeholder_name.clone(),
                         quote_style: None,
                     }),
-                }),
-            })
-        }
-    }
+                }))
+            }
+        })?;
+
+    Ok(TypedSQLExpr {
+        type_: expr.type_.clone(),
+        expr: sqlexpr,
+    })
 }
 
 pub fn compile_sqlarg(
     schema: Ref<Schema>,
+    scope: CRef<SQLScope>,
     expr: &sqlast::Expr,
-) -> Result<TypedSQLExpr<CRef<MType>>> {
+) -> Result<TypedSQLExpr> {
     Ok(intern_placeholder(
         schema.clone(),
         "param",
-        compile_sqlexpr(schema.clone(), expr)?,
+        compile_sqlexpr(schema.clone(), scope.clone(), expr)?,
     )?)
 }
 
-pub fn combine_sqlparams(
-    all: Vec<&TypedSQLExpr<CRef<MType>>>,
-) -> Result<BTreeMap<ast::Ident, TypedExpr<CRef<MType>>>> {
-    Ok(all
-        .iter()
-        .map(|t| t.expr.params.clone())
-        .flatten()
-        .collect())
+type CParams = Params<CRef<MType>>;
+
+pub fn combine_sqlparams(all: Vec<&TypedSQLExpr>) -> Result<CRef<CParams>> {
+    let params = mkcref(BTreeMap::new());
+
+    for expr in all {
+        expr.expr.then(|sqlexpr: Ref<SQLExpr<CRef<MType>>>| {
+            let params = sqlexpr.borrow().params.clone();
+        })?
+    }
+
+    panic!();
 }
+
+#[derive(Clone, Debug)]
+pub struct SQLScope {
+    pub parent: Option<Rc<SQLScope>>,
+    pub relations: BTreeMap<String, CRef<MType>>,
+    pub multiple_rows: bool,
+}
+
+impl SQLScope {
+    pub fn new(schema: Ref<Schema>, parent: Option<Rc<SQLScope>>) -> SQLScope {
+        SQLScope {
+            parent,
+            relations: BTreeMap::new(),
+            multiple_rows: true,
+        }
+    }
+}
+
+impl Constrainable for SQLScope {}
 
 pub fn compile_select(schema: Ref<Schema>, select: &sqlast::Select) -> Result<CTypedExpr> {
     if select.distinct {
@@ -80,10 +197,6 @@ pub fn compile_select(schema: Ref<Schema>, select: &sqlast::Select) -> Result<CT
 
     if select.lateral_views.len() > 0 {
         return Err(CompileError::unimplemented("Lateral views"));
-    }
-
-    if select.selection.is_some() {
-        return Err(CompileError::unimplemented("WHERE"));
     }
 
     if select.group_by.len() > 0 {
@@ -110,23 +223,11 @@ pub fn compile_select(schema: Ref<Schema>, select: &sqlast::Select) -> Result<CT
         return Err(CompileError::unimplemented("QUALIFY"));
     }
 
-    match select.from.len() {
+    let scope = match select.from.len() {
         0 => {
-            if select.projection.len() != 1 {
-                return Err(CompileError::unimplemented(
-                    "Multiple projections in projection without FROM",
-                ));
-            }
-
-            match &select.projection[0] {
-                sqlast::SelectItem::UnnamedExpr(e) => Ok(compile_sqlexpr(schema.clone(), e)?),
-                sqlast::SelectItem::ExprWithAlias { expr, .. } => {
-                    Ok(compile_sqlexpr(schema.clone(), expr)?)
-                }
-                _ => Err(CompileError::unimplemented(
-                    "Wildcard in SELECT without FROM",
-                )),
-            }
+            let scope = SQLScope::new(schema.clone(), None);
+            scope.multiple_rows = true;
+            mkcref(scope)
         }
         1 => {
             if select.from[0].joins.len() > 0 {
@@ -161,56 +262,119 @@ pub fn compile_select(schema: Ref<Schema>, select: &sqlast::Select) -> Result<CT
                     )));
                     list_type.unify(&relation.type_)?;
 
-                    let placeholder_name = QVM_NAMESPACE.to_string()
-                        + new_placeholder_name(schema.clone(), "rel").as_str();
+                    relation.type_.then(move |t| {
+                        let mut scope = SQLScope::new(schema.clone(), None);
 
-                    let mut ret = select.clone();
-                    ret.from = vec![sqlast::TableWithJoins {
-                        relation: sqlast::TableFactor::Table {
-                            name: sqlast::ObjectName(vec![sqlast::Ident {
-                                value: placeholder_name.clone(),
-                                quote_style: None,
-                            }]),
-                            alias: alias.clone(),
-                            args: args.clone(),
-                            with_hints: with_hints.clone(),
-                        },
-                        joins: Vec::new(),
-                    }];
-
-                    Ok(TypedExpr {
-                        type_: relation.type_.clone(),
-                        expr: Rc::new(Expr::SQLQuery(Rc::new(SQLQuery {
-                            params: Params::from([(
-                                placeholder_name.clone(),
-                                TypedExpr {
-                                    type_: relation.type_,
-                                    expr: relation.expr,
-                                },
-                            )]),
-                            query: sqlast::Query {
-                                with: None,
-                                body: Box::new(sqlast::SetExpr::Select(Box::new(ret))),
-                                order_by: Vec::new(),
-                                limit: None,
-                                offset: None,
-                                fetch: None,
-                                lock: None,
-                            },
-                        }))),
-                    })
+                        Ok(mkcref(scope))
+                    })?
                 }
                 sqlast::TableFactor::Derived { .. } => {
-                    Err(CompileError::unimplemented("Subqueries"))
+                    return Err(CompileError::unimplemented("Subqueries"))
                 }
                 sqlast::TableFactor::TableFunction { .. } => {
-                    Err(CompileError::unimplemented("TABLE"))
+                    return Err(CompileError::unimplemented("TABLE"))
                 }
-                sqlast::TableFactor::UNNEST { .. } => Err(CompileError::unimplemented("UNNEST")),
-                sqlast::TableFactor::NestedJoin { .. } => Err(CompileError::unimplemented("JOIN")),
+                sqlast::TableFactor::UNNEST { .. } => {
+                    return Err(CompileError::unimplemented("UNNEST"))
+                }
+                sqlast::TableFactor::NestedJoin { .. } => {
+                    return Err(CompileError::unimplemented("JOIN"))
+                }
             }
         }
-        _ => Err(CompileError::unimplemented("JOIN")),
+        _ => return Err(CompileError::unimplemented("JOIN")),
+    };
+
+    let exprs = Vec::new();
+    let fields = Vec::new();
+
+    for proj in &select.projection {
+        let (name, expr) = match proj {
+            sqlast::SelectItem::UnnamedExpr(e) => {
+                let alias = format!("{}", e);
+                (alias, compile_sqlexpr(schema.clone(), scope.clone(), e)?)
+            }
+            sqlast::SelectItem::ExprWithAlias { expr, alias } => (
+                alias.value,
+                compile_sqlexpr(schema.clone(), scope.clone(), expr)?,
+            ),
+            _ => {
+                scope.constrain(|scope| {
+                    if scope.borrow().relations.len() == 0 {
+                        return Err(CompileError::unimplemented(
+                            "Wildcard in SELECT without FROM",
+                        ));
+                    }
+                    Ok(())
+                })?;
+            }
+        };
+
+        exprs.push(expr.expr);
+        fields.push(MField {
+            name,
+            type_: expr.type_,
+            nullable: true,
+        });
+    }
+
+    let row = scope.then(|scope: Ref<SQLScope>| {
+        if scope.relations.len() == 0 {
+            if select.projection.len() != 1 {}
+        } else {
+            return Err(CompileError::unimplemented("FROM"));
+            let placeholder_name =
+                QVM_NAMESPACE.to_string() + new_placeholder_name(schema.clone(), "rel").as_str();
+
+            let mut ret = select.clone();
+            ret.from = vec![sqlast::TableWithJoins {
+                relation: sqlast::TableFactor::Table {
+                    name: sqlast::ObjectName(vec![sqlast::Ident {
+                        value: placeholder_name.clone(),
+                        quote_style: None,
+                    }]),
+                    alias: alias.clone(),
+                    args: args.clone(),
+                    with_hints: with_hints.clone(),
+                },
+                joins: Vec::new(),
+            }];
+
+            Ok(TypedExpr {
+                type_: relation.type_.clone(),
+                expr: Rc::new(Expr::SQLQuery(Rc::new(SQLQuery {
+                    params: Params::from([(
+                        placeholder_name.clone(),
+                        TypedExpr {
+                            type_: relation.type_,
+                            expr: relation.expr,
+                        },
+                    )]),
+                    query: sqlast::Query {
+                        with: None,
+                        body: Box::new(sqlast::SetExpr::Select(Box::new(ret))),
+                        order_by: Vec::new(),
+                        limit: None,
+                        offset: None,
+                        fetch: None,
+                        lock: None,
+                    },
+                }))),
+            })
+        };
+    });
+
+    if select.selection.is_some() {
+        return Err(CompileError::unimplemented("WHERE"));
+    }
+
+    if multiple_rows {
+        Ok(mkcref(TypedExpr {
+            type_: mkcref(MType::List(row.type_)),
+            expr: row.expr,
+        }))
+    } else {
+        Ok(row)
     }
 }
 
@@ -250,7 +414,11 @@ pub fn compile_sqlquery(schema: Ref<Schema>, query: &sqlast::Query) -> Result<CT
     }
 }
 
-pub fn compile_sqlexpr(schema: Ref<Schema>, expr: &sqlast::Expr) -> Result<CTypedExpr> {
+pub fn compile_sqlexpr(
+    schema: Ref<Schema>,
+    scope: CRef<SQLScope>,
+    expr: &sqlast::Expr,
+) -> Result<CTypedExpr> {
     let ret = match expr {
         sqlast::Expr::Value(v) => match v {
             sqlast::Value::Number(n, _) => TypedExpr {
@@ -315,8 +483,8 @@ pub fn compile_sqlexpr(schema: Ref<Schema>, expr: &sqlast::Expr) -> Result<CType
             }
         }
         sqlast::Expr::BinaryOp { left, op, right } => {
-            let cleft = compile_sqlarg(schema.clone(), left)?;
-            let cright = compile_sqlarg(schema.clone(), right)?;
+            let cleft = compile_sqlarg(schema.clone(), scope.clone(), left)?;
+            let cright = compile_sqlarg(schema.clone(), scope.clone(), right)?;
             let params = combine_sqlparams(vec![&cleft, &cright])?;
             let type_ = match op {
                 sqlast::BinaryOperator::Plus => {
@@ -404,7 +572,7 @@ pub fn compile_sqlexpr(schema: Ref<Schema>, expr: &sqlast::Expr) -> Result<CType
                     return Err(CompileError::duplicate_entry(vec![name.clone()]));
                 }
 
-                let compiled_arg = compile_sqlarg(schema.clone(), &expr)?;
+                let compiled_arg = compile_sqlarg(schema.clone(), scope.clone(), &expr)?;
                 compiled_args.insert(
                     name.clone(),
                     TypedNameAndSQLExpr {

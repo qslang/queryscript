@@ -1,4 +1,3 @@
-use sqlparser::ast as sqlast;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path as FilePath;
@@ -202,66 +201,13 @@ pub fn typecheck_path(type_: CRef<MType>, path: &[String]) -> Result<CRef<MType>
     })
 }
 
-pub fn compile_reference(schema: Ref<Schema>, sqlpath: &Vec<sqlast::Ident>) -> Result<CTypedExpr> {
-    let path: Vec<_> = sqlpath.iter().map(|e| e.value.clone()).collect();
-    let (decl, remainder) = lookup_path(schema.clone(), &path, true /* import_global */)?;
-
-    let entry = decl.value.clone();
-    let remainder_cpy = remainder.clone();
-
-    let type_ = match &entry {
-        SchemaEntry::Expr(v) => v.clone(),
-        _ => return Err(CompileError::wrong_kind(path.clone(), "value", &decl)),
-    }
-    .then(move |typed: Ref<STypedExpr>| -> Result<CRef<MType>> {
-        let type_ = typed
-            .borrow()
-            .type_
-            .then(|t: Ref<SType>| Ok(t.borrow().instantiate()?))?;
-        typecheck_path(type_.clone(), remainder_cpy.as_slice())
-    })?;
-
-    let top_level_ref = TypedExpr {
-        type_: type_.clone(),
-        expr: Rc::new(Expr::SchemaEntry(SchemaEntryExpr {
-            debug_name: decl.name.clone(),
-            entry: entry.clone(),
-        })),
-    };
-
-    let r = match remainder.len() {
-        0 => top_level_ref,
-        _ => {
-            // Turn the top level reference into a SQL placeholder, and return
-            // a path accessing it
-            let placeholder = intern_placeholder(schema.clone(), "param", top_level_ref)?;
-            let placeholder_name = match &placeholder.expr.expr {
-                sqlast::Expr::Identifier(i) => i,
-                _ => panic!("placeholder expected to be an identifier"),
-            };
-            let mut full_name = vec![placeholder_name.clone()];
-            full_name.extend(remainder.clone().into_iter().map(|n| sqlast::Ident {
-                value: n,
-                quote_style: None,
-            }));
-
-            TypedExpr {
-                type_,
-                expr: Rc::new(Expr::SQLExpr(Rc::new(SQLExpr {
-                    params: placeholder.expr.params.clone(),
-                    expr: sqlast::Expr::CompoundIdentifier(full_name),
-                }))),
-            }
-        }
-    };
-
-    Ok(r)
-}
-
 pub fn compile_expr(schema: Ref<Schema>, expr: &ast::Expr) -> Result<CTypedExpr> {
     match expr {
         ast::Expr::SQLQuery(q) => Ok(compile_sqlquery(schema.clone(), q)?),
-        ast::Expr::SQLExpr(e) => Ok(compile_sqlexpr(schema.clone(), e)?),
+        ast::Expr::SQLExpr(e) => {
+            let scope = mkcref(SQLScope::new(schema.clone(), None));
+            Ok(compile_sqlexpr(schema.clone(), scope.clone(), e)?)
+        }
     }
 }
 
