@@ -1,0 +1,15 @@
+{
+    "decls": {
+        "let foo": Int64,
+    },
+    "queries": [
+        TypedValue {
+            type_: Atom(
+                Int64,
+            ),
+            value: Int64(
+                1,
+            ),
+        },
+    ],
+}
