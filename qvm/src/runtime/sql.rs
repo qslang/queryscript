@@ -64,9 +64,21 @@ impl LoadJsonFn {
             _ => return fail!("Type of load_json is not a function"),
         };
 
-        let schema = match ret_type.as_ref().try_into()? {
-            DFDataType::Struct(s) => Arc::new(DFSchema::new(s)),
-            _ => return fail!("Return type of load_json is not a list of records"),
+        let mut schema = None;
+        if let DFDataType::List(dt) = ret_type.as_ref().try_into()? {
+            if let DFDataType::Struct(s) = dt.data_type() {
+                schema = Some(Arc::new(DFSchema::new(s.clone())));
+            }
+        }
+
+        let schema = match schema {
+            Some(schema) => schema,
+            None => {
+                return fail!(
+                    "Return type of load_json ({:?}) is not a list of records",
+                    ret_type.as_ref(),
+                )
+            }
         };
 
         Ok(LoadJsonFn { schema })
