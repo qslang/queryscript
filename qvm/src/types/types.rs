@@ -381,6 +381,7 @@ impl TryInto<ArrowSchema> for &Type {
                     .map(|f| Ok(f.try_into()?))
                     .collect::<Result<Vec<ArrowField>>>()?,
             )),
+            Type::List(dt) => dt.as_ref().try_into(),
             t => ts_fail!("Cannot convert type {:?} to record", t),
         }
     }

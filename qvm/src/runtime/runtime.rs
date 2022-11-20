@@ -15,9 +15,7 @@ pub fn eval_params(
 ) -> Result<HashMap<String, SQLParam>> {
     let mut param_values = HashMap::new();
     for (name, param) in params {
-        eprintln!("expr: {:?}", &param.expr);
         let value = eval(schema.clone(), param)?;
-        eprintln!("evaluated value: {:?}", value);
         param_values.insert(
             name.clone(),
             SQLParam::new(name.clone(), value, &param.type_.borrow()),
