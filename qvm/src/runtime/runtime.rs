@@ -50,12 +50,15 @@ pub fn eval(schema: schema::SchemaRef, typed_expr: &schema::TypedExpr<TypeRef>) 
         schema::Expr::Fn { .. } => {
             return Err(RuntimeError::unimplemented("functions"));
         }
-        schema::Expr::NativeFn(name) => match name.as_str() {
-            "load_json" => Ok(Value::Fn(Arc::new(super::sql::LoadJsonFn::new(
-                &*typed_expr.type_.borrow(),
-            )?))),
-            _ => return rt_unimplemented!("native function: {}", name),
-        },
+        schema::Expr::NativeFn(name) => {
+            use super::functions::*;
+            match name.as_str() {
+                "load_json" => Ok(Value::Fn(Arc::new(LoadJsonFn::new(
+                    &*typed_expr.type_.borrow(),
+                )?))),
+                _ => return rt_unimplemented!("native function: {}", name),
+            }
+        }
         schema::Expr::FnCall(schema::FnCallExpr { func, args }) => {
             let arg_values = args
                 .iter()

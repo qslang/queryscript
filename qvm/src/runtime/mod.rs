@@ -1,4 +1,5 @@
 pub mod error;
+mod functions;
 pub mod runtime;
 mod sql;
 
