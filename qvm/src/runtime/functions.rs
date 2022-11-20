@@ -62,7 +62,7 @@ impl LoadJsonFn {
             last_modified: fmeta.modified().map(chrono::DateTime::from).unwrap(),
             size: fmeta.len() as usize,
         };
-        // let physical_planner = DefaultPhysicalPlanner::default();
+        // XXX We should make these functions async as datafusion's execution already is
         let records = runtime.block_on(async {
             let plan = format
                 .create_physical_plan(
