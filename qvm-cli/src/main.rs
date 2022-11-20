@@ -13,13 +13,16 @@ mod repl;
 #[command(propagate_version = true)]
 struct Cli {
     file: Option<String>,
+
+    #[arg(short, long, default_value_t = false)]
+    compile: bool,
 }
 
 fn main() {
     let cli = Cli::parse();
 
     match cli.file {
-        Some(file) => match run_file(&file) {
+        Some(file) => match run_file(&file, cli.compile) {
             Err(err) => {
                 eprintln!("{}", err);
                 if let Some(bt) = ErrorCompat::backtrace(&err) {
@@ -29,14 +32,23 @@ fn main() {
             Ok(()) => {}
         },
         None => {
+            if cli.compile {
+                eprintln!("Cannot run with compile-only mode (--compile) in the repl");
+                return;
+            }
             crate::repl::run();
         }
     }
 }
 
-fn run_file(file: &str) -> Result<(), Whatever> {
+fn run_file(file: &str, compile_only: bool) -> Result<(), Whatever> {
     let schema = compile::compile_schema_from_file(&Path::new(&file))
         .with_whatever_context(|e| format!("{}", e))?;
+
+    if compile_only {
+        println!("{:#?}", schema);
+        return Ok(());
+    }
 
     for expr in schema.borrow().exprs.iter() {
         let expr = expr
