@@ -577,7 +577,7 @@ pub struct Schema {
     pub externs: BTreeMap<String, CRef<MType>>,
     pub decls: BTreeMap<String, Decl>,
     pub imports: BTreeMap<ast::Path, Ref<ImportedSchema>>,
-    pub queries: Vec<TypedExpr<CRef<MType>>>,
+    pub exprs: Vec<CTypedExpr>,
 }
 
 impl Schema {
@@ -589,7 +589,7 @@ impl Schema {
             externs: BTreeMap::new(),
             decls: BTreeMap::new(),
             imports: BTreeMap::new(),
-            queries: Vec::new(),
+            exprs: Vec::new(),
         })
     }
 

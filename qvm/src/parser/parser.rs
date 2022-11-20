@@ -125,10 +125,7 @@ impl<'a> Parser<'a> {
         } else if self.peek_keyword("select") {
             self.parse_query()?
         } else {
-            return unexpected_token!(
-                self.peek_token(),
-                "Expected: import | export | fn | extern | let | type | select"
-            );
+            self.parse_expr_stmt()?
         };
 
         Ok(Stmt { export, body })
@@ -337,7 +334,14 @@ impl<'a> Parser<'a> {
         let query = wrap_sql_eof(self.sqlparser.parse_query())?;
         self.expect_eos()?;
 
-        Ok(StmtBody::Query { query })
+        Ok(StmtBody::Expr(Expr::SQLQuery(query)))
+    }
+
+    pub fn parse_expr_stmt(&mut self) -> Result<StmtBody> {
+        let expr = wrap_sql_eof(self.sqlparser.parse_expr())?;
+        self.expect_eos()?;
+
+        Ok(StmtBody::Expr(Expr::SQLExpr(expr)))
     }
 
     pub fn parse_typedef(&mut self) -> Result<StmtBody> {

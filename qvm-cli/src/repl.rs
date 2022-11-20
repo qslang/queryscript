@@ -60,14 +60,16 @@ pub fn run() {
                 match run_command(repl_schema.clone(), &curr_buffer) {
                     Ok(RunCommandResult::Done) => {
                         // Reset the buffer
-                        curr_buffer = String::new();
+                        rl.add_history_entry(curr_buffer.as_str());
+                        curr_buffer.clear();
                     }
                     Ok(RunCommandResult::More) => {
                         // Allow the loop to run again (and parse more)
                     }
                     Err(e) => {
                         eprintln!("Error: {}", e);
-                        curr_buffer = String::new();
+                        rl.add_history_entry(curr_buffer.as_str());
+                        curr_buffer.clear();
                     }
                 }
             }
@@ -103,36 +105,25 @@ fn run_command(repl_schema: schema::SchemaRef, cmd: &str) -> Result<RunCommandRe
 
     match parser.parse_schema() {
         Ok(ast) => {
+            let num_exprs = repl_schema.borrow().exprs.len();
+
             compile::compile_schema_ast(repl_schema.clone(), &ast)
                 .with_whatever_context(|e| format!("{}", e))?;
-            return Ok(RunCommandResult::Done);
-        }
-        Err(parser::ParserError::Incomplete { .. }) => return Ok(RunCommandResult::More),
-        Err(_) => {
-            // TODO: Currently falls back to parsing as an expression in this case.
-            // We should really distinguish between whether this _is_ a schema vs.
-            // an error parsing a schema.
-            parser.reset();
-        }
-    };
 
-    match parser.parse_expr() {
-        Ok(ast) => {
-            let compiled = compile::compile_expr(repl_schema.clone(), &ast)
-                .with_whatever_context(|e| format!("{}", e))?;
-            let expr = compiled
-                .to_runtime_type()
-                .with_whatever_context(|e| format!("{}", e))?;
-            let value = runtime::eval(repl_schema.clone(), &expr)
-                .with_whatever_context(|e| format!("{}", e))?;
-            println!("{:?}", value);
+            if repl_schema.borrow().exprs.len() > num_exprs {
+                let compiled = repl_schema.borrow().exprs.last().unwrap().clone();
+                let expr = compiled
+                    .to_runtime_type()
+                    .with_whatever_context(|e| format!("{}", e))?;
+                let value = runtime::eval(repl_schema.clone(), &expr)
+                    .with_whatever_context(|e| format!("{}", e))?;
+                println!("{:?}", value);
+            }
+            Ok(RunCommandResult::Done)
         }
-        Err(e) => {
-            whatever!("{}", e);
-        }
-    };
-
-    return Ok(RunCommandResult::Done);
+        Err(parser::ParserError::Incomplete { .. }) => Ok(RunCommandResult::More),
+        Err(e) => whatever!("{}", e),
+    }
 }
 
 fn get_qvm_dir() -> Option<std::path::PathBuf> {

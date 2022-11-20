@@ -49,8 +49,8 @@ mod tests {
             }
         }
 
-        let mut queries = Vec::new();
-        for query in &schema.borrow().queries {
+        let mut exprs = Vec::new();
+        for expr in &schema.borrow().exprs {
             #[derive(Debug)]
             #[allow(dead_code)]
             struct TypedValue {
@@ -58,21 +58,21 @@ mod tests {
                 pub value: types::Value,
             }
 
-            let query = query
+            let expr = expr
                 .to_runtime_type()
-                .expect(format!("Could not convert expression {:?}", query).as_str());
-            let value = runtime::eval(schema.clone(), &query)
-                .expect(format!("Could not run expression {:?}", query).as_str());
+                .expect(format!("Could not convert expression {:?}", expr).as_str());
+            let value = runtime::eval(schema.clone(), &expr)
+                .expect(format!("Could not run expression {:?}", expr).as_str());
 
-            queries.push(TypedValue {
-                type_: query.type_.borrow().clone(),
+            exprs.push(TypedValue {
+                type_: expr.type_.borrow().clone(),
                 value,
             });
         }
 
         let mut result = BTreeMap::<String, Box<dyn fmt::Debug>>::new();
         result.insert("decls".to_string(), Box::new(decls));
-        result.insert("queries".to_string(), Box::new(queries));
+        result.insert("queries".to_string(), Box::new(exprs));
 
         let result_str = format!("{:#?}", result);
 

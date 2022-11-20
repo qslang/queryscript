@@ -324,7 +324,7 @@ pub fn declare_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
     for stmt in &ast.stmts {
         let entries: Vec<(String, bool, SchemaEntry)> = match &stmt.body {
             ast::StmtBody::Noop => continue,
-            ast::StmtBody::Query { .. } => continue,
+            ast::StmtBody::Expr(_) => continue,
             ast::StmtBody::Import { path, list, .. } => {
                 let imported = lookup_schema(schema.clone(), &path)?;
                 if imported.borrow().args.is_some() {
@@ -564,9 +564,9 @@ pub fn compile_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
     for stmt in &ast.stmts {
         match &stmt.body {
             ast::StmtBody::Noop => continue,
-            ast::StmtBody::Query { query } => {
-                let compiled = compile_sqlquery(schema.clone(), query)?;
-                schema.borrow_mut().queries.push(compiled);
+            ast::StmtBody::Expr(expr) => {
+                let compiled = compile_expr(schema.clone(), expr)?;
+                schema.borrow_mut().exprs.push(compiled);
             }
             ast::StmtBody::Import { .. } => continue,
             ast::StmtBody::TypeDef(nt) => {

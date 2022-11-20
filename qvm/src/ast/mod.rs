@@ -54,9 +54,7 @@ pub enum ImportList {
 #[derive(Clone, Debug)]
 pub enum StmtBody {
     Noop,
-    Query {
-        query: sqlast::Query,
-    },
+    Expr(Expr),
     Import {
         path: Path,
         list: ImportList,
