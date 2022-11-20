@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::parser::error::{unexpected_token, Result};
+use crate::parser::error::{unexpected_token, wrap_sql_eof, IncompleteSnafu, Result};
 use sqlparser::{
     dialect::{keywords::Keyword, GenericDialect},
     parser,
@@ -37,6 +37,18 @@ impl<'a> Parser<'a> {
 
     pub fn expect_token(&mut self, expected: &Token) -> Result<()> {
         Ok(self.sqlparser.expect_token(expected)?)
+    }
+
+    // This returns a slightly different error code that indicates that we were
+    // expecting the statement to end, so we can handle it in the REPL.
+    pub fn expect_eos(&mut self) -> Result<()> {
+        match self.expect_token(&Token::SemiColon) {
+            Ok(_) => Ok(()),
+            Err(e) => IncompleteSnafu {
+                original: Box::new(e),
+            }
+            .fail(),
+        }
     }
 
     pub fn peek_keyword(&mut self, expected: &str) -> bool {
@@ -115,7 +127,7 @@ impl<'a> Parser<'a> {
         } else {
             return unexpected_token!(
                 self.peek_token(),
-                "Expected: import | fn | extern | let | type"
+                "Expected: import | export | fn | extern | let | type | select"
             );
         };
 
@@ -156,7 +168,7 @@ impl<'a> Parser<'a> {
         //
         let name = self.parse_ident()?;
         let type_ = self.parse_type()?;
-        self.expect_token(&Token::SemiColon)?;
+        self.expect_eos()?;
 
         Ok(StmtBody::Extern { name, type_ })
     }
@@ -188,7 +200,7 @@ impl<'a> Parser<'a> {
 
     pub fn parse_simple_import(&mut self) -> Result<StmtBody> {
         let path = self.parse_path()?;
-        self.expect_token(&Token::SemiColon)?;
+        self.expect_eos()?;
         Ok(StmtBody::Import {
             path,
             list: ImportList::None,
@@ -240,7 +252,7 @@ impl<'a> Parser<'a> {
             None
         };
 
-        self.expect_token(&Token::SemiColon)?;
+        self.expect_eos()?;
 
         Ok(StmtBody::Import { path, list, args })
     }
@@ -316,14 +328,14 @@ impl<'a> Parser<'a> {
             }
         };
 
-        self.expect_token(&Token::SemiColon)?;
+        self.expect_eos()?;
 
         Ok(StmtBody::Let { name, type_, body })
     }
 
     pub fn parse_query(&mut self) -> Result<StmtBody> {
-        let query = self.sqlparser.parse_query()?;
-        self.expect_token(&Token::SemiColon)?;
+        let query = wrap_sql_eof(self.sqlparser.parse_query())?;
+        self.expect_eos()?;
 
         Ok(StmtBody::Query { query })
     }
@@ -335,7 +347,7 @@ impl<'a> Parser<'a> {
         let def = self.parse_type()?;
         match def {
             Type::Struct(_) => {}
-            _ => self.expect_token(&Token::SemiColon)?,
+            _ => self.expect_eos()?,
         }
         Ok(StmtBody::TypeDef(NameAndType { name, def }))
     }

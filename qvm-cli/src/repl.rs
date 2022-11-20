@@ -33,24 +33,41 @@ pub fn run() {
         }
     }
 
+    let mut curr_buffer = String::new();
     loop {
-        let readline = rl.readline("qvm> ");
+        let readline = rl.readline(if curr_buffer.len() == 0 {
+            "qvm> "
+        } else {
+            "...> "
+        });
 
         match readline {
             Ok(line) => {
-                rl.add_history_entry(line.as_str());
-                match line.trim().to_lowercase().trim_end_matches(';') {
+                if curr_buffer.len() == 0 {
+                    curr_buffer = line;
+                } else {
+                    curr_buffer.push_str(&format!("\n{}", line));
+                }
+                match curr_buffer.trim().to_lowercase().trim_end_matches(';') {
                     "exit" | "quit" => {
+                        rl.add_history_entry(curr_buffer.as_str());
                         println!("Goodbye!");
                         break;
                     }
                     _ => {}
                 };
 
-                match run_command(repl_schema.clone(), &line) {
-                    Ok(_) => {}
+                match run_command(repl_schema.clone(), &curr_buffer) {
+                    Ok(RunCommandResult::Done) => {
+                        // Reset the buffer
+                        curr_buffer = String::new();
+                    }
+                    Ok(RunCommandResult::More) => {
+                        // Allow the loop to run again (and parse more)
+                    }
                     Err(e) => {
                         eprintln!("Error: {}", e);
+                        curr_buffer = String::new();
                     }
                 }
             }
@@ -75,7 +92,12 @@ pub fn run() {
     }
 }
 
-fn run_command(repl_schema: schema::SchemaRef, cmd: &str) -> Result<(), Whatever> {
+enum RunCommandResult {
+    Done,
+    More,
+}
+
+fn run_command(repl_schema: schema::SchemaRef, cmd: &str) -> Result<RunCommandResult, Whatever> {
     let tokens = parser::tokenize(&cmd).with_whatever_context(|e| format!("{}", e))?;
     let mut parser = parser::Parser::new(tokens);
 
@@ -83,8 +105,9 @@ fn run_command(repl_schema: schema::SchemaRef, cmd: &str) -> Result<(), Whatever
         Ok(ast) => {
             compile::compile_schema_ast(repl_schema.clone(), &ast)
                 .with_whatever_context(|e| format!("{}", e))?;
-            return Ok(());
+            return Ok(RunCommandResult::Done);
         }
+        Err(parser::ParserError::Incomplete { .. }) => return Ok(RunCommandResult::More),
         Err(_) => {
             // TODO: Currently falls back to parsing as an expression in this case.
             // We should really distinguish between whether this _is_ a schema vs.
@@ -109,7 +132,7 @@ fn run_command(repl_schema: schema::SchemaRef, cmd: &str) -> Result<(), Whatever
         }
     };
 
-    return Ok(());
+    return Ok(RunCommandResult::Done);
 }
 
 fn get_qvm_dir() -> Option<std::path::PathBuf> {
