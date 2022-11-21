@@ -335,8 +335,6 @@ pub type Value = crate::types::Value;
 
 pub type Params<TypeRef> = BTreeMap<ast::Ident, TypedExpr<TypeRef>>;
 
-impl<TypeRef: Clone + fmt::Debug> Constrainable for Params<TypeRef> {}
-
 #[derive(Clone)]
 pub struct SQLExpr<TypeRef>
 where

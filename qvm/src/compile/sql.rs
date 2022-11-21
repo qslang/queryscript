@@ -43,16 +43,153 @@ impl Constrainable for CTypedNameAndSQLExpr {}
 impl Constrainable for CTypedSQLExpr {}
 impl Constrainable for CTypedSQLQuery {}
 
+pub fn get_rowtype(relation: CRef<MType>) -> Result<CRef<MType>> {
+    let r = relation.clone();
+    r.then(move |r: Ref<MType>| match &*r.borrow() {
+        MType::List(inner) => Ok(inner.clone()),
+        _ => Ok(relation.clone()),
+    })
+}
+
 pub fn compile_sqlreference(
     schema: Ref<Schema>,
-    _scope: Ref<SQLScope>,
+    scope: Ref<SQLScope>,
     sqlpath: &Vec<sqlast::Ident>,
 ) -> Result<CTypedExpr> {
-    // XXX This should actually check the scope
-    //
+    match sqlpath.len() {
+        0 => {
+            return Err(CompileError::internal(
+                "Reference must have at least one part",
+            ));
+        }
+        1 => {
+            let name = sqlpath[0].value.clone();
+
+            if let Some(relation) = scope.borrow().relations.get(&name) {
+                let type_ = get_rowtype(relation.type_.clone())?;
+                let expr = mkcref(Expr::SQLExpr(Rc::new(SQLExpr {
+                    params: BTreeMap::new(),
+                    expr: sqlast::Expr::CompoundIdentifier(sqlpath.clone()),
+                })));
+                return Ok(CTypedExpr { type_, expr });
+            } else {
+                #[derive(Clone, Debug)]
+                struct FieldMatch {
+                    pub relation: String,
+                    pub field: String,
+                    pub type_: Option<CRef<MType>>,
+                }
+                impl Constrainable for FieldMatch {}
+
+                let relations = combine_crefs(
+                    scope
+                        .borrow()
+                        .relations
+                        .iter()
+                        .map(|(n, te)| {
+                            let n = n.clone();
+                            get_rowtype(te.type_.clone())?.then(move |rowtype: Ref<MType>| {
+                                let rowtype = rowtype.borrow().clone();
+                                match &rowtype {
+                                    MType::Record(fields) => Ok(mkcref(
+                                        fields
+                                            .iter()
+                                            .map(|field| FieldMatch {
+                                                relation: n.clone(),
+                                                field: field.name.clone(),
+                                                type_: Some(field.type_.clone()),
+                                            })
+                                            .collect(),
+                                    )),
+                                    _ => Ok(mkcref(vec![FieldMatch {
+                                        relation: n.clone(),
+                                        field: n.clone(),
+                                        type_: Some(mkcref(rowtype)),
+                                    }])),
+                                }
+                            })
+                        })
+                        .collect::<Result<Vec<_>>>()?,
+                )?
+                .then(|relations: Ref<Vec<Ref<Vec<FieldMatch>>>>| {
+                    let mut ret = BTreeMap::<String, FieldMatch>::new();
+                    for a in &*relations.borrow() {
+                        for b in &*a.borrow() {
+                            if let Some(existing) = ret.get_mut(&b.field) {
+                                existing.type_ = None;
+                            } else {
+                                ret.insert(b.field.clone(), b.clone());
+                            }
+                        }
+                    }
+                    Ok(mkcref(ret))
+                })?;
+
+                let sqlpath = sqlpath.clone();
+                let tse = relations.then(move |relations: Ref<BTreeMap<String, FieldMatch>>| {
+                    if let Some(fm) = relations.borrow().get(&name) {
+                        if let Some(type_) = fm.type_.clone() {
+                            Ok(mkcref(TypedExpr {
+                                type_: type_.clone(),
+                                expr: Rc::new(Expr::SQLExpr(Rc::new(SQLExpr {
+                                    params: BTreeMap::new(),
+                                    expr: sqlast::Expr::CompoundIdentifier(vec![
+                                        sqlast::Ident {
+                                            value: fm.relation.clone(),
+                                            quote_style: None,
+                                        },
+                                        sqlast::Ident {
+                                            value: name.clone(),
+                                            quote_style: None,
+                                        },
+                                    ]),
+                                }))),
+                            }))
+                        } else {
+                            Err(CompileError::duplicate_entry(vec![name.clone()]))
+                        }
+                    } else {
+                        // If it doesn't match any names of fields in SQL relations,
+                        // compile it as a normal reference.
+                        //
+                        let te = compile_reference(schema.clone(), &sqlpath)?;
+                        Ok(mkcref(te))
+                    }
+                })?;
+                let type_ =
+                    tse.then(|tse: Ref<TypedExpr<CRef<MType>>>| Ok(tse.borrow().type_.clone()))?;
+                let expr = tse.then(|tse: Ref<TypedExpr<CRef<MType>>>| {
+                    Ok(mkcref(tse.borrow().expr.as_ref().clone()))
+                })?;
+
+                return Ok(CTypedExpr { type_, expr });
+            }
+        }
+        2 => {
+            let relation_name = sqlpath[0].value.clone();
+            let field_name = sqlpath[1].value.clone();
+
+            // If the relation can't be found in the scope, just fall through
+            //
+            if let Some(relation) = scope.borrow().relations.get(&relation_name) {
+                let rowtype = get_rowtype(relation.type_.clone())?;
+                let type_ = typecheck_path(rowtype, vec![field_name].as_slice())?;
+                let expr = mkcref(Expr::SQLExpr(Rc::new(SQLExpr {
+                    params: BTreeMap::new(),
+                    expr: sqlast::Expr::CompoundIdentifier(sqlpath.clone()),
+                })));
+                return Ok(CTypedExpr { type_, expr });
+            }
+        }
+        // References longer than two parts must be pointing outside the query, so just fall
+        // through
+        //
+        _ => {}
+    }
+
     let te = compile_reference(schema.clone(), sqlpath)?;
     Ok(CTypedExpr {
-        type_: te.type_,
+        type_: te.type_.clone(),
         expr: mkcref(te.expr.as_ref().clone()),
     })
 }
@@ -143,31 +280,36 @@ pub fn intern_placeholder(
     }
 }
 
+pub fn intern_cref_placeholder(
+    schema: Ref<Schema>,
+    kind: String,
+    te: CTypedExpr,
+) -> Result<CTypedSQLExpr> {
+    let type_ = te.type_.clone();
+    let expr = te.expr.clone().then(move |expr: Ref<Expr<CRef<MType>>>| {
+        let te = te.clone();
+        let sqlexpr: SQLExpr<CRef<MType>> = intern_placeholder(
+            schema.clone(),
+            kind.as_str(),
+            &TypedExpr {
+                type_: te.type_.clone(),
+                expr: Rc::new(expr.borrow().clone()),
+            },
+        )?
+        .as_ref()
+        .clone();
+        Ok(mkcref(sqlexpr))
+    })?;
+    Ok(CTypedSQLExpr { type_, expr })
+}
+
 pub fn compile_sqlarg(
     schema: Ref<Schema>,
     scope: Ref<SQLScope>,
     expr: &sqlast::Expr,
 ) -> Result<CTypedSQLExpr> {
     let compiled = compile_sqlexpr(schema.clone(), scope.clone(), expr)?;
-    let type_ = compiled.type_.clone();
-    let expr = compiled
-        .expr
-        .clone()
-        .then(move |expr: Ref<Expr<CRef<MType>>>| {
-            let compiled = compiled.clone();
-            let sqlexpr: SQLExpr<CRef<MType>> = intern_placeholder(
-                schema.clone(),
-                "param",
-                &TypedExpr {
-                    type_: compiled.type_.clone(),
-                    expr: Rc::new(expr.borrow().clone()),
-                },
-            )?
-            .as_ref()
-            .clone();
-            Ok(mkcref(sqlexpr))
-        })?;
-    Ok(CTypedSQLExpr { type_, expr })
+    intern_cref_placeholder(schema.clone(), "param".to_string(), compiled)
 }
 
 type CParams = Params<CRef<MType>>;

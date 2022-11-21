@@ -1,6 +1,7 @@
 use crate::compile::error::*;
 use crate::compile::schema::{mkref, Ref};
 use crate::runtime;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::rc::Rc;
 
@@ -36,7 +37,14 @@ where
 {
 }
 
+impl Constrainable for String {}
 impl<T> Constrainable for Vec<T> where T: Constrainable {}
+impl<K, V> Constrainable for BTreeMap<K, V>
+where
+    K: Constrainable,
+    V: Constrainable,
+{
+}
 impl<T> Constrainable for Ref<T> where T: Constrainable {}
 
 pub enum Constrained<T>
