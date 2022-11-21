@@ -36,6 +36,9 @@ where
 {
 }
 
+impl<T> Constrainable for Vec<T> where T: Constrainable {}
+impl<T> Constrainable for Ref<T> where T: Constrainable {}
+
 pub enum Constrained<T>
 where
     T: Constrainable,

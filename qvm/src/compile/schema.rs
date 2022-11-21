@@ -132,6 +132,15 @@ pub struct CTypedExpr {
     pub expr: CRef<Expr<CRef<MType>>>,
 }
 
+impl CTypedExpr {
+    pub fn to_runtime_type(&self) -> runtime::error::Result<TypedExpr<Ref<Type>>> {
+        Ok(TypedExpr {
+            type_: mkref(self.type_.must()?.borrow().to_runtime_type()?),
+            expr: Rc::new(self.expr.must()?.borrow().to_runtime_type()?),
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct CTypedNameAndExpr {
     pub name: String,
@@ -329,12 +338,15 @@ pub type Params<TypeRef> = BTreeMap<ast::Ident, TypedExpr<TypeRef>>;
 impl<TypeRef: Clone + fmt::Debug> Constrainable for Params<TypeRef> {}
 
 #[derive(Clone)]
-pub struct SQLExpr<TypeRef> {
+pub struct SQLExpr<TypeRef>
+where
+    TypeRef: Clone + fmt::Debug,
+{
     pub params: Params<TypeRef>,
     pub expr: sqlast::Expr,
 }
 
-impl<T: fmt::Debug> fmt::Debug for SQLExpr<T> {
+impl<T: Clone + fmt::Debug> fmt::Debug for SQLExpr<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SQLExpr")
             .field("params", &self.params)
@@ -344,12 +356,15 @@ impl<T: fmt::Debug> fmt::Debug for SQLExpr<T> {
 }
 
 #[derive(Clone)]
-pub struct SQLQuery<TypeRef> {
+pub struct SQLQuery<TypeRef>
+where
+    TypeRef: Clone + fmt::Debug,
+{
     pub params: Params<TypeRef>,
     pub query: sqlast::Query,
 }
 
-impl<T: fmt::Debug> fmt::Debug for SQLQuery<T> {
+impl<T: Clone + fmt::Debug> fmt::Debug for SQLQuery<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SQLQuery")
             .field("params", &self.params)
@@ -359,12 +374,15 @@ impl<T: fmt::Debug> fmt::Debug for SQLQuery<T> {
 }
 
 #[derive(Clone)]
-pub struct FnExpr<TypeRef> {
+pub struct FnExpr<TypeRef>
+where
+    TypeRef: Clone + fmt::Debug,
+{
     pub inner_schema: Ref<Schema>,
     pub body: Rc<Expr<TypeRef>>,
 }
 
-impl<TypeRef: fmt::Debug> fmt::Debug for FnExpr<TypeRef> {
+impl<TypeRef: Clone + fmt::Debug> fmt::Debug for FnExpr<TypeRef> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Ok(f.debug_struct("FnExpr")
             .field("body", &self.body)
@@ -373,7 +391,10 @@ impl<TypeRef: fmt::Debug> fmt::Debug for FnExpr<TypeRef> {
 }
 
 #[derive(Clone, Debug)]
-pub struct FnCallExpr<TypeRef> {
+pub struct FnCallExpr<TypeRef>
+where
+    TypeRef: Clone + fmt::Debug,
+{
     pub func: Rc<TypedExpr<TypeRef>>,
     pub args: Vec<TypedExpr<TypeRef>>,
 }
@@ -393,7 +414,10 @@ impl fmt::Debug for SchemaEntryExpr {
 }
 
 #[derive(Clone, Debug)]
-pub enum Expr<TypeRef> {
+pub enum Expr<TypeRef>
+where
+    TypeRef: Clone + fmt::Debug,
+{
     SQLQuery(Rc<SQLQuery<TypeRef>>),
     SQLExpr(Rc<SQLExpr<TypeRef>>),
     SchemaEntry(SchemaEntryExpr),
@@ -447,7 +471,10 @@ impl Expr<CRef<MType>> {
 impl<Ty: Clone + fmt::Debug> Constrainable for Expr<Ty> {}
 
 #[derive(Clone, Debug)]
-pub struct TypedExpr<TypeRef> {
+pub struct TypedExpr<TypeRef>
+where
+    TypeRef: Clone + fmt::Debug,
+{
     pub type_: TypeRef,
     pub expr: Rc<Expr<TypeRef>>,
 }
@@ -466,7 +493,7 @@ impl Constrainable for TypedExpr<CRef<MType>> {}
 #[derive(Clone)]
 pub struct STypedExpr {
     pub type_: CRef<SType>,
-    pub expr: Rc<Expr<CRef<MType>>>,
+    pub expr: CRef<Expr<CRef<MType>>>,
 }
 
 impl STypedExpr {
@@ -485,7 +512,7 @@ impl STypedExpr {
                     .borrow()
                     .to_runtime_type()?,
             ),
-            expr: Rc::new(self.expr.to_runtime_type()?),
+            expr: Rc::new(self.expr.must()?.borrow().to_runtime_type()?),
         })
     }
 }
@@ -521,7 +548,10 @@ pub struct Decl {
 }
 
 #[derive(Clone, Debug)]
-pub struct TypedNameAndExpr<TypeRef> {
+pub struct TypedNameAndExpr<TypeRef>
+where
+    TypeRef: Clone + fmt::Debug,
+{
     pub name: String,
     pub type_: TypeRef,
     pub expr: Rc<Expr<TypeRef>>,
@@ -624,7 +654,7 @@ impl Schema {
                                 ret: mkcref(MType::List(mkcref(MType::Name("R".to_string())))),
                             })),
                         }),
-                        expr: Rc::new(Expr::NativeFn("load_json".to_string())),
+                        expr: mkcref(Expr::NativeFn("load_json".to_string())),
                     })),
                 },
             ),

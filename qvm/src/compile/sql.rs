@@ -12,20 +12,26 @@ use std::rc::Rc;
 const QVM_NAMESPACE: &str = "__qvm";
 
 #[derive(Clone, Debug)]
-pub struct TypedNameAndSQLExpr {
+pub struct TypedSQLExpr {
+    pub type_: CRef<MType>,
+    pub expr: Ref<SQLExpr<CRef<MType>>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CTypedNameAndSQLExpr {
     pub name: String,
     pub type_: CRef<MType>,
     pub expr: CRef<SQLExpr<CRef<MType>>>,
 }
 
 #[derive(Clone, Debug)]
-pub struct TypedSQLExpr {
+pub struct CTypedSQLExpr {
     pub type_: CRef<MType>,
     pub expr: CRef<SQLExpr<CRef<MType>>>,
 }
 
 #[derive(Clone, Debug)]
-pub struct TypedSQLQuery {
+pub struct CTypedSQLQuery {
     pub type_: CRef<MType>,
     pub query: CRef<SQLQuery<CRef<MType>>>,
 }
@@ -33,9 +39,28 @@ pub struct TypedSQLQuery {
 impl<Ty: Clone + fmt::Debug> Constrainable for SQLExpr<Ty> {}
 impl<Ty: Clone + fmt::Debug> Constrainable for SQLQuery<Ty> {}
 impl Constrainable for TypedSQLExpr {}
-impl Constrainable for TypedSQLQuery {}
+impl Constrainable for CTypedNameAndSQLExpr {}
+impl Constrainable for CTypedSQLExpr {}
+impl Constrainable for CTypedSQLQuery {}
 
-pub fn compile_reference(schema: Ref<Schema>, sqlpath: &Vec<sqlast::Ident>) -> Result<CTypedExpr> {
+pub fn compile_sqlreference(
+    schema: Ref<Schema>,
+    _scope: Ref<SQLScope>,
+    sqlpath: &Vec<sqlast::Ident>,
+) -> Result<CTypedExpr> {
+    // XXX This should actually check the scope
+    //
+    let te = compile_reference(schema.clone(), sqlpath)?;
+    Ok(CTypedExpr {
+        type_: te.type_,
+        expr: mkcref(te.expr.as_ref().clone()),
+    })
+}
+
+pub fn compile_reference(
+    schema: Ref<Schema>,
+    sqlpath: &Vec<sqlast::Ident>,
+) -> Result<TypedExpr<CRef<MType>>> {
     let path: Vec<_> = sqlpath.iter().map(|e| e.value.clone()).collect();
     let (decl, remainder) = lookup_path(schema.clone(), &path, true /* import_global */)?;
 
@@ -54,9 +79,9 @@ pub fn compile_reference(schema: Ref<Schema>, sqlpath: &Vec<sqlast::Ident>) -> R
         typecheck_path(type_.clone(), remainder_cpy.as_slice())
     })?;
 
-    let top_level_ref = CTypedExpr {
+    let top_level_ref = TypedExpr {
         type_: type_.clone(),
-        expr: mkcref(Expr::SchemaEntry(SchemaEntryExpr {
+        expr: Rc::new(Expr::SchemaEntry(SchemaEntryExpr {
             debug_name: decl.name.clone(),
             entry: entry.clone(),
         })),
@@ -67,27 +92,23 @@ pub fn compile_reference(schema: Ref<Schema>, sqlpath: &Vec<sqlast::Ident>) -> R
         _ => {
             // Turn the top level reference into a SQL placeholder, and return
             // a path accessing it
-            let placeholder = intern_placeholder(schema.clone(), "param", top_level_ref)?;
-            let expr = placeholder.expr.then(|expr: Ref<SQLExpr<CRef<MType>>>| {
-                let placeholder_name = match &expr.borrow().expr {
-                    sqlast::Expr::Identifier(i) => i,
-                    _ => panic!("placeholder expected to be an identifier"),
-                };
-                let mut full_name = vec![placeholder_name.clone()];
-                full_name.extend(remainder.clone().into_iter().map(|n| sqlast::Ident {
-                    value: n,
-                    quote_style: None,
-                }));
+            let placeholder = intern_placeholder(schema.clone(), "param", &top_level_ref)?;
+            let placeholder_name = match &placeholder.expr {
+                sqlast::Expr::Identifier(i) => i,
+                _ => panic!("placeholder expected to be an identifier"),
+            };
+            let mut full_name = vec![placeholder_name.clone()];
+            full_name.extend(remainder.clone().into_iter().map(|n| sqlast::Ident {
+                value: n,
+                quote_style: None,
+            }));
 
-                let expr = mkcref(Expr::SQLExpr(Rc::new(SQLExpr {
-                    params: expr.borrow().params.clone(),
-                    expr: sqlast::Expr::CompoundIdentifier(full_name),
-                })));
+            let expr = Rc::new(Expr::SQLExpr(Rc::new(SQLExpr {
+                params: placeholder.params.clone(),
+                expr: sqlast::Expr::CompoundIdentifier(full_name),
+            })));
 
-                Ok(expr)
-            })?;
-
-            CTypedExpr { type_, expr }
+            TypedExpr { type_, expr }
         }
     };
 
@@ -103,85 +124,85 @@ pub fn new_placeholder_name(schema: Ref<Schema>, kind: &str) -> String {
 pub fn intern_placeholder(
     schema: Ref<Schema>,
     kind: &str,
-    expr: CTypedExpr,
-) -> Result<TypedSQLExpr> {
-    let type_ = expr.type_;
-    let sqlexpr = expr
-        .expr
-        .then(|expr: Ref<Expr<CRef<MType>>>| match &*expr.borrow() {
-            Expr::SQLExpr(sqlexpr) => Ok(mkcref(sqlexpr.as_ref().clone())),
-            _ => {
-                let placeholder_name =
-                    "@".to_string() + new_placeholder_name(schema.clone(), kind).as_str();
+    expr: &TypedExpr<CRef<MType>>,
+) -> Result<Rc<SQLExpr<CRef<MType>>>> {
+    match &*expr.expr {
+        Expr::SQLExpr(sqlexpr) => Ok(sqlexpr.clone()),
+        _ => {
+            let placeholder_name =
+                "@".to_string() + new_placeholder_name(schema.clone(), kind).as_str();
 
-                Ok(mkcref(SQLExpr {
-                    params: Params::from([(
-                        placeholder_name.clone(),
-                        TypedExpr {
-                            type_: type_.clone(),
-                            expr: Rc::new(expr.borrow().clone()),
-                        },
-                    )]),
-                    expr: sqlast::Expr::Identifier(sqlast::Ident {
-                        value: placeholder_name.clone(),
-                        quote_style: None,
-                    }),
-                }))
-            }
-        })?;
-
-    Ok(TypedSQLExpr {
-        type_: expr.type_.clone(),
-        expr: sqlexpr,
-    })
+            Ok(Rc::new(SQLExpr {
+                params: Params::from([(placeholder_name.clone(), expr.clone())]),
+                expr: sqlast::Expr::Identifier(sqlast::Ident {
+                    value: placeholder_name.clone(),
+                    quote_style: None,
+                }),
+            }))
+        }
+    }
 }
 
 pub fn compile_sqlarg(
     schema: Ref<Schema>,
     scope: Ref<SQLScope>,
     expr: &sqlast::Expr,
-) -> Result<TypedSQLExpr> {
-    Ok(intern_placeholder(
-        schema.clone(),
-        "param",
-        compile_sqlexpr(schema.clone(), scope.clone(), expr)?,
-    )?)
+) -> Result<CTypedSQLExpr> {
+    let compiled = compile_sqlexpr(schema.clone(), scope.clone(), expr)?;
+    let type_ = compiled.type_.clone();
+    let expr = compiled
+        .expr
+        .clone()
+        .then(move |expr: Ref<Expr<CRef<MType>>>| {
+            let compiled = compiled.clone();
+            let sqlexpr: SQLExpr<CRef<MType>> = intern_placeholder(
+                schema.clone(),
+                "param",
+                &TypedExpr {
+                    type_: compiled.type_.clone(),
+                    expr: Rc::new(expr.borrow().clone()),
+                },
+            )?
+            .as_ref()
+            .clone();
+            Ok(mkcref(sqlexpr))
+        })?;
+    Ok(CTypedSQLExpr { type_, expr })
 }
 
 type CParams = Params<CRef<MType>>;
 
-pub fn combine_sqlparams(all: Vec<&TypedSQLExpr>) -> Result<CRef<CParams>> {
-    let mut params: CRef<CParams> = mkcref(BTreeMap::new());
+pub fn combine_crefs<T: 'static + Constrainable>(all: Vec<CRef<T>>) -> Result<CRef<Vec<Ref<T>>>> {
+    let mut ret = mkcref(Vec::new());
 
-    for expr in all {
-        expr.expr.then(move |sqlexpr: Ref<SQLExpr<CRef<MType>>>| {
-            let expr_params = sqlexpr.borrow().params.clone();
-
-            let full_params = params.then(move |p: Ref<Params<CRef<MType>>>| {
-                for (k, ep) in expr_params.clone() {
-                    p.borrow_mut().insert(k, ep);
-                }
-
-                Ok(mkcref(p.borrow().clone()))
-            })?;
-            params = full_params.clone();
-
-            Ok(full_params)
+    for a in all {
+        ret = ret.then(move |sofar: Ref<Vec<Ref<T>>>| {
+            a.then(move |a: Ref<T>| Ok(mkcref(vec![sofar.borrow().clone(), vec![a]].concat())))
         })?;
     }
 
-    panic!();
+    Ok(ret)
+}
+
+pub fn combine_sqlparams(all: &Vec<Ref<SQLExpr<CRef<MType>>>>) -> Result<CParams> {
+    let mut ret = BTreeMap::new();
+    for e in all {
+        for (n, p) in &e.borrow().params {
+            ret.insert(n.clone(), p.clone());
+        }
+    }
+    Ok(ret)
 }
 
 #[derive(Clone, Debug)]
 pub struct SQLScope {
     pub parent: Option<Rc<SQLScope>>,
-    pub relations: BTreeMap<Vec<String>, CTypedExpr>,
+    pub relations: BTreeMap<String, TypedExpr<CRef<MType>>>,
     pub multiple_rows: bool,
 }
 
 impl SQLScope {
-    pub fn new(schema: Ref<Schema>, parent: Option<Rc<SQLScope>>) -> SQLScope {
+    pub fn new(parent: Option<Rc<SQLScope>>) -> SQLScope {
         SQLScope {
             parent,
             relations: BTreeMap::new(),
@@ -237,7 +258,7 @@ pub fn compile_select(schema: Ref<Schema>, select: &sqlast::Select) -> Result<CT
         return Err(CompileError::unimplemented("QUALIFY"));
     }
 
-    let mut scope = mkref(SQLScope::new(schema.clone(), None));
+    let scope = mkref(SQLScope::new(None));
 
     match select.from.len() {
         0 => {}
@@ -267,6 +288,9 @@ pub fn compile_select(schema: Ref<Schema>, select: &sqlast::Select) -> Result<CT
                         return Err(CompileError::unimplemented("WITH hints"));
                     }
 
+                    // TODO: This currently assumes that table references always come from outside
+                    // the query, which is not actually the case.
+                    //
                     let relation = compile_reference(schema.clone(), &name.0)?;
 
                     let list_type = mkcref(MType::List(MType::new_unknown(
@@ -274,8 +298,18 @@ pub fn compile_select(schema: Ref<Schema>, select: &sqlast::Select) -> Result<CT
                     )));
                     list_type.unify(&relation.type_)?;
 
-                    let path = name.0.iter().map(|n| n.value).collect::<Vec<_>>();
-                    scope.borrow_mut().relations.insert(path, relation);
+                    let name = match alias {
+                        Some(a) => a.name.value.clone(),
+                        None => name
+                            .0
+                            .last()
+                            .ok_or_else(|| {
+                                CompileError::internal("Table name must have at least one part")
+                            })?
+                            .value
+                            .clone(),
+                    };
+                    scope.borrow_mut().relations.insert(name, relation);
                 }
                 sqlast::TableFactor::Derived { .. } => {
                     return Err(CompileError::unimplemented("Subqueries"))
@@ -294,87 +328,123 @@ pub fn compile_select(schema: Ref<Schema>, select: &sqlast::Select) -> Result<CT
         _ => return Err(CompileError::unimplemented("JOIN")),
     };
 
-    let relations = &scope.borrow().relations;
-
-    if select.projection.len() == 1 && matches!(select.projection[0], sqlast::SelectItem::Wildcard)
-    {
-        if relations.len() > 1 {
-            return Err(CompileError::unimplemented("Wildcard in SELECT with JOIN"));
-        } else if relations.len() == 0 {
-            return Err(CompileError::unimplemented(
-                "Wildcard in SELECT without FROM",
-            ));
-        }
-        let name = relations.keys().take(1).collect::<Vec<_>>()[0];
-        let relation = relations
-            .get(name)
-            .ok_or_else(|| CompileError::internal("Could not get first relation"))?;
-
+    let mut from = Vec::new();
+    let mut from_params = BTreeMap::new();
+    for (name, relation) in &scope.borrow().relations {
         let placeholder_name =
             QVM_NAMESPACE.to_string() + new_placeholder_name(schema.clone(), "rel").as_str();
 
-        let mut ret = select.clone();
-        ret.from = vec![sqlast::TableWithJoins {
+        from.push(sqlast::TableWithJoins {
             relation: sqlast::TableFactor::Table {
                 name: sqlast::ObjectName(vec![sqlast::Ident {
                     value: placeholder_name.clone(),
                     quote_style: None,
                 }]),
-                alias: None,
+                alias: Some(sqlast::TableAlias {
+                    name: sqlast::Ident {
+                        value: name.clone(),
+                        quote_style: None,
+                    },
+                    columns: Vec::new(),
+                }),
                 args: None,
                 with_hints: Vec::new(),
             },
             joins: Vec::new(),
-        }];
-
-        return Ok(CTypedExpr {
-            type_: relation.type_.clone(),
-            expr: mkcref(Expr::SQLQuery(Rc::new(SQLQuery {
-                params: Params::from([(
-                    placeholder_name.clone(),
-                    TypedExpr {
-                        type_: relation.type_,
-                        expr: relation.expr,
-                    },
-                )]),
-                query: sqlast::Query {
-                    with: None,
-                    body: Box::new(sqlast::SetExpr::Select(Box::new(ret))),
-                    order_by: Vec::new(),
-                    limit: None,
-                    offset: None,
-                    fetch: None,
-                    lock: None,
-                },
-            }))),
         });
-    } else {
-        let fields = Vec::new();
-        let exprs = Vec::new();
-        for proj in &select.projection {
-            let (name, type_) = match proj {
-                sqlast::SelectItem::UnnamedExpr(e) => {
-                    let name = format!("{}", e);
-                    let compiled = compile_sqlexpr(schema.clone(), scope.clone(), e)?;
-                    (name, compiled.type_)
+        from_params.insert(placeholder_name.clone(), relation.clone());
+    }
+
+    let exprs = select
+        .projection
+        .iter()
+        .map(|p| {
+            Ok(match p {
+                sqlast::SelectItem::UnnamedExpr(expr) => {
+                    let name = format!("{}", expr);
+                    let compiled = compile_sqlarg(schema.clone(), scope.clone(), expr)?;
+                    mkcref(vec![CTypedNameAndSQLExpr {
+                        name,
+                        type_: compiled.type_,
+                        expr: compiled.expr,
+                    }])
                 }
                 sqlast::SelectItem::ExprWithAlias { expr, alias } => {
                     let name = alias.value.clone();
-                    let compiled = compile_sqlexpr(schema.clone(), scope.clone(), expr)?;
-                    (name, compiled.type_)
+                    let compiled = compile_sqlarg(schema.clone(), scope.clone(), expr)?;
+                    mkcref(vec![CTypedNameAndSQLExpr {
+                        name,
+                        type_: compiled.type_,
+                        expr: compiled.expr,
+                    }])
                 }
                 _ => {
                     return Err(CompileError::unimplemented("Table wildcard"));
                 }
-            };
-            fields.push(MField {
-                name,
-                type_,
-                nullable: true,
-            });
-        }
-        return Err(CompileError::unimplemented("SELECT no FROM"));
-    }
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let projections = combine_crefs(exprs)?;
+
+    let type_: CRef<MType> =
+        projections.then(|exprs: Ref<Vec<Ref<Vec<CTypedNameAndSQLExpr>>>>| {
+            let mut fields = Vec::new();
+            for a in &*exprs.borrow() {
+                for b in &*a.borrow() {
+                    fields.push(MField {
+                        name: b.name.clone(),
+                        type_: b.type_.clone(),
+                        nullable: true,
+                    });
+                }
+            }
+
+            Ok(mkcref(MType::Record(fields)))
+        })?;
+
+    let select = select.clone();
+    let expr: CRef<Expr<CRef<MType>>> =
+        projections.then(move |exprs: Ref<Vec<Ref<Vec<CTypedNameAndSQLExpr>>>>| {
+            let mut sqlexprs = Vec::new();
+            for a in &*exprs.borrow() {
+                for b in &*a.borrow() {
+                    sqlexprs.push(b.expr.clone());
+                }
+            }
+
+            let select = select.clone();
+            let from = from.clone();
+            let from_params = from_params.clone();
+            combine_crefs(sqlexprs)?.then(move |sqlexprs: Ref<Vec<Ref<SQLExpr<CRef<MType>>>>>| {
+                let proj_params = combine_sqlparams(&*sqlexprs.borrow())?;
+                let mut params = BTreeMap::new();
+                proj_params.iter().for_each(|(n, p)| {
+                    params.insert(n.clone(), p.clone());
+                });
+                from_params.iter().for_each(|(n, p)| {
+                    params.insert(n.clone(), p.clone());
+                });
+
+                let mut ret = select.clone();
+                ret.from = from.clone();
+
+                Ok(mkcref(Expr::SQLQuery(Rc::new(SQLQuery {
+                    params,
+                    query: sqlast::Query {
+                        with: None,
+                        body: Box::new(sqlast::SetExpr::Select(Box::new(ret.clone()))),
+                        order_by: Vec::new(),
+                        limit: None,
+                        offset: None,
+                        fetch: None,
+                        lock: None,
+                    },
+                }))))
+            })
+        })?;
+
+    return Ok(CTypedExpr { type_, expr });
 }
 
 pub fn compile_sqlquery(schema: Ref<Schema>, query: &sqlast::Query) -> Result<CTypedExpr> {
@@ -461,7 +531,7 @@ pub fn compile_sqlexpr(
         sqlast::Expr::Array(sqlast::Array { elem, .. }) => {
             let c_elems: Vec<CTypedExpr> = elem
                 .iter()
-                .map(|e| compile_sqlexpr(schema.clone(), e))
+                .map(|e| compile_sqlexpr(schema.clone(), scope.clone(), e))
                 .collect::<Result<Vec<_>>>()?;
             let mut c_elem_iter = c_elems.iter();
             let data_type = if let Some(first) = c_elem_iter.next() {
@@ -473,18 +543,20 @@ pub fn compile_sqlexpr(
                 mkcref(MType::Atom(AtomicType::Null))
             };
 
-            TypedExpr {
+            CTypedExpr {
                 type_: data_type,
-                expr: Rc::new(Expr::SQLExpr(Rc::new(SQLExpr {
+                expr: mkcref(Expr::SQLExpr(Rc::new(SQLExpr {
                     params: BTreeMap::new(),
                     expr: expr.clone(),
                 }))),
             }
         }
         sqlast::Expr::BinaryOp { left, op, right } => {
-            let cleft = compile_sqlarg(schema.clone(), scope.clone(), left)?;
-            let cright = compile_sqlarg(schema.clone(), scope.clone(), right)?;
-            let params = combine_sqlparams(vec![&cleft, &cright])?;
+            let op = op.clone();
+            let left = left.clone();
+            let right = right.clone();
+            let cleft = compile_sqlarg(schema.clone(), scope.clone(), left.as_ref())?;
+            let cright = compile_sqlarg(schema.clone(), scope.clone(), right.as_ref())?;
             let type_ = match op {
                 sqlast::BinaryOperator::Plus => {
                     cleft.type_.unify(&cright.type_)?;
@@ -498,16 +570,19 @@ pub fn compile_sqlexpr(
             };
             CTypedExpr {
                 type_,
-                expr: params.then(|params: Ref<Params<CRef<MType>>>| {
-                    Ok(mkcref(Expr::SQLExpr(Rc::new(SQLExpr {
-                        params: params.borrow().clone(),
-                        expr: sqlast::Expr::BinaryOp {
-                            left: Box::new(cleft.expr.expr.clone()),
-                            op: op.clone(),
-                            right: Box::new(cright.expr.expr.clone()),
-                        },
-                    }))))
-                })?,
+                expr: combine_crefs(vec![cleft.expr, cright.expr])?.then(
+                    move |args: Ref<Vec<Ref<SQLExpr<CRef<MType>>>>>| {
+                        let params = combine_sqlparams(&*args.borrow())?;
+                        Ok(mkcref(Expr::SQLExpr(Rc::new(SQLExpr {
+                            params,
+                            expr: sqlast::Expr::BinaryOp {
+                                left: Box::new(args.borrow()[0].borrow().expr.clone()),
+                                op: op.clone(),
+                                right: Box::new(args.borrow()[1].borrow().expr.clone()),
+                            },
+                        }))))
+                    },
+                )?,
             }
         }
         sqlast::Expr::Function(sqlast::Function {
@@ -542,7 +617,7 @@ pub fn compile_sqlexpr(
                     ))
                 }
             };
-            let mut compiled_args: BTreeMap<String, TypedNameAndSQLExpr> = BTreeMap::new();
+            let mut compiled_args: BTreeMap<String, CTypedNameAndSQLExpr> = BTreeMap::new();
             let mut pos: usize = 0;
             for arg in args {
                 let (name, expr) = match arg {
@@ -575,7 +650,7 @@ pub fn compile_sqlexpr(
                 let compiled_arg = compile_sqlarg(schema.clone(), scope.clone(), &expr)?;
                 compiled_args.insert(
                     name.clone(),
-                    TypedNameAndSQLExpr {
+                    CTypedNameAndSQLExpr {
                         name: name.clone(),
                         type_: compiled_arg.type_.clone(),
                         expr: compiled_arg.expr.clone(),
@@ -593,85 +668,98 @@ pub fn compile_sqlexpr(
                 }
             }
 
-            // TODO: Once we start binding SQL queries, we need to detect whether the arguments
+            // XXX: Now that we are binding SQL queries, we need to detect whether the arguments
             // contain any references to values within the SQL query and avoid lifting the function
             // expression if they do.
             //
+            let type_ = fn_type.ret.clone();
             let expr = if true {
                 let arg_exprs: Vec<_> = arg_sqlexprs
                     .iter()
-                    .map(|e| TypedExpr {
-                        type_: e.type_.clone(),
-                        expr: Rc::new(Expr::SQLExpr(e.expr.clone())),
+                    .map(|e| {
+                        let type_ = e.type_.clone();
+                        e.expr.then(move |expr: Ref<SQLExpr<CRef<MType>>>| {
+                            Ok(mkcref(TypedExpr {
+                                type_: type_.clone(),
+                                expr: Rc::new(Expr::SQLExpr(Rc::new(expr.borrow().clone()))),
+                            }))
+                        })
                     })
-                    .collect();
-                Rc::new(Expr::FnCall(FnCallExpr {
-                    func: Rc::new(TypedExpr {
-                        type_: mkcref(MType::Fn(fn_type.clone())),
-                        expr: func.expr,
-                    }),
-                    args: arg_exprs,
-                }))
-            } else {
-                let args_nonames = arg_sqlexprs
-                    .iter()
-                    .map(|e| TypedSQLExpr {
-                        type_: e.type_.clone(),
-                        expr: e.expr.clone(),
-                    })
-                    .collect::<Vec<_>>();
-                let mut params = combine_sqlparams(args_nonames.iter().collect())?;
-
-                let placeholder_name = QVM_NAMESPACE.to_string()
-                    + new_placeholder_name(schema.clone(), "func").as_str();
-
-                params.insert(
-                    placeholder_name.clone(),
-                    TypedExpr {
-                        expr: func.expr,
-                        type_: fn_type.ret.clone(),
+                    .collect::<Result<_>>()?;
+                combine_crefs(arg_exprs)?.then(
+                    move |arg_exprs: Ref<Vec<Ref<TypedExpr<CRef<MType>>>>>| {
+                        Ok(mkcref(Expr::FnCall(FnCallExpr {
+                            func: Rc::new(TypedExpr {
+                                type_: mkcref(MType::Fn(fn_type.clone())),
+                                expr: func.expr.clone(),
+                            }),
+                            args: arg_exprs
+                                .borrow()
+                                .iter()
+                                .map(|e| e.borrow().clone())
+                                .collect(),
+                        })))
                     },
-                );
+                )?
+            } else {
+                panic!();
+                // let args_nonames = arg_sqlexprs
+                //     .iter()
+                //     .map(|e| CTypedSQLExpr {
+                //         type_: e.type_.clone(),
+                //         expr: e.expr.clone(),
+                //     })
+                //     .collect::<Vec<_>>();
+                // let mut params = combine_sqlparams(args_nonames.iter().collect())?;
 
-                Rc::new(Expr::SQLExpr(Rc::new(SQLExpr {
-                    params,
-                    expr: sqlast::Expr::Function(sqlast::Function {
-                        name: sqlast::ObjectName(vec![sqlast::Ident {
-                            value: placeholder_name.clone(),
-                            quote_style: None,
-                        }]),
-                        args: arg_sqlexprs
-                            .iter()
-                            .map(|e| sqlast::FunctionArg::Named {
-                                name: sqlast::Ident {
-                                    value: e.name.clone(),
-                                    quote_style: None,
-                                },
-                                arg: sqlast::FunctionArgExpr::Expr(e.expr.expr.clone()),
-                            })
-                            .collect(),
-                        over: None,
-                        distinct: false,
-                        special: false,
-                    }),
-                })))
+                // let placeholder_name = QVM_NAMESPACE.to_string()
+                //     + new_placeholder_name(schema.clone(), "func").as_str();
+
+                // params.insert(
+                //     placeholder_name.clone(),
+                //     TypedExpr {
+                //         expr: func.expr,
+                //         type_: fn_type.ret.clone(),
+                //     },
+                // );
+
+                // Rc::new(Expr::SQLExpr(Rc::new(SQLExpr {
+                //     params,
+                //     expr: sqlast::Expr::Function(sqlast::Function {
+                //         name: sqlast::ObjectName(vec![sqlast::Ident {
+                //             value: placeholder_name.clone(),
+                //             quote_style: None,
+                //         }]),
+                //         args: arg_sqlexprs
+                //             .iter()
+                //             .map(|e| sqlast::FunctionArg::Named {
+                //                 name: sqlast::Ident {
+                //                     value: e.name.clone(),
+                //                     quote_style: None,
+                //                 },
+                //                 arg: sqlast::FunctionArgExpr::Expr(e.expr.expr.clone()),
+                //             })
+                //             .collect(),
+                //         over: None,
+                //         distinct: false,
+                //         special: false,
+                //     }),
+                // })))
             };
-
-            let type_ = fn_type.ret.clone();
 
             // XXX There are cases here where we could inline eagerly
             //
-            TypedExpr { type_, expr }
+            CTypedExpr { type_, expr }
         }
         sqlast::Expr::CompoundIdentifier(sqlpath) => {
             // XXX There are cases here where we could inline eagerly
             //
-            compile_reference(schema.clone(), sqlpath)?
+            compile_sqlreference(schema.clone(), scope.clone(), sqlpath)?
         }
         sqlast::Expr::Identifier(ident) => {
             // XXX There are cases here where we could inline eagerly
             //
-            compile_reference(schema.clone(), &vec![ident.clone()])?
+            compile_sqlreference(schema.clone(), scope.clone(), &vec![ident.clone()])?
         }
         _ => {
             return Err(CompileError::unimplemented(

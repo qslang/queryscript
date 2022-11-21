@@ -205,8 +205,8 @@ pub fn compile_expr(schema: Ref<Schema>, expr: &ast::Expr) -> Result<CTypedExpr>
     match expr {
         ast::Expr::SQLQuery(q) => Ok(compile_sqlquery(schema.clone(), q)?),
         ast::Expr::SQLExpr(e) => {
-            let scope = mkcref(SQLScope::new(schema.clone(), None));
-            Ok(compile_sqlexpr(schema.clone(), scope.clone(), e)?)
+            let scope = mkref(SQLScope::new(None));
+            Ok(compile_sqlexpr(schema.clone(), scope, e)?)
         }
     }
 }
@@ -217,7 +217,7 @@ pub fn rebind_decl(_schema: SchemaInstance, decl: &Decl) -> Result<SchemaEntry> 
         SchemaEntry::Type(t) => Ok(SchemaEntry::Type(t.clone())),
         SchemaEntry::Expr(e) => Ok(SchemaEntry::Expr(mkcref(STypedExpr {
             type_: e.then(|e: Ref<STypedExpr>| Ok(e.borrow().type_.clone()))?,
-            expr: Rc::new(Expr::SchemaEntry(SchemaEntryExpr {
+            expr: mkcref(Expr::SchemaEntry(SchemaEntryExpr {
                 debug_name: decl.name.clone(),
                 entry: decl.value.clone(),
             })),
@@ -547,7 +547,7 @@ pub fn compile_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
                             name: arg.name.clone(),
                             value: SchemaEntry::Expr(mkcref(STypedExpr {
                                 type_: SType::new_mono(type_.clone()),
-                                expr: Rc::new(Expr::Unknown),
+                                expr: mkcref(Expr::Unknown),
                             })),
                         },
                     );
@@ -571,10 +571,12 @@ pub fn compile_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
                             args: compiled_args,
                             ret: compiled.type_.clone(),
                         }))),
-                        expr: Rc::new(Expr::Fn(FnExpr {
-                            inner_schema: inner_schema.clone(),
-                            body: compiled.expr.clone(),
-                        })),
+                        expr: compiled.expr.then(move |expr: Ref<Expr<CRef<MType>>>| {
+                            Ok(mkcref(Expr::Fn(FnExpr {
+                                inner_schema: inner_schema.clone(),
+                                body: Rc::new(expr.borrow().clone()),
+                            })))
+                        })?,
                     }),
                 )?;
             }
@@ -601,7 +603,7 @@ pub fn compile_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
                     name.as_str(),
                     mkcref(STypedExpr {
                         type_: SType::new_mono(resolve_type(schema.clone(), type_)?),
-                        expr: Rc::new(Expr::Unknown),
+                        expr: mkcref(Expr::Unknown),
                     }),
                 )?;
             }
