@@ -6,7 +6,7 @@ use qvm::compile::schema;
 use qvm::parser;
 use qvm::runtime;
 
-pub fn run() {
+pub fn run(rt: &runtime::Runtime) {
     let cwd = std::env::current_dir()
         .expect("current working directory")
         .display()
@@ -57,7 +57,7 @@ pub fn run() {
                     _ => {}
                 };
 
-                match run_command(repl_schema.clone(), &curr_buffer) {
+                match run_command(rt, repl_schema.clone(), &curr_buffer) {
                     Ok(RunCommandResult::Done) => {
                         // Reset the buffer
                         rl.add_history_entry(curr_buffer.as_str());
@@ -99,7 +99,11 @@ enum RunCommandResult {
     More,
 }
 
-fn run_command(repl_schema: schema::SchemaRef, cmd: &str) -> Result<RunCommandResult, Whatever> {
+fn run_command(
+    rt: &runtime::Runtime,
+    repl_schema: schema::SchemaRef,
+    cmd: &str,
+) -> Result<RunCommandResult, Whatever> {
     let tokens = parser::tokenize(&cmd).with_whatever_context(|e| format!("{}", e))?;
     let mut parser = parser::Parser::new(tokens);
 
@@ -115,8 +119,11 @@ fn run_command(repl_schema: schema::SchemaRef, cmd: &str) -> Result<RunCommandRe
                 let expr = compiled
                     .to_runtime_type()
                     .with_whatever_context(|e| format!("{}", e))?;
-                let value = runtime::eval(repl_schema.clone(), &expr)
-                    .with_whatever_context(|e| format!("{}", e))?;
+                let value = rt.block_on(async move {
+                    runtime::eval(repl_schema.clone(), &expr)
+                        .await
+                        .with_whatever_context(|e| format!("{}", e))
+                })?;
                 println!("{:?}", value);
             }
             Ok(RunCommandResult::Done)

@@ -9,6 +9,7 @@ edition = "2021"
 arrow-buffer = "26.0.0" # This has to be tracked with datafusion
 datafusion = { path = "../arrow-datafusion/datafusion/core" }
 
+async-trait = "0.1"
 chrono = { version = "0.4.22", default-features = false }
 dyn-clone = "1.0.9"
 lazy_static = "1.4.0"

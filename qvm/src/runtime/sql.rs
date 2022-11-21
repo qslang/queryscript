@@ -16,7 +16,10 @@ use super::error::Result;
 use crate::types;
 use crate::types::{Relation, Type, Value};
 
-pub fn eval(query: &sqlast::Query, params: HashMap<String, SQLParam>) -> Result<Arc<dyn Relation>> {
+pub async fn eval(
+    query: &sqlast::Query,
+    params: HashMap<String, SQLParam>,
+) -> Result<Arc<dyn Relation>> {
     let mut ctx =
         SessionContext::with_config_rt(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
 
@@ -30,9 +33,7 @@ pub fn eval(query: &sqlast::Query, params: HashMap<String, SQLParam>) -> Result<
     let plan = sql_to_rel.query_to_plan(query.clone(), &mut ctes)?;
     let plan = ctx.optimize(&plan)?;
 
-    let runtime = tokio::runtime::Builder::new_current_thread().build()?;
-    // let physical_planner = DefaultPhysicalPlanner::default();
-    let records = runtime.block_on(async { execute_plan(&ctx, &plan).await })?;
+    let records = execute_plan(&ctx, &plan).await?;
     Ok(records)
 }
 

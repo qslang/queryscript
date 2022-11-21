@@ -20,9 +20,10 @@ struct Cli {
 
 fn main() {
     let cli = Cli::parse();
+    let rt = runtime::build().expect("Failed to build runtime");
 
     match cli.file {
-        Some(file) => match run_file(&file, cli.compile) {
+        Some(file) => match run_file(&rt, &file, cli.compile) {
             Err(err) => {
                 eprintln!("{}", err);
                 if let Some(bt) = ErrorCompat::backtrace(&err) {
@@ -36,12 +37,12 @@ fn main() {
                 eprintln!("Cannot run with compile-only mode (--compile) in the repl");
                 return;
             }
-            crate::repl::run();
+            crate::repl::run(&rt);
         }
     }
 }
 
-fn run_file(file: &str, compile_only: bool) -> Result<(), Whatever> {
+fn run_file(rt: &runtime::Runtime, file: &str, compile_only: bool) -> Result<(), Whatever> {
     let schema = compile::compile_schema_from_file(&Path::new(&file))
         .with_whatever_context(|e| format!("{}", e))?;
 
@@ -54,8 +55,11 @@ fn run_file(file: &str, compile_only: bool) -> Result<(), Whatever> {
         let expr = expr
             .to_runtime_type()
             .with_whatever_context(|e| format!("{}", e))?;
-        let value =
-            runtime::eval(schema.clone(), &expr).with_whatever_context(|e| format!("{}", e))?;
+        let value = rt.block_on(async {
+            runtime::eval(schema.clone(), &expr)
+                .await
+                .with_whatever_context(|e| format!("{}", e))
+        })?;
         println!("{:?}", value);
     }
 

@@ -1,4 +1,5 @@
 pub use arrow_buffer::i256;
+use async_trait::async_trait;
 pub use datafusion::arrow::{
     array::Array as ArrowArray,
     array::ArrayRef as ArrowArrayRef,
@@ -84,8 +85,9 @@ pub trait List: Debug + Send + Sync {
     fn as_vec(&self) -> Vec<Value>;
 }
 
+#[async_trait]
 pub trait FnValue: Debug + DynClone + Send + Sync {
-    fn execute(&self, args: Vec<Value>) -> crate::runtime::error::Result<Value>;
+    async fn execute(&self, args: Vec<Value>) -> crate::runtime::error::Result<Value>;
     fn fn_type(&self) -> FnType;
     fn as_any(&self) -> &dyn Any;
 }
