@@ -132,6 +132,13 @@ pub struct CTypedExpr {
     pub expr: CRef<Expr<CRef<MType>>>,
 }
 
+#[derive(Clone, Debug)]
+pub struct CTypedNameAndExpr {
+    pub name: String,
+    pub type_: CRef<MType>,
+    pub expr: CRef<Expr<CRef<MType>>>,
+}
+
 struct DebugMFields<'a>(&'a Vec<MField>);
 
 impl<'a> fmt::Debug for DebugMFields<'a> {
@@ -319,7 +326,7 @@ pub type Value = crate::types::Value;
 
 pub type Params<TypeRef> = BTreeMap<ast::Ident, TypedExpr<TypeRef>>;
 
-impl<TypeRef: Clone + fmt::Debug> Constrainable for BTreeMap<ast::Ident, TypedExpr<TypeRef>> {}
+impl<TypeRef: Clone + fmt::Debug> Constrainable for Params<TypeRef> {}
 
 #[derive(Clone)]
 pub struct SQLExpr<TypeRef> {
