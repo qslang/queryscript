@@ -10,7 +10,7 @@ mod tests {
     use crate::runtime;
     use crate::types;
 
-    fn test_directory(dir: &PathBuf) {
+    fn test_directory(rt: &runtime::Runtime, dir: &PathBuf) {
         println!("Running tests in {}", dir.display());
         for entry in fs::read_dir(dir).expect(format!("Could not read {}", dir.display()).as_str())
         {
@@ -18,14 +18,14 @@ mod tests {
             let path = entry.path();
             if path.is_file() && path.extension().and_then(OsStr::to_str) == Some("co") {
                 println!("Running {}", path.display());
-                test_schema(&path);
+                test_schema(&rt, &path);
             } else {
                 println!("Skipping {}", path.display());
             }
         }
     }
 
-    fn test_schema(path: &PathBuf) {
+    fn test_schema(rt: &runtime::Runtime, path: &PathBuf) {
         let schema = compile::compile_schema_from_file(path).expect("Failed to compile schema");
         let mut decls = BTreeMap::<String, Box<dyn fmt::Debug>>::new();
         for (name, decl) in &schema.borrow().decls {
@@ -61,8 +61,11 @@ mod tests {
             let expr = expr
                 .to_runtime_type()
                 .expect(format!("Could not convert expression {:?}", expr).as_str());
-            let value = runtime::eval(schema.clone(), &expr)
-                .expect(format!("Could not run expression {:?}", expr).as_str());
+            let async_schema = schema.clone();
+            let async_expr = expr.clone();
+            let value = rt
+                .block_on(async move { runtime::eval(async_schema.clone(), &async_expr).await })
+                .expect("Failed to evaluate expression");
 
             exprs.push(TypedValue {
                 type_: expr.type_.borrow().clone(),
@@ -99,12 +102,13 @@ mod tests {
         .collect::<PathBuf>();
         assert!(tests.is_dir());
 
+        let rt = runtime::build().expect("Failed to build runtime");
         println!("Running tests in {}", tests.display());
         for entry in
             fs::read_dir(&tests).expect(format!("Could not read {}", tests.display()).as_str())
         {
             let entry = entry.expect(format!("Could not read {}", tests.display()).as_str());
-            test_directory(&entry.path());
+            test_directory(&rt, &entry.path());
         }
     }
 }

@@ -269,21 +269,25 @@ impl<'a> Parser<'a> {
 
         self.expect_token(&Token::LParen)?;
 
-        let mut args = Vec::new();
-        loop {
-            let name = self.parse_ident()?;
-            let type_ = self.parse_type()?;
+        let args = if self.consume_token(&Token::RParen) {
+            Vec::new()
+        } else {
+            let mut args = Vec::new();
+            loop {
+                let name = self.parse_ident()?;
+                let type_ = self.parse_type()?;
 
-            args.push(FnArg { name, type_ });
+                args.push(FnArg { name, type_ });
 
-            match self.next_token().token {
-                Token::Comma => {}
-                Token::RParen => break,
-                _ => {
-                    return unexpected_token!(self.peek_token(), "Expected: ',' | ')'");
+                match self.next_token().token {
+                    Token::Comma => {}
+                    Token::RParen => break args,
+                    _ => {
+                        return unexpected_token!(self.peek_token(), "Expected: ',' | ')'");
+                    }
                 }
             }
-        }
+        };
 
         let ret = if self.consume_token(&Token::Arrow) {
             Some(self.parse_type()?)

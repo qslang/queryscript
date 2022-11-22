@@ -4,11 +4,44 @@
     },
     "queries": [
         TypedValue {
-            type_: Atom(
-                Int64,
+            type_: List(
+                Record(
+                    [
+                        Field {
+                            name: "foo",
+                            type_: Atom(
+                                Int64,
+                            ),
+                            nullable: true,
+                        },
+                    ],
+                ),
             ),
-            value: Int64(
-                1,
+            value: Relation(
+                [
+                    RecordBatch {
+                        schema: Schema {
+                            fields: [
+                                Field {
+                                    name: "foo",
+                                    data_type: Int64,
+                                    nullable: false,
+                                    dict_id: 0,
+                                    dict_is_ordered: false,
+                                    metadata: None,
+                                },
+                            ],
+                            metadata: {},
+                        },
+                        columns: [
+                            PrimitiveArray<Int64>
+                            [
+                              1,
+                            ],
+                        ],
+                        row_count: 1,
+                    },
+                ],
             ),
         },
     ],
