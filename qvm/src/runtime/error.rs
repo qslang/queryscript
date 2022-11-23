@@ -1,6 +1,7 @@
 use object_store;
-use snafu::{Backtrace, Snafu};
+use snafu::{Backtrace, GenerateImplicitData, Snafu};
 use std::num::ParseFloatError;
+use std::sync::Arc;
 pub type Result<T> = std::result::Result<T, RuntimeError>;
 
 #[derive(Debug, Snafu)]
@@ -26,8 +27,8 @@ pub enum RuntimeError {
 
     #[snafu(context(false))]
     DataFusionError {
-        source: datafusion::common::DataFusionError,
-        backtrace: Option<Backtrace>,
+        source: Arc<datafusion::common::DataFusionError>,
+        backtrace: Backtrace,
     },
 
     #[snafu(context(false))]
@@ -56,6 +57,21 @@ impl RuntimeError {
 
     pub fn unimplemented(what: &str) -> RuntimeError {
         return UnimplementedSnafu { what }.build();
+    }
+}
+
+impl<Guard> From<std::sync::PoisonError<Guard>> for RuntimeError {
+    fn from(e: std::sync::PoisonError<Guard>) -> RuntimeError {
+        RuntimeError::new(format!("{}", e).as_str())
+    }
+}
+
+impl From<datafusion::common::DataFusionError> for RuntimeError {
+    fn from(e: datafusion::common::DataFusionError) -> RuntimeError {
+        RuntimeError::DataFusionError {
+            source: Arc::new(e),
+            backtrace: Backtrace::generate(),
+        }
     }
 }
 

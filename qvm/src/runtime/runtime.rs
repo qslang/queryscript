@@ -5,7 +5,6 @@ use crate::types;
 use crate::types::{Arc, Value};
 use sqlparser::ast as sqlast;
 use std::collections::HashMap;
-use std::rc::Rc;
 
 type TypeRef = schema::Ref<types::Type>;
 
@@ -26,7 +25,7 @@ pub async fn eval_params(
         let value = eval(schema.clone(), param).await?;
         param_values.insert(
             name.clone(),
-            SQLParam::new(name.clone(), value, &param.type_.borrow()),
+            SQLParam::new(name.clone(), value, &*param.type_.read()?),
         );
     }
 
@@ -49,8 +48,8 @@ pub fn eval<'a>(
                             schema.clone(),
                             &schema::TypedExpr {
                                 type_: typed_expr.type_.clone(),
-                                expr: Rc::new(
-                                    e.must()?.borrow().expr.must()?.borrow().to_runtime_type()?,
+                                expr: Arc::new(
+                                    e.must()?.read()?.expr.must()?.read()?.to_runtime_type()?,
                                 ),
                             },
                         )
@@ -69,7 +68,7 @@ pub fn eval<'a>(
                 use super::functions::*;
                 match name.as_str() {
                     "load_json" => Ok(Value::Fn(Arc::new(LoadJsonFn::new(
-                        &*typed_expr.type_.borrow(),
+                        &*typed_expr.type_.read()?,
                     )?))),
                     _ => return rt_unimplemented!("native function: {}", name),
                 }

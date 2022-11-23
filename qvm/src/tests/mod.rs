@@ -28,7 +28,7 @@ mod tests {
     fn test_schema(rt: &runtime::Runtime, path: &PathBuf) {
         let schema = compile::compile_schema_from_file(path).expect("Failed to compile schema");
         let mut decls = BTreeMap::<String, Box<dyn fmt::Debug>>::new();
-        for (name, decl) in &schema.borrow().decls {
+        for (name, decl) in &schema.read().unwrap().decls {
             match &decl.value {
                 compile::schema::SchemaEntry::Type(t) => {
                     decls.insert(format!("type {}", name), Box::new(t.clone()));
@@ -39,7 +39,7 @@ mod tests {
                         Box::new(
                             e.must()
                                 .expect("Unresolved declaration after compilation")
-                                .borrow()
+                                .read().unwrap()
                                 .type_
                                 .clone(),
                         ),
@@ -50,7 +50,7 @@ mod tests {
         }
 
         let mut exprs = Vec::new();
-        for expr in &schema.borrow().exprs {
+        for expr in &schema.read().unwrap().exprs {
             #[derive(Debug)]
             #[allow(dead_code)]
             struct TypedValue {
@@ -68,7 +68,7 @@ mod tests {
                 .expect("Failed to evaluate expression");
 
             exprs.push(TypedValue {
-                type_: expr.type_.borrow().clone(),
+                type_: expr.type_.read().unwrap().clone(),
                 value,
             });
         }

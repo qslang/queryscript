@@ -6,10 +6,9 @@ use crate::compile::{
 use crate::runtime;
 use crate::types::{AtomicType, Field, FnType, Type};
 use sqlparser::ast as sqlast;
-use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 
 pub type Ident = ast::Ident;
 
@@ -59,14 +58,14 @@ impl MType {
                     .map(|f| {
                         Ok(Field {
                             name: f.name.clone(),
-                            type_: f.type_.must()?.borrow().to_runtime_type()?,
+                            type_: f.type_.must()?.read()?.to_runtime_type()?,
                             nullable: f.nullable,
                         })
                     })
                     .collect::<runtime::error::Result<Vec<_>>>()?,
             )),
             MType::List(inner) => Ok(Type::List(Box::new(
-                inner.must()?.borrow().to_runtime_type()?,
+                inner.must()?.read()?.to_runtime_type()?,
             ))),
             MType::Fn(MFnType { args, ret }) => Ok(Type::Fn(FnType {
                 args: args
@@ -74,12 +73,12 @@ impl MType {
                     .map(|a| {
                         Ok(Field {
                             name: a.name.clone(),
-                            type_: a.type_.must()?.borrow().to_runtime_type()?,
+                            type_: a.type_.must()?.read()?.to_runtime_type()?,
                             nullable: a.nullable,
                         })
                     })
                     .collect::<runtime::error::Result<Vec<_>>>()?,
-                ret: Box::new(ret.must()?.borrow().to_runtime_type()?),
+                ret: Box::new(ret.must()?.read()?.to_runtime_type()?),
             })),
             MType::Name(_) => {
                 runtime::error::fail!("Unresolved type name cannot exist at runtime: {:?}", self)
@@ -135,8 +134,8 @@ pub struct CTypedExpr {
 impl CTypedExpr {
     pub fn to_runtime_type(&self) -> runtime::error::Result<TypedExpr<Ref<Type>>> {
         Ok(TypedExpr {
-            type_: mkref(self.type_.must()?.borrow().to_runtime_type()?),
-            expr: Rc::new(self.expr.must()?.borrow().to_runtime_type()?),
+            type_: mkref(self.type_.must()?.read()?.to_runtime_type()?),
+            expr: Arc::new(self.expr.must()?.read()?.to_runtime_type()?),
         })
     }
 }
@@ -261,15 +260,15 @@ impl Constrainable for Vec<MField> {
 
 impl CRef<MType> {
     pub fn substitute(&self, variables: &BTreeMap<String, CRef<MType>>) -> Result<CRef<MType>> {
-        match &*self.borrow() {
-            Constrained::Known(t) => t.borrow().substitute(variables),
+        match &*self.read()? {
+            Constrained::Known(t) => t.read()?.substitute(variables),
             Constrained::Unknown { .. } => Ok(self.clone()),
             Constrained::Ref(r) => r.substitute(variables),
         }
     }
 }
 
-pub type Ref<T> = Rc<RefCell<T>>;
+pub type Ref<T> = Arc<RwLock<T>>;
 
 #[derive(Clone)]
 pub struct SType {
@@ -338,13 +337,13 @@ pub type Params<TypeRef> = BTreeMap<ast::Ident, TypedExpr<TypeRef>>;
 #[derive(Clone)]
 pub struct SQLExpr<TypeRef>
 where
-    TypeRef: Clone + fmt::Debug,
+    TypeRef: Clone + fmt::Debug + Send + Sync,
 {
     pub params: Params<TypeRef>,
     pub expr: sqlast::Expr,
 }
 
-impl<T: Clone + fmt::Debug> fmt::Debug for SQLExpr<T> {
+impl<T: Clone + fmt::Debug + Send + Sync> fmt::Debug for SQLExpr<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SQLExpr")
             .field("params", &self.params)
@@ -356,13 +355,13 @@ impl<T: Clone + fmt::Debug> fmt::Debug for SQLExpr<T> {
 #[derive(Clone)]
 pub struct SQLQuery<TypeRef>
 where
-    TypeRef: Clone + fmt::Debug,
+    TypeRef: Clone + fmt::Debug + Send + Sync,
 {
     pub params: Params<TypeRef>,
     pub query: sqlast::Query,
 }
 
-impl<T: Clone + fmt::Debug> fmt::Debug for SQLQuery<T> {
+impl<T: Clone + fmt::Debug + Send + Sync> fmt::Debug for SQLQuery<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SQLQuery")
             .field("params", &self.params)
@@ -374,13 +373,13 @@ impl<T: Clone + fmt::Debug> fmt::Debug for SQLQuery<T> {
 #[derive(Clone)]
 pub struct FnExpr<TypeRef>
 where
-    TypeRef: Clone + fmt::Debug,
+    TypeRef: Clone + fmt::Debug + Send + Sync,
 {
     pub inner_schema: Ref<Schema>,
-    pub body: Rc<Expr<TypeRef>>,
+    pub body: Arc<Expr<TypeRef>>,
 }
 
-impl<TypeRef: Clone + fmt::Debug> fmt::Debug for FnExpr<TypeRef> {
+impl<TypeRef: Clone + fmt::Debug + Send + Sync> fmt::Debug for FnExpr<TypeRef> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Ok(f.debug_struct("FnExpr")
             .field("body", &self.body)
@@ -391,9 +390,9 @@ impl<TypeRef: Clone + fmt::Debug> fmt::Debug for FnExpr<TypeRef> {
 #[derive(Clone, Debug)]
 pub struct FnCallExpr<TypeRef>
 where
-    TypeRef: Clone + fmt::Debug,
+    TypeRef: Clone + fmt::Debug + Send + Sync,
 {
-    pub func: Rc<TypedExpr<TypeRef>>,
+    pub func: Arc<TypedExpr<TypeRef>>,
     pub args: Vec<TypedExpr<TypeRef>>,
 }
 
@@ -414,10 +413,10 @@ impl fmt::Debug for SchemaEntryExpr {
 #[derive(Clone, Debug)]
 pub enum Expr<TypeRef>
 where
-    TypeRef: Clone + fmt::Debug,
+    TypeRef: Clone + fmt::Debug + Send + Sync,
 {
-    SQLQuery(Rc<SQLQuery<TypeRef>>),
-    SQLExpr(Rc<SQLExpr<TypeRef>>),
+    SQLQuery(Arc<SQLQuery<TypeRef>>),
+    SQLExpr(Arc<SQLExpr<TypeRef>>),
     SchemaEntry(SchemaEntryExpr),
     Fn(FnExpr<TypeRef>),
     FnCall(FnCallExpr<TypeRef>),
@@ -430,7 +429,7 @@ impl Expr<CRef<MType>> {
         match self {
             Expr::SQLQuery(q) => {
                 let SQLQuery { params, query } = q.as_ref();
-                Ok(Expr::SQLQuery(Rc::new(SQLQuery {
+                Ok(Expr::SQLQuery(Arc::new(SQLQuery {
                     params: params
                         .iter()
                         .map(|(name, param)| Ok((name.clone(), param.to_runtime_type()?)))
@@ -440,7 +439,7 @@ impl Expr<CRef<MType>> {
             }
             Expr::SQLExpr(e) => {
                 let SQLExpr { params, expr } = e.as_ref();
-                Ok(Expr::SQLExpr(Rc::new(SQLExpr {
+                Ok(Expr::SQLExpr(Arc::new(SQLExpr {
                     params: params
                         .iter()
                         .map(|(name, param)| Ok((name.clone(), param.to_runtime_type()?)))
@@ -450,10 +449,10 @@ impl Expr<CRef<MType>> {
             }
             Expr::Fn(FnExpr { inner_schema, body }) => Ok(Expr::Fn(FnExpr {
                 inner_schema: inner_schema.clone(),
-                body: Rc::new(body.to_runtime_type()?),
+                body: Arc::new(body.to_runtime_type()?),
             })),
             Expr::FnCall(FnCallExpr { func, args }) => Ok(Expr::FnCall(FnCallExpr {
-                func: Rc::new(func.to_runtime_type()?),
+                func: Arc::new(func.to_runtime_type()?),
                 args: args
                     .iter()
                     .map(|a| Ok(a.to_runtime_type()?))
@@ -466,22 +465,22 @@ impl Expr<CRef<MType>> {
     }
 }
 
-impl<Ty: Clone + fmt::Debug> Constrainable for Expr<Ty> {}
+impl<Ty: Clone + fmt::Debug + Send + Sync> Constrainable for Expr<Ty> {}
 
 #[derive(Clone, Debug)]
 pub struct TypedExpr<TypeRef>
 where
-    TypeRef: Clone + fmt::Debug,
+    TypeRef: Clone + fmt::Debug + Send + Sync,
 {
     pub type_: TypeRef,
-    pub expr: Rc<Expr<TypeRef>>,
+    pub expr: Arc<Expr<TypeRef>>,
 }
 
 impl TypedExpr<CRef<MType>> {
     pub fn to_runtime_type(&self) -> runtime::error::Result<TypedExpr<Ref<Type>>> {
         Ok(TypedExpr::<Ref<Type>> {
-            type_: mkref(self.type_.must()?.borrow().to_runtime_type()?),
-            expr: Rc::new(self.expr.to_runtime_type()?),
+            type_: mkref(self.type_.must()?.read()?.to_runtime_type()?),
+            expr: Arc::new(self.expr.to_runtime_type()?),
         })
     }
 }
@@ -504,13 +503,13 @@ impl STypedExpr {
             type_: mkref(
                 self.type_
                     .must()?
-                    .borrow()
+                    .read()?
                     .body
                     .must()?
-                    .borrow()
+                    .read()?
                     .to_runtime_type()?,
             ),
-            expr: Rc::new(self.expr.must()?.borrow().to_runtime_type()?),
+            expr: Arc::new(self.expr.must()?.read()?.to_runtime_type()?),
         })
     }
 }
@@ -518,7 +517,7 @@ impl STypedExpr {
 impl fmt::Debug for STypedExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("STypedExpr")
-            .field("type_", &*self.type_.borrow())
+            .field("type_", &*self.type_.read().unwrap())
             .field("expr", &self.expr)
             .finish()
     }
@@ -534,7 +533,7 @@ pub enum SchemaEntry {
 }
 
 pub fn mkref<T>(t: T) -> Ref<T> {
-    Rc::new(RefCell::new(t))
+    Arc::new(RwLock::new(t))
 }
 
 #[derive(Clone, Debug)]
@@ -548,11 +547,11 @@ pub struct Decl {
 #[derive(Clone, Debug)]
 pub struct TypedNameAndExpr<TypeRef>
 where
-    TypeRef: Clone + fmt::Debug,
+    TypeRef: Clone + fmt::Debug + Send + Sync,
 {
     pub name: String,
     pub type_: TypeRef,
-    pub expr: Rc<Expr<TypeRef>>,
+    pub expr: Arc<Expr<TypeRef>>,
 }
 
 pub type SchemaRef = Ref<Schema>;
@@ -595,7 +594,7 @@ impl Schema {
 
     pub fn new_global_schema() -> Ref<Schema> {
         let ret = Schema::new(None);
-        ret.borrow_mut().decls = BTreeMap::from([
+        ret.write().unwrap().decls = BTreeMap::from([
             (
                 "number".to_string(),
                 Decl {

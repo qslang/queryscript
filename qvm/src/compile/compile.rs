@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path as FilePath;
-use std::rc::Rc;
+use std::sync::{Arc, RwLockReadGuard};
+
+use snafu::{FromString, Whatever};
 
 use crate::ast;
 use crate::compile::error::*;
@@ -31,14 +33,37 @@ impl Compiler {
         self.next_placeholder += 1;
         format!("{}{}", kind, placeholder)
     }
+
+    pub fn async_cref<T: Constrainable + 'static>(
+        &self,
+        f: impl std::future::Future<Output = Result<CRef<T>>> + Send + 'static,
+    ) -> CRef<T> {
+        let slot = CRef::<T>::new_unknown("async_slot");
+        let ret = slot.clone();
+        self.runtime.spawn(async move {
+            let r = f.await?;
+            slot.unify(&r)
+        });
+
+        ret
+    }
+}
+
+pub fn read_whatever<'a, T>(
+    r: &'a Ref<T>,
+) -> core::result::Result<RwLockReadGuard<'a, T>, Whatever> {
+    match r.read() {
+        Ok(guard) => Ok(guard),
+        Err(e) => Err(Whatever::without_source(e.to_string())),
+    }
 }
 
 pub fn lookup_schema(schema: Ref<Schema>, path: &ast::Path) -> Result<Ref<ImportedSchema>> {
-    if let Some(s) = schema.borrow().imports.get(path) {
+    if let Some(s) = schema.read()?.imports.get(path) {
         return Ok(s.clone());
     }
 
-    let (k, v) = if let Some(root) = &schema.borrow().folder {
+    let (k, v) = if let Some(root) = &schema.read()?.folder {
         let mut file_path_buf = FilePath::new(root).to_path_buf();
         for p in path {
             file_path_buf.push(FilePath::new(p));
@@ -53,7 +78,7 @@ pub fn lookup_schema(schema: Ref<Schema>, path: &ast::Path) -> Result<Ref<Import
     };
 
     let imported = mkref(ImportedSchema {
-        args: if v.borrow().externs.len() == 0 {
+        args: if v.read()?.externs.len() == 0 {
             None
         } else {
             Some(Vec::new())
@@ -61,7 +86,7 @@ pub fn lookup_schema(schema: Ref<Schema>, path: &ast::Path) -> Result<Ref<Import
         schema: v.clone(),
     });
 
-    schema.borrow_mut().imports.insert(k, imported.clone());
+    schema.write()?.imports.insert(k, imported.clone());
 
     return Ok(imported);
 }
@@ -76,7 +101,7 @@ pub fn lookup_path(
     }
 
     for (i, ident) in path.iter().enumerate() {
-        let new = match schema.borrow().decls.get(ident) {
+        let new = match schema.read()?.decls.get(ident) {
             Some(decl) => {
                 if i > 0 && !decl.public {
                     return Err(CompileError::wrong_kind(path.clone(), "public", decl));
@@ -88,13 +113,13 @@ pub fn lookup_path(
 
                 match &decl.value {
                     SchemaEntry::Schema(imported) => lookup_schema(schema.clone(), &imported)?
-                        .borrow()
+                        .read()?
                         .schema
                         .clone(),
                     _ => return Ok((decl.clone(), path[i + 1..].to_vec())),
                 }
             }
-            None => match &schema.borrow().parent_scope {
+            None => match &schema.read()?.parent_scope {
                 Some(parent) => {
                     return lookup_path(parent.clone(), &path[i..].to_vec(), import_global)
                 }
@@ -198,7 +223,7 @@ pub fn typecheck_path(type_: CRef<MType>, path: &[String]) -> Result<CRef<MType>
     let name = path[0].clone();
     let remainder = path[1..].to_vec();
 
-    type_.then(move |type_: Ref<MType>| match &*type_.borrow() {
+    type_.then(move |type_: Ref<MType>| match &*type_.read()? {
         MType::Record(fields) => {
             if let Some(field) = find_field(&fields, name.as_str()) {
                 typecheck_path(field.type_.clone(), remainder.as_slice())
@@ -208,7 +233,7 @@ pub fn typecheck_path(type_: CRef<MType>, path: &[String]) -> Result<CRef<MType>
                         name.clone(),
                         MType::new_unknown("field"),
                     )]),
-                    &*type_.borrow(),
+                    &*type_.read()?,
                 ));
             }
         }
@@ -218,7 +243,7 @@ pub fn typecheck_path(type_: CRef<MType>, path: &[String]) -> Result<CRef<MType>
                     name.clone(),
                     MType::new_unknown("field"),
                 )]),
-                &*type_.borrow(),
+                &*type_.read()?,
             ))
         }
     })
@@ -243,7 +268,7 @@ pub fn rebind_decl(_schema: SchemaInstance, decl: &Decl) -> Result<SchemaEntry> 
         SchemaEntry::Schema(s) => Ok(SchemaEntry::Schema(s.clone())),
         SchemaEntry::Type(t) => Ok(SchemaEntry::Type(t.clone())),
         SchemaEntry::Expr(e) => Ok(SchemaEntry::Expr(mkcref(STypedExpr {
-            type_: e.then(|e: Ref<STypedExpr>| Ok(e.borrow().type_.clone()))?,
+            type_: e.then(|e: Ref<STypedExpr>| Ok(e.read()?.type_.clone()))?,
             expr: mkcref(Expr::SchemaEntry(SchemaEntryExpr {
                 debug_name: decl.name.clone(),
                 entry: decl.value.clone(),
@@ -310,7 +335,7 @@ pub fn declare_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
             ast::StmtBody::Expr(_) => continue,
             ast::StmtBody::Import { path, list, .. } => {
                 let imported = lookup_schema(schema.clone(), &path)?;
-                if imported.borrow().args.is_some() {
+                if imported.read()?.args.is_some() {
                     return Err(CompileError::unimplemented("Importing with arguments"));
                 }
 
@@ -322,7 +347,7 @@ pub fn declare_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
                 // let checked = match args {
                 //     None => None,
                 //     Some(args) => {
-                //         let mut externs = imported.borrow().schema.borrow().externs.clone();
+                //         let mut externs = imported.read()?.schema.read()?.externs.clone();
                 //         let mut checked = BTreeMap::new();
                 //         for arg in args {
                 //             let expr = match &arg.expr {
@@ -361,7 +386,7 @@ pub fn declare_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
                 // };
 
                 // let id = {
-                //     let imported_args = &mut imported.borrow_mut().args;
+                //     let imported_args = &mut imported.write()?.args;
                 //     if let Some(imported_args) = imported_args {
                 //         if let Some(checked) = checked {
                 //             let id = imported_args.len();
@@ -394,15 +419,15 @@ pub fn declare_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
                     }
                     ast::ImportList::Star => {
                         for (k, v) in imported
-                            .borrow()
+                            .read()?
                             .schema
-                            .borrow()
+                            .read()?
                             .decls
                             .iter()
                             .filter(|(_, v)| v.public)
                         {
                             let imported_schema = SchemaInstance {
-                                schema: imported.borrow().schema.clone(),
+                                schema: imported.read()?.schema.clone(),
                                 id: None,
                             };
                             imports.push((
@@ -419,7 +444,7 @@ pub fn declare_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
                             }
 
                             let (decl, r) = lookup_path(
-                                imported.borrow().schema.clone(),
+                                imported.read()?.schema.clone(),
                                 &item,
                                 false, /* import_global */
                             )?;
@@ -470,11 +495,11 @@ pub fn declare_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
         };
 
         for (name, extern_, value) in &entries {
-            if schema.borrow().decls.contains_key(name) {
+            if schema.read()?.decls.contains_key(name) {
                 return Err(CompileError::duplicate_entry(vec![name.clone()]));
             }
 
-            schema.borrow_mut().decls.insert(
+            schema.write()?.decls.insert(
                 name.clone(),
                 Decl {
                     public: stmt.export,
@@ -490,7 +515,7 @@ pub fn declare_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
 }
 
 pub fn unify_type_decl(schema: Ref<Schema>, name: &str, type_: CRef<MType>) -> Result<()> {
-    let s = schema.borrow();
+    let s = schema.read()?;
     let decl = s.decls.get(name).ok_or_else(|| {
         CompileError::internal(
             format!(
@@ -517,7 +542,7 @@ pub fn unify_type_decl(schema: Ref<Schema>, name: &str, type_: CRef<MType>) -> R
 }
 
 pub fn unify_expr_decl(schema: Ref<Schema>, name: &str, value: CRef<STypedExpr>) -> Result<()> {
-    let s = schema.borrow();
+    let s = schema.read()?;
     let decl = s.decls.get(name).ok_or_else(|| {
         CompileError::internal(
             format!(
@@ -553,7 +578,7 @@ pub fn compile_schema_entries(
             ast::StmtBody::Noop => continue,
             ast::StmtBody::Expr(expr) => {
                 let compiled = compile_expr(compiler.clone(), schema.clone(), expr)?;
-                schema.borrow_mut().exprs.push(compiled);
+                schema.write()?.exprs.push(compiled);
             }
             ast::StmtBody::Import { .. } => continue,
             ast::StmtBody::TypeDef(nt) => {
@@ -571,16 +596,16 @@ pub fn compile_schema_entries(
                     return Err(CompileError::unimplemented("function generics"));
                 }
 
-                let inner_schema = Schema::new(schema.borrow().folder.clone());
-                inner_schema.borrow_mut().parent_scope = Some(schema.clone());
+                let inner_schema = Schema::new(schema.read()?.folder.clone());
+                inner_schema.write()?.parent_scope = Some(schema.clone());
 
                 let mut compiled_args = Vec::new();
                 for arg in args {
-                    if inner_schema.borrow().decls.get(&arg.name).is_some() {
+                    if inner_schema.read()?.decls.get(&arg.name).is_some() {
                         return Err(CompileError::duplicate_entry(vec![name.clone()]));
                     }
                     let type_ = resolve_type(inner_schema.clone(), &arg.type_)?;
-                    inner_schema.borrow_mut().decls.insert(
+                    inner_schema.write()?.decls.insert(
                         arg.name.clone(),
                         Decl {
                             public: true,
@@ -593,7 +618,7 @@ pub fn compile_schema_entries(
                         },
                     );
                     inner_schema
-                        .borrow_mut()
+                        .write()?
                         .externs
                         .insert(arg.name.clone(), type_.clone());
                     compiled_args.push(MField::new_nullable(arg.name.clone(), type_.clone()));
@@ -615,7 +640,7 @@ pub fn compile_schema_entries(
                         expr: compiled.expr.then(move |expr: Ref<Expr<CRef<MType>>>| {
                             Ok(mkcref(Expr::Fn(FnExpr {
                                 inner_schema: inner_schema.clone(),
-                                body: Rc::new(expr.borrow().clone()),
+                                body: Arc::new(expr.read()?.clone()),
                             })))
                         })?,
                     }),
@@ -655,17 +680,17 @@ pub fn compile_schema_entries(
 }
 
 pub fn gather_schema_externs(schema: Ref<Schema>) -> Result<()> {
-    let s = schema.borrow();
+    let s = schema.read()?;
     for (name, decl) in &s.decls {
         if decl.extern_ {
             match &decl.value {
                 SchemaEntry::Expr(e) => {
-                    schema.borrow_mut().externs.insert(
+                    schema.write()?.externs.insert(
                         name.clone(),
                         e.must()?
-                            .borrow()
+                            .read()?
                             .type_
-                            .then(|t: Ref<SType>| Ok(t.borrow().instantiate()?))?,
+                            .then(|t: Ref<SType>| Ok(t.read()?.instantiate()?))?,
                     );
                 }
                 _ => return Err(CompileError::unimplemented("type externs")),

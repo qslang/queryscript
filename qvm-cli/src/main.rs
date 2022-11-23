@@ -51,7 +51,8 @@ fn run_file(rt: &runtime::Runtime, file: &str, compile_only: bool) -> Result<(),
         return Ok(());
     }
 
-    for expr in schema.borrow().exprs.iter() {
+    let locked_schema = compile::read_whatever(&schema)?;
+    for expr in locked_schema.exprs.iter() {
         let expr = expr
             .to_runtime_type()
             .with_whatever_context(|e| format!("{}", e))?;

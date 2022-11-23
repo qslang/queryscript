@@ -7,7 +7,7 @@ use sqlparser::ast as sqlast;
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::rc::Rc;
+use std::sync::Arc;
 
 const QVM_NAMESPACE: &str = "__qvm";
 
@@ -27,7 +27,7 @@ pub struct CTypedNameAndSQLExpr {
 #[derive(Clone, Debug)]
 pub struct NameAndSQLExpr {
     pub name: String,
-    pub expr: Rc<SQLExpr<CRef<MType>>>,
+    pub expr: Arc<SQLExpr<CRef<MType>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -42,8 +42,8 @@ pub struct CTypedSQLQuery {
     pub query: CRef<SQLQuery<CRef<MType>>>,
 }
 
-impl<Ty: Clone + fmt::Debug> Constrainable for SQLExpr<Ty> {}
-impl<Ty: Clone + fmt::Debug> Constrainable for SQLQuery<Ty> {}
+impl<Ty: Clone + fmt::Debug + Send + Sync> Constrainable for SQLExpr<Ty> {}
+impl<Ty: Clone + fmt::Debug + Send + Sync> Constrainable for SQLQuery<Ty> {}
 impl Constrainable for TypedSQLExpr {}
 impl Constrainable for NameAndSQLExpr {}
 impl Constrainable for CTypedNameAndSQLExpr {}
@@ -52,7 +52,7 @@ impl Constrainable for CTypedSQLQuery {}
 
 pub fn get_rowtype(relation: CRef<MType>) -> Result<CRef<MType>> {
     let r = relation.clone();
-    r.then(move |r: Ref<MType>| match &*r.borrow() {
+    r.then(move |r: Ref<MType>| match &*r.read()? {
         MType::List(inner) => Ok(inner.clone()),
         _ => Ok(relation.clone()),
     })
@@ -73,23 +73,23 @@ pub fn compile_sqlreference(
         1 => {
             let name = sqlpath[0].value.clone();
 
-            if let Some(relation) = scope.borrow().relations.get(&name) {
+            if let Some(relation) = scope.read()?.relations.get(&name) {
                 let type_ = get_rowtype(relation.type_.clone())?;
-                let expr = mkcref(Expr::SQLExpr(Rc::new(SQLExpr {
+                let expr = mkcref(Expr::SQLExpr(Arc::new(SQLExpr {
                     params: BTreeMap::new(),
                     expr: sqlast::Expr::CompoundIdentifier(sqlpath.clone()),
                 })));
                 return Ok(CTypedExpr { type_, expr });
             } else {
-                let available = scope.borrow().get_available_references()?;
+                let available = scope.read()?.get_available_references()?;
 
                 let sqlpath = sqlpath.clone();
                 let tse = available.then(move |available: Ref<BTreeMap<String, FieldMatch>>| {
-                    if let Some(fm) = available.borrow().get(&name) {
+                    if let Some(fm) = available.read()?.get(&name) {
                         if let Some(type_) = fm.type_.clone() {
                             Ok(mkcref(TypedExpr {
                                 type_: type_.clone(),
-                                expr: Rc::new(Expr::SQLExpr(Rc::new(SQLExpr {
+                                expr: Arc::new(Expr::SQLExpr(Arc::new(SQLExpr {
                                     params: BTreeMap::new(),
                                     expr: sqlast::Expr::CompoundIdentifier(vec![
                                         sqlast::Ident {
@@ -115,9 +115,9 @@ pub fn compile_sqlreference(
                     }
                 })?;
                 let type_ =
-                    tse.then(|tse: Ref<TypedExpr<CRef<MType>>>| Ok(tse.borrow().type_.clone()))?;
+                    tse.then(|tse: Ref<TypedExpr<CRef<MType>>>| Ok(tse.read()?.type_.clone()))?;
                 let expr = tse.then(|tse: Ref<TypedExpr<CRef<MType>>>| {
-                    Ok(mkcref(tse.borrow().expr.as_ref().clone()))
+                    Ok(mkcref(tse.read()?.expr.as_ref().clone()))
                 })?;
 
                 return Ok(CTypedExpr { type_, expr });
@@ -129,10 +129,10 @@ pub fn compile_sqlreference(
 
             // If the relation can't be found in the scope, just fall through
             //
-            if let Some(relation) = scope.borrow().relations.get(&relation_name) {
+            if let Some(relation) = scope.read()?.relations.get(&relation_name) {
                 let rowtype = get_rowtype(relation.type_.clone())?;
                 let type_ = typecheck_path(rowtype, vec![field_name].as_slice())?;
-                let expr = mkcref(Expr::SQLExpr(Rc::new(SQLExpr {
+                let expr = mkcref(Expr::SQLExpr(Arc::new(SQLExpr {
                     params: BTreeMap::new(),
                     expr: sqlast::Expr::CompoundIdentifier(sqlpath.clone()),
                 })));
@@ -169,15 +169,15 @@ pub fn compile_reference(
     }
     .then(move |typed: Ref<STypedExpr>| -> Result<CRef<MType>> {
         let type_ = typed
-            .borrow()
+            .read()?
             .type_
-            .then(|t: Ref<SType>| Ok(t.borrow().instantiate()?))?;
+            .then(|t: Ref<SType>| Ok(t.read()?.instantiate()?))?;
         typecheck_path(type_.clone(), remainder_cpy.as_slice())
     })?;
 
     let top_level_ref = TypedExpr {
         type_: type_.clone(),
-        expr: Rc::new(Expr::SchemaEntry(SchemaEntryExpr {
+        expr: Arc::new(Expr::SchemaEntry(SchemaEntryExpr {
             debug_name: decl.name.clone(),
             entry: entry.clone(),
         })),
@@ -199,7 +199,7 @@ pub fn compile_reference(
                 quote_style: None,
             }));
 
-            let expr = Rc::new(Expr::SQLExpr(Rc::new(SQLExpr {
+            let expr = Arc::new(Expr::SQLExpr(Arc::new(SQLExpr {
                 params: placeholder.params.clone(),
                 expr: sqlast::Expr::CompoundIdentifier(full_name),
             })));
@@ -215,14 +215,14 @@ pub fn intern_placeholder(
     compiler: Ref<Compiler>,
     kind: &str,
     expr: &TypedExpr<CRef<MType>>,
-) -> Result<Rc<SQLExpr<CRef<MType>>>> {
+) -> Result<Arc<SQLExpr<CRef<MType>>>> {
     match &*expr.expr {
         Expr::SQLExpr(sqlexpr) => Ok(sqlexpr.clone()),
         _ => {
             let placeholder_name =
-                "@".to_string() + compiler.borrow_mut().next_placeholder(kind).as_str();
+                "@".to_string() + compiler.write()?.next_placeholder(kind).as_str();
 
-            Ok(Rc::new(SQLExpr {
+            Ok(Arc::new(SQLExpr {
                 params: Params::from([(placeholder_name.clone(), expr.clone())]),
                 expr: sqlast::Expr::Identifier(sqlast::Ident {
                     value: placeholder_name.clone(),
@@ -246,7 +246,7 @@ pub fn intern_cref_placeholder(
             kind.as_str(),
             &TypedExpr {
                 type_: te.type_.clone(),
-                expr: Rc::new(expr.borrow().clone()),
+                expr: Arc::new(expr.read()?.clone()),
             },
         )?
         .as_ref()
@@ -273,7 +273,7 @@ pub fn combine_crefs<T: 'static + Constrainable>(all: Vec<CRef<T>>) -> Result<CR
 
     for a in all {
         ret = ret.then(move |sofar: Ref<Vec<Ref<T>>>| {
-            a.then(move |a: Ref<T>| Ok(mkcref(vec![sofar.borrow().clone(), vec![a]].concat())))
+            a.then(move |a: Ref<T>| Ok(mkcref(vec![sofar.read()?.clone(), vec![a]].concat())))
         })?;
     }
 
@@ -283,7 +283,7 @@ pub fn combine_crefs<T: 'static + Constrainable>(all: Vec<CRef<T>>) -> Result<CR
 pub fn combine_sqlparams(all: &Vec<Ref<SQLExpr<CRef<MType>>>>) -> Result<CParams> {
     let mut ret = BTreeMap::new();
     for e in all {
-        for (n, p) in &e.borrow().params {
+        for (n, p) in &e.read()?.params {
             ret.insert(n.clone(), p.clone());
         }
     }
@@ -300,13 +300,13 @@ impl Constrainable for FieldMatch {}
 
 #[derive(Clone, Debug)]
 pub struct SQLScope {
-    pub parent: Option<Rc<SQLScope>>,
+    pub parent: Option<Arc<SQLScope>>,
     pub relations: BTreeMap<String, TypedExpr<CRef<MType>>>,
     pub multiple_rows: bool,
 }
 
 impl SQLScope {
-    pub fn new(parent: Option<Rc<SQLScope>>) -> SQLScope {
+    pub fn new(parent: Option<Arc<SQLScope>>) -> SQLScope {
         SQLScope {
             parent,
             relations: BTreeMap::new(),
@@ -321,7 +321,7 @@ impl SQLScope {
                 .map(|(n, te)| {
                     let n = n.clone();
                     get_rowtype(te.type_.clone())?.then(move |rowtype: Ref<MType>| {
-                        let rowtype = rowtype.borrow().clone();
+                        let rowtype = rowtype.read()?.clone();
                         match &rowtype {
                             MType::Record(fields) => Ok(mkcref(
                                 fields
@@ -345,8 +345,8 @@ impl SQLScope {
         )?
         .then(|relations: Ref<Vec<Ref<Vec<FieldMatch>>>>| {
             let mut ret = BTreeMap::<String, FieldMatch>::new();
-            for a in &*relations.borrow() {
-                for b in &*a.borrow() {
+            for a in &*relations.read()? {
+                for b in &*a.read()? {
                     if let Some(existing) = ret.get_mut(&b.field) {
                         existing.type_ = None;
                     } else {
@@ -455,7 +455,7 @@ pub fn compile_select(
                             .value
                             .clone(),
                     };
-                    scope.borrow_mut().relations.insert(name, relation);
+                    scope.write()?.relations.insert(name, relation);
                 }
                 sqlast::TableFactor::Derived { .. } => {
                     return Err(CompileError::unimplemented("Subqueries"))
@@ -476,9 +476,9 @@ pub fn compile_select(
 
     let mut from = Vec::new();
     let mut from_params = BTreeMap::new();
-    for (name, relation) in &scope.borrow().relations {
+    for (name, relation) in &scope.read()?.relations {
         let placeholder_name =
-            QVM_NAMESPACE.to_string() + compiler.borrow_mut().next_placeholder("rel").as_str();
+            QVM_NAMESPACE.to_string() + compiler.write()?.next_placeholder("rel").as_str();
 
         from.push(sqlast::TableWithJoins {
             relation: sqlast::TableFactor::Table {
@@ -527,10 +527,10 @@ pub fn compile_select(
                     }])
                 }
                 sqlast::SelectItem::Wildcard => {
-                    let available = scope.borrow().get_available_references()?;
+                    let available = scope.read()?.get_available_references()?;
                     available.then(|available: Ref<BTreeMap<String, FieldMatch>>| {
                         let mut ret = Vec::new();
-                        for (_, m) in &*available.borrow() {
+                        for (_, m) in &*available.read()? {
                             let type_ = match &m.type_ {
                                 Some(t) => t.clone(),
                                 None => {
@@ -572,8 +572,8 @@ pub fn compile_select(
     let type_: CRef<MType> =
         projections.then(|exprs: Ref<Vec<Ref<Vec<CTypedNameAndSQLExpr>>>>| {
             let mut fields = Vec::new();
-            for a in &*exprs.borrow() {
-                for b in &*a.borrow() {
+            for a in &*exprs.read()? {
+                for b in &*a.read()? {
                     fields.push(MField {
                         name: b.name.clone(),
                         type_: b.type_.clone(),
@@ -589,13 +589,13 @@ pub fn compile_select(
     let expr: CRef<Expr<CRef<MType>>> =
         projections.then(move |exprs: Ref<Vec<Ref<Vec<CTypedNameAndSQLExpr>>>>| {
             let mut proj_exprs = Vec::new();
-            for a in &*exprs.borrow() {
-                for b in &*a.borrow() {
+            for a in &*exprs.read()? {
+                for b in &*a.read()? {
                     let n = b.name.clone();
                     proj_exprs.push(b.expr.then(move |expr: Ref<SQLExpr<CRef<MType>>>| {
                         Ok(mkcref(NameAndSQLExpr {
                             name: n.clone(),
-                            expr: Rc::new(expr.borrow().clone()),
+                            expr: Arc::new(expr.read()?.clone()),
                         }))
                     })?);
                 }
@@ -607,8 +607,8 @@ pub fn compile_select(
             combine_crefs(proj_exprs)?.then(move |proj_exprs: Ref<Vec<Ref<NameAndSQLExpr>>>| {
                 let mut params = BTreeMap::new();
                 let mut projection = Vec::new();
-                for sqlexpr in &*proj_exprs.borrow() {
-                    let b = sqlexpr.borrow();
+                for sqlexpr in &*proj_exprs.read()? {
+                    let b = sqlexpr.read()?;
                     let expr = &b.expr;
                     for (n, p) in &expr.params {
                         params.insert(n.clone(), p.clone());
@@ -629,7 +629,7 @@ pub fn compile_select(
                 ret.from = from.clone();
                 ret.projection = projection;
 
-                Ok(mkcref(Expr::SQLQuery(Rc::new(SQLQuery {
+                Ok(mkcref(Expr::SQLQuery(Arc::new(SQLQuery {
                     params,
                     query: sqlast::Query {
                         with: None,
@@ -697,7 +697,7 @@ pub fn compile_sqlexpr(
         sqlast::Expr::Value(v) => match v {
             sqlast::Value::Number(n, _) => CTypedExpr {
                 type_: mkcref(MType::Atom(parse_numeric_type(n)?)),
-                expr: mkcref(Expr::SQLExpr(Rc::new(SQLExpr {
+                expr: mkcref(Expr::SQLExpr(Arc::new(SQLExpr {
                     params: BTreeMap::new(),
                     expr: expr.clone(),
                 }))),
@@ -708,21 +708,21 @@ pub fn compile_sqlexpr(
             | sqlast::Value::HexStringLiteral(_)
             | sqlast::Value::DoubleQuotedString(_) => CTypedExpr {
                 type_: resolve_global_atom("string")?,
-                expr: mkcref(Expr::SQLExpr(Rc::new(SQLExpr {
+                expr: mkcref(Expr::SQLExpr(Arc::new(SQLExpr {
                     params: BTreeMap::new(),
                     expr: expr.clone(),
                 }))),
             },
             sqlast::Value::Boolean(_) => CTypedExpr {
                 type_: resolve_global_atom("bool")?,
-                expr: mkcref(Expr::SQLExpr(Rc::new(SQLExpr {
+                expr: mkcref(Expr::SQLExpr(Arc::new(SQLExpr {
                     params: BTreeMap::new(),
                     expr: expr.clone(),
                 }))),
             },
             sqlast::Value::Null => CTypedExpr {
                 type_: resolve_global_atom("null")?,
-                expr: mkcref(Expr::SQLExpr(Rc::new(SQLExpr {
+                expr: mkcref(Expr::SQLExpr(Arc::new(SQLExpr {
                     params: BTreeMap::new(),
                     expr: expr.clone(),
                 }))),
@@ -750,7 +750,7 @@ pub fn compile_sqlexpr(
 
             CTypedExpr {
                 type_: data_type,
-                expr: mkcref(Expr::SQLExpr(Rc::new(SQLExpr {
+                expr: mkcref(Expr::SQLExpr(Arc::new(SQLExpr {
                     params: BTreeMap::new(),
                     expr: expr.clone(),
                 }))),
@@ -787,13 +787,13 @@ pub fn compile_sqlexpr(
                 type_,
                 expr: combine_crefs(vec![cleft.expr, cright.expr])?.then(
                     move |args: Ref<Vec<Ref<SQLExpr<CRef<MType>>>>>| {
-                        let params = combine_sqlparams(&*args.borrow())?;
-                        Ok(mkcref(Expr::SQLExpr(Rc::new(SQLExpr {
+                        let params = combine_sqlparams(&*args.read()?)?;
+                        Ok(mkcref(Expr::SQLExpr(Arc::new(SQLExpr {
                             params,
                             expr: sqlast::Expr::BinaryOp {
-                                left: Box::new(args.borrow()[0].borrow().expr.clone()),
+                                left: Box::new(args.read()?[0].read()?.expr.clone()),
                                 op: op.clone(),
-                                right: Box::new(args.borrow()[1].borrow().expr.clone()),
+                                right: Box::new(args.read()?[1].read()?.expr.clone()),
                             },
                         }))))
                     },
@@ -820,7 +820,7 @@ pub fn compile_sqlexpr(
             }
 
             let func = compile_reference(compiler.clone(), schema.clone(), &name.0)?;
-            let fn_type = match func.type_.must()?.borrow().clone() {
+            let fn_type = match func.type_.must()?.read()?.clone() {
                 MType::Fn(f) => f,
                 _ => {
                     return Err(CompileError::wrong_type(
@@ -828,7 +828,7 @@ pub fn compile_sqlexpr(
                             args: Vec::new(),
                             ret: MType::new_unknown("ret"),
                         }),
-                        &*func.type_.must()?.borrow(),
+                        &*func.type_.must()?.read()?,
                     ))
                 }
             };
@@ -897,7 +897,7 @@ pub fn compile_sqlexpr(
                         e.expr.then(move |expr: Ref<SQLExpr<CRef<MType>>>| {
                             Ok(mkcref(TypedExpr {
                                 type_: type_.clone(),
-                                expr: Rc::new(Expr::SQLExpr(Rc::new(expr.borrow().clone()))),
+                                expr: Arc::new(Expr::SQLExpr(Arc::new(expr.read()?.clone()))),
                             }))
                         })
                     })
@@ -905,15 +905,15 @@ pub fn compile_sqlexpr(
                 combine_crefs(arg_exprs)?.then(
                     move |arg_exprs: Ref<Vec<Ref<TypedExpr<CRef<MType>>>>>| {
                         Ok(mkcref(Expr::FnCall(FnCallExpr {
-                            func: Rc::new(TypedExpr {
+                            func: Arc::new(TypedExpr {
                                 type_: mkcref(MType::Fn(fn_type.clone())),
                                 expr: func.expr.clone(),
                             }),
                             args: arg_exprs
-                                .borrow()
+                                .read()?
                                 .iter()
-                                .map(|e| e.borrow().clone())
-                                .collect(),
+                                .map(|e| Ok(e.read()?.clone()))
+                                .collect::<Result<_>>()?,
                         })))
                     },
                 )?
@@ -939,7 +939,7 @@ pub fn compile_sqlexpr(
                 //     },
                 // );
 
-                // Rc::new(Expr::SQLExpr(Rc::new(SQLExpr {
+                // Arc::new(Expr::SQLExpr(Arc::new(SQLExpr {
                 //     params,
                 //     expr: sqlast::Expr::Function(sqlast::Function {
                 //         name: sqlast::ObjectName(vec![sqlast::Ident {

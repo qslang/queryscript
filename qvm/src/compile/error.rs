@@ -125,3 +125,9 @@ impl CompileError {
         .build();
     }
 }
+
+impl<Guard> From<std::sync::PoisonError<Guard>> for CompileError {
+    fn from(e: std::sync::PoisonError<Guard>) -> CompileError {
+        CompileError::internal(format!("{}", e).as_str())
+    }
+}
