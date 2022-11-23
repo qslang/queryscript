@@ -575,7 +575,6 @@ pub struct ImportedSchema {
 pub struct Schema {
     pub folder: Option<String>,
     pub parent_scope: Option<Ref<Schema>>,
-    pub next_placeholder: usize,
     pub externs: BTreeMap<String, CRef<MType>>,
     pub decls: BTreeMap<String, Decl>,
     pub imports: BTreeMap<ast::Path, Ref<ImportedSchema>>,
@@ -587,7 +586,6 @@ impl Schema {
         mkref(Schema {
             folder,
             parent_scope: None,
-            next_placeholder: 1,
             externs: BTreeMap::new(),
             decls: BTreeMap::new(),
             imports: BTreeMap::new(),

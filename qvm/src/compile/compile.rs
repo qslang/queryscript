@@ -10,6 +10,29 @@ use crate::compile::schema::*;
 use crate::compile::sql::*;
 use crate::parser::parse_schema;
 
+pub struct Compiler {
+    pub next_placeholder: usize,
+    pub runtime: tokio::runtime::Runtime,
+}
+
+impl Compiler {
+    pub fn new() -> Result<Ref<Compiler>> {
+        Ok(mkref(Compiler {
+            next_placeholder: 1,
+            runtime: tokio::runtime::Builder::new_current_thread()
+                .thread_name("qvm-compiler")
+                .thread_stack_size(3 * 1024 * 1024)
+                .build()?,
+        }))
+    }
+
+    pub fn next_placeholder(&mut self, kind: &str) -> String {
+        let placeholder = self.next_placeholder;
+        self.next_placeholder += 1;
+        format!("{}{}", kind, placeholder)
+    }
+}
+
 pub fn lookup_schema(schema: Ref<Schema>, path: &ast::Path) -> Result<Ref<ImportedSchema>> {
     if let Some(s) = schema.borrow().imports.get(path) {
         return Ok(s.clone());
@@ -201,12 +224,16 @@ pub fn typecheck_path(type_: CRef<MType>, path: &[String]) -> Result<CRef<MType>
     })
 }
 
-pub fn compile_expr(schema: Ref<Schema>, expr: &ast::Expr) -> Result<CTypedExpr> {
+pub fn compile_expr(
+    compiler: Ref<Compiler>,
+    schema: Ref<Schema>,
+    expr: &ast::Expr,
+) -> Result<CTypedExpr> {
     match expr {
-        ast::Expr::SQLQuery(q) => Ok(compile_sqlquery(schema.clone(), q)?),
+        ast::Expr::SQLQuery(q) => Ok(compile_sqlquery(compiler.clone(), schema.clone(), q)?),
         ast::Expr::SQLExpr(e) => {
             let scope = mkref(SQLScope::new(None));
-            Ok(compile_sqlexpr(schema.clone(), scope, e)?)
+            Ok(compile_sqlexpr(compiler.clone(), schema.clone(), scope, e)?)
         }
     }
 }
@@ -228,7 +255,8 @@ pub fn rebind_decl(_schema: SchemaInstance, decl: &Decl) -> Result<SchemaEntry> 
 pub fn compile_schema_from_string(contents: &str) -> Result<Ref<Schema>> {
     let ast = parse_schema(contents)?;
 
-    compile_schema(None, &ast)
+    let compiler = Compiler::new()?;
+    compile_schema(compiler.clone(), None, &ast)
 }
 
 pub fn compile_schema_from_file(file_path: &FilePath) -> Result<Ref<Schema>> {
@@ -250,18 +278,27 @@ pub fn compile_schema_from_file(file_path: &FilePath) -> Result<Ref<Schema>> {
 
     let ast = parse_schema(contents.as_str())?;
 
-    compile_schema(folder, &ast)
+    let compiler = Compiler::new()?;
+    compile_schema(compiler.clone(), folder, &ast)
 }
 
-pub fn compile_schema(folder: Option<String>, ast: &ast::Schema) -> Result<Ref<Schema>> {
+pub fn compile_schema(
+    compiler: Ref<Compiler>,
+    folder: Option<String>,
+    ast: &ast::Schema,
+) -> Result<Ref<Schema>> {
     let schema = Schema::new(folder);
-    compile_schema_ast(schema.clone(), ast)?;
+    compile_schema_ast(compiler.clone(), schema.clone(), ast)?;
     Ok(schema)
 }
 
-pub fn compile_schema_ast(schema: Ref<Schema>, ast: &ast::Schema) -> Result<()> {
+pub fn compile_schema_ast(
+    compiler: Ref<Compiler>,
+    schema: Ref<Schema>,
+    ast: &ast::Schema,
+) -> Result<()> {
     declare_schema_entries(schema.clone(), ast)?;
-    compile_schema_entries(schema.clone(), ast)?;
+    compile_schema_entries(compiler.clone(), schema.clone(), ast)?;
     gather_schema_externs(schema)?;
     Ok(())
 }
@@ -506,12 +543,16 @@ pub fn unify_expr_decl(schema: Ref<Schema>, name: &str, value: CRef<STypedExpr>)
     Ok(())
 }
 
-pub fn compile_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<()> {
+pub fn compile_schema_entries(
+    compiler: Ref<Compiler>,
+    schema: Ref<Schema>,
+    ast: &ast::Schema,
+) -> Result<()> {
     for stmt in &ast.stmts {
         match &stmt.body {
             ast::StmtBody::Noop => continue,
             ast::StmtBody::Expr(expr) => {
-                let compiled = compile_expr(schema.clone(), expr)?;
+                let compiled = compile_expr(compiler.clone(), schema.clone(), expr)?;
                 schema.borrow_mut().exprs.push(compiled);
             }
             ast::StmtBody::Import { .. } => continue,
@@ -558,7 +599,7 @@ pub fn compile_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
                     compiled_args.push(MField::new_nullable(arg.name.clone(), type_.clone()));
                 }
 
-                let compiled = compile_expr(inner_schema.clone(), body)?;
+                let compiled = compile_expr(compiler.clone(), inner_schema.clone(), body)?;
                 if let Some(ret) = ret {
                     resolve_type(inner_schema.clone(), ret)?.unify(&compiled.type_)?
                 }
@@ -586,7 +627,7 @@ pub fn compile_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
                 } else {
                     MType::new_unknown(format!("typeof {}", name).as_str())
                 };
-                let compiled = compile_expr(schema.clone(), &body)?;
+                let compiled = compile_expr(compiler.clone(), schema.clone(), &body)?;
                 lhs_type.unify(&compiled.type_)?;
                 unify_expr_decl(
                     schema.clone(),

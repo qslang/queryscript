@@ -111,7 +111,8 @@ fn run_command(
         Ok(ast) => {
             let num_exprs = repl_schema.borrow().exprs.len();
 
-            compile::compile_schema_ast(repl_schema.clone(), &ast)
+            let compiler = compile::Compiler::new().with_whatever_context(|e| format!("{}", e))?;
+            compile::compile_schema_ast(compiler.clone(), repl_schema.clone(), &ast)
                 .with_whatever_context(|e| format!("{}", e))?;
 
             if repl_schema.borrow().exprs.len() > num_exprs {
