@@ -109,16 +109,22 @@ fn run_command(
 
     match parser.parse_schema() {
         Ok(ast) => {
-            let cloned_schema = repl_schema.clone();
-            let locked_schema = compile::read_whatever(&cloned_schema)?;
-            let num_exprs = locked_schema.exprs.len();
+            let num_exprs = compile::read_whatever(&repl_schema)?.exprs.len();
 
             let compiler = compile::Compiler::new().with_whatever_context(|e| format!("{}", e))?;
             compile::compile_schema_ast(compiler.clone(), repl_schema.clone(), &ast)
                 .with_whatever_context(|e| format!("{}", e))?;
 
-            if locked_schema.exprs.len() > num_exprs {
-                let compiled = locked_schema.exprs.last().unwrap().clone();
+            let compiled = {
+                let locked_schema = compile::read_whatever(&repl_schema)?;
+                if locked_schema.exprs.len() > num_exprs {
+                    Some(locked_schema.exprs.last().unwrap().clone())
+                } else {
+                    None
+                }
+            };
+
+            if let Some(compiled) = compiled {
                 let expr = compiled
                     .to_runtime_type()
                     .with_whatever_context(|e| format!("{}", e))?;
