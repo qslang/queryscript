@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use difference::assert_diff;
     use std::collections::BTreeMap;
     use std::ffi::OsStr;
     use std::fmt;
@@ -93,7 +94,7 @@ mod tests {
             let expected_str = fs::read_to_string(&expected_file)
                 .expect(format!("Could not read {}", expected_file.display()).as_str());
 
-            assert_eq!(result_str, expected_str);
+            assert_diff!(expected_str.as_str(), result_str.as_str(), "\n", 0);
         } else {
             fs::write(&expected_file, result_str.as_bytes())
                 .expect(format!("Could not write {}", expected_file.display()).as_str());

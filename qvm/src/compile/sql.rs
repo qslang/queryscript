@@ -51,12 +51,16 @@ impl Constrainable for CTypedNameAndSQLExpr {}
 impl Constrainable for CTypedSQLExpr {}
 impl Constrainable for CTypedSQLQuery {}
 
-pub fn get_rowtype(relation: CRef<MType>) -> Result<CRef<MType>> {
-    let r = relation.clone();
-    r.then(move |r: Ref<MType>| match &*r.read()? {
-        MType::List(inner) => Ok(inner.clone()),
-        _ => Ok(relation.clone()),
-    })
+pub fn get_rowtype(compiler: Ref<Compiler>, relation: CRef<MType>) -> Result<CRef<MType>> {
+    Ok(compiler.read()?.async_cref(async move {
+        let r = &relation;
+        let reltype = r.await?;
+        let locked = reltype.read()?;
+        match &*locked {
+            MType::List(inner) => Ok(inner.clone()),
+            _ => Ok(relation.clone()),
+        }
+    }))
 }
 
 pub fn compile_sqlreference(
@@ -75,14 +79,14 @@ pub fn compile_sqlreference(
             let name = sqlpath[0].value.clone();
 
             if let Some(relation) = scope.read()?.relations.get(&name) {
-                let type_ = get_rowtype(relation.type_.clone())?;
+                let type_ = get_rowtype(compiler.clone(), relation.type_.clone())?;
                 let expr = mkcref(Expr::SQLExpr(Arc::new(SQLExpr {
                     params: BTreeMap::new(),
                     expr: sqlast::Expr::CompoundIdentifier(sqlpath.clone()),
                 })));
                 return Ok(CTypedExpr { type_, expr });
             } else {
-                let available = scope.read()?.get_available_references()?;
+                let available = scope.read()?.get_available_references(compiler.clone())?;
 
                 let sqlpath = sqlpath.clone();
                 let tse = available.then(move |available: Ref<BTreeMap<String, FieldMatch>>| {
@@ -131,7 +135,7 @@ pub fn compile_sqlreference(
             // If the relation can't be found in the scope, just fall through
             //
             if let Some(relation) = scope.read()?.relations.get(&relation_name) {
-                let rowtype = get_rowtype(relation.type_.clone())?;
+                let rowtype = get_rowtype(compiler.clone(), relation.type_.clone())?;
                 let type_ = typecheck_path(rowtype, vec![field_name].as_slice())?;
                 let expr = mkcref(Expr::SQLExpr(Arc::new(SQLExpr {
                     params: BTreeMap::new(),
@@ -315,32 +319,37 @@ impl SQLScope {
         }
     }
 
-    pub fn get_available_references(&self) -> Result<CRef<BTreeMap<String, FieldMatch>>> {
+    pub fn get_available_references(
+        &self,
+        compiler: Ref<Compiler>,
+    ) -> Result<CRef<BTreeMap<String, FieldMatch>>> {
         combine_crefs(
             self.relations
                 .iter()
                 .map(|(n, te)| {
                     let n = n.clone();
-                    get_rowtype(te.type_.clone())?.then(move |rowtype: Ref<MType>| {
-                        let rowtype = rowtype.read()?.clone();
-                        match &rowtype {
-                            MType::Record(fields) => Ok(mkcref(
-                                fields
-                                    .iter()
-                                    .map(|field| FieldMatch {
-                                        relation: n.clone(),
-                                        field: field.name.clone(),
-                                        type_: Some(field.type_.clone()),
-                                    })
-                                    .collect(),
-                            )),
-                            _ => Ok(mkcref(vec![FieldMatch {
-                                relation: n.clone(),
-                                field: n.clone(),
-                                type_: Some(mkcref(rowtype)),
-                            }])),
-                        }
-                    })
+                    get_rowtype(compiler.clone(), te.type_.clone())?.then(
+                        move |rowtype: Ref<MType>| {
+                            let rowtype = rowtype.read()?.clone();
+                            match &rowtype {
+                                MType::Record(fields) => Ok(mkcref(
+                                    fields
+                                        .iter()
+                                        .map(|field| FieldMatch {
+                                            relation: n.clone(),
+                                            field: field.name.clone(),
+                                            type_: Some(field.type_.clone()),
+                                        })
+                                        .collect(),
+                                )),
+                                _ => Ok(mkcref(vec![FieldMatch {
+                                    relation: n.clone(),
+                                    field: n.clone(),
+                                    type_: Some(mkcref(rowtype)),
+                                }])),
+                            }
+                        },
+                    )
                 })
                 .collect::<Result<Vec<_>>>()?,
         )?
@@ -528,7 +537,7 @@ pub fn compile_select(
                     }])
                 }
                 sqlast::SelectItem::Wildcard => {
-                    let available = scope.read()?.get_available_references()?;
+                    let available = scope.read()?.get_available_references(compiler.clone())?;
                     available.then(|available: Ref<BTreeMap<String, FieldMatch>>| {
                         let mut ret = Vec::new();
                         for (_, m) in &*available.read()? {

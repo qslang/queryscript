@@ -63,6 +63,7 @@ where
     Known(Ref<T>),
     Unknown {
         debug_name: String,
+        error: Option<CompileError>,
         constraints: Vec<Ref<dyn Constraint<T>>>,
     },
     Ref(CRef<T>),
@@ -99,12 +100,28 @@ impl<T: 'static + Constrainable> CRef<T> {
     pub fn new_unknown(debug_name: &str) -> CRef<T> {
         CRef(mkref(Constrained::Unknown {
             debug_name: debug_name.to_string(),
+            error: None,
+            constraints: Vec::new(),
+        }))
+    }
+
+    pub fn new_error(e: CompileError) -> CRef<T> {
+        CRef(mkref(Constrained::Unknown {
+            debug_name: "error".to_string(),
+            error: Some(e),
             constraints: Vec::new(),
         }))
     }
 
     pub fn new_known(t: Ref<T>) -> CRef<T> {
         CRef(mkref(Constrained::Known(t)))
+    }
+
+    pub fn new_result(r: Result<Ref<T>>) -> CRef<T> {
+        match r {
+            Ok(t) => CRef::new_known(t),
+            Err(e) => CRef::new_error(e),
+        }
     }
 
     pub fn read(&self) -> Result<std::sync::RwLockReadGuard<'_, Constrained<T>>> {
@@ -221,7 +238,7 @@ impl<T: 'static + Constrainable> CRef<T> {
     }
 }
 
-impl<T: Constrainable + 'static> Future for CRef<T> {
+impl<T: Constrainable + 'static> Future for &CRef<T> {
     type Output = Result<Ref<T>>;
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match || -> Result<_> {

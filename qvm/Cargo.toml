@@ -11,11 +11,12 @@ datafusion = { path = "../arrow-datafusion/datafusion/core" }
 
 async-trait = "0.1"
 chrono = { version = "0.4.22", default-features = false }
+difference = "2.0"
 dyn-clone = "1.0.9"
+half = "2.1"
 lazy_static = "1.4.0"
 object_store = "0.5.0"
 snafu = { version = "0.7.3" }
 sqlparser = { path = "../sqlparser-rs" }
-tokio = "1.0"
-half = "2.1"
 tabled = "0.10"
+tokio = "1.0"
