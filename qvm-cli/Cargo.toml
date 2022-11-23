@@ -14,4 +14,4 @@ clap = { version = "4.0", features=["derive"] }
 home = "0.5.4"
 qvm = { path="../qvm" }
 rustyline = "10.0.0"
-snafu = { version = "0.7.3", features = [ "backtraces" ] }
+snafu = { version = "0.7.3" , features = [ "backtraces" ] }

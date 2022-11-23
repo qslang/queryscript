@@ -16,6 +16,9 @@ struct Cli {
 
     #[arg(short, long, default_value_t = false)]
     compile: bool,
+
+    #[arg(short, long, default_value_t = false)]
+    verbose: bool,
 }
 
 fn main() {
@@ -26,8 +29,10 @@ fn main() {
         Some(file) => match run_file(&rt, &file, cli.compile) {
             Err(err) => {
                 eprintln!("{}", err);
-                if let Some(bt) = ErrorCompat::backtrace(&err) {
-                    eprintln!("{}", bt);
+                if cli.verbose {
+                    if let Some(bt) = ErrorCompat::backtrace(&err) {
+                        eprintln!("{:?}", bt);
+                    }
                 }
             }
             Ok(()) => {}
@@ -43,6 +48,11 @@ fn main() {
 }
 
 fn run_file(rt: &runtime::Runtime, file: &str, compile_only: bool) -> Result<(), Whatever> {
+    let path = Path::new(&file);
+    if !path.exists() {
+        whatever!("Path {:?} does not exist", path);
+    }
+
     let schema = compile::compile_schema_from_file(&Path::new(&file))
         .with_whatever_context(|e| format!("{}", e))?;
 
