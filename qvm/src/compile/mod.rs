@@ -1,3 +1,4 @@
+mod builtin_types;
 pub mod compile;
 pub mod error;
 pub mod inference;

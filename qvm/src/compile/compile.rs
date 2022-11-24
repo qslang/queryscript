@@ -6,6 +6,7 @@ use std::sync::{Arc, RwLockReadGuard};
 use snafu::{FromString, Whatever};
 
 use crate::ast;
+use crate::compile::builtin_types::GLOBAL_SCHEMA;
 use crate::compile::error::*;
 use crate::compile::inference::*;
 use crate::compile::schema::*;
@@ -92,7 +93,7 @@ pub fn lookup_schema(schema: Ref<Schema>, path: &ast::Path) -> Result<Ref<Import
 }
 
 pub fn lookup_path(
-    mut schema: Ref<Schema>,
+    schema: Ref<Schema>,
     path: &ast::Path,
     import_global: bool,
 ) -> Result<(Decl, ast::Path)> {
@@ -100,6 +101,7 @@ pub fn lookup_path(
         return Err(CompileError::no_such_entry(path.clone()));
     }
 
+    let mut schema = schema;
     for (i, ident) in path.iter().enumerate() {
         let new = match schema.read()?.decls.get(ident) {
             Some(decl) => {
@@ -126,7 +128,7 @@ pub fn lookup_path(
                 None => {
                     if import_global {
                         return lookup_path(
-                            Schema::new_global_schema(),
+                            GLOBAL_SCHEMA.clone(),
                             &path[i..].to_vec(),
                             false, /* import_global */
                         );
@@ -190,8 +192,10 @@ pub fn resolve_type(schema: Ref<Schema>, ast: &ast::Type) -> Result<CRef<MType>>
 }
 
 pub fn resolve_global_atom(name: &str) -> Result<CRef<MType>> {
-    let schema = Schema::new_global_schema();
-    resolve_type(schema, &ast::Type::Reference(vec![name.to_string()]))
+    resolve_type(
+        GLOBAL_SCHEMA.clone(),
+        &ast::Type::Reference(vec![name.to_string()]),
+    )
 }
 
 fn find_field<'a>(fields: &'a Vec<MField>, name: &str) -> Option<&'a MField> {
