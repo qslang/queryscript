@@ -30,7 +30,7 @@ const BUILTIN_TYPES: &'static [BuiltinType] = &[
     // Date/Time. Time precision is defaulted to microseconds
     // but we should make this configurable.
     //
-    ("date", AtomicType::Date32),
+    ("date", AtomicType::Date64),
     ("time", AtomicType::Time64(TimeUnit::Microsecond)),
     (
         "timestamp",

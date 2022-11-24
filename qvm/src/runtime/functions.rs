@@ -76,7 +76,6 @@ impl LoadFileFn {
             Format::CSV => Box::new(CsvFormat::default().with_schema_infer_max_rec(Some(0)))
                 as Box<dyn FileFormat>,
         };
-        eprintln!("Parsing format {:?}", format_type);
 
         let location = Path::from_filesystem_path(file.as_str())?;
         let fmeta = std::fs::metadata(file)?;
