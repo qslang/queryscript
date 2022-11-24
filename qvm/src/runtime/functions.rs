@@ -5,8 +5,8 @@ use datafusion::arrow::{
 };
 use datafusion::common::Statistics;
 use datafusion::config::ConfigOptions;
-use datafusion::datasource::file_format::json::JsonFormat;
 use datafusion::datasource::file_format::FileFormat;
+use datafusion::datasource::file_format::{csv::CsvFormat, json::JsonFormat};
 use datafusion::datasource::object_store::ObjectStoreUrl;
 use datafusion::execution::context::{SessionConfig, SessionContext};
 use datafusion::execution::runtime_env::RuntimeEnv;
@@ -21,15 +21,21 @@ use crate::types;
 use crate::types::{FnValue, Value};
 
 #[derive(Clone, Debug)]
-pub struct LoadJsonFn {
+enum Format {
+    Json,
+    CSV,
+}
+
+#[derive(Clone, Debug)]
+pub struct LoadFileFn {
     schema: Arc<DFSchema>,
 }
 
-impl LoadJsonFn {
-    pub fn new(type_: &types::Type) -> Result<LoadJsonFn> {
+impl LoadFileFn {
+    pub fn new(type_: &types::Type) -> Result<LoadFileFn> {
         let ret_type = match type_ {
             types::Type::Fn(types::FnType { ret, .. }) => ret,
-            _ => return fail!("Type of load_json is not a function"),
+            _ => return fail!("Type of load is not a function"),
         };
 
         let mut schema = None;
@@ -43,17 +49,34 @@ impl LoadJsonFn {
             Some(schema) => schema,
             None => {
                 return fail!(
-                    "Return type of load_json ({:?}) is not a list of records",
+                    "Return type of load ({:?}) is not a list of records",
                     ret_type.as_ref(),
                 )
             }
         };
 
-        Ok(LoadJsonFn { schema })
+        Ok(LoadFileFn { schema })
     }
 
-    pub async fn load_json(&self, file: String) -> Result<Value> {
-        let format = JsonFormat::default().with_schema_infer_max_rec(Some(0));
+    pub async fn load(&self, file: String, format: Option<String>) -> Result<Value> {
+        let format_type = match format.map(|s| s.to_lowercase()).as_deref() {
+            None => {
+                if file.ends_with(".csv") {
+                    Format::CSV
+                } else {
+                    Format::Json
+                }
+            }
+            Some("csv") => Format::CSV,
+            Some("json") | _ => Format::Json,
+        };
+        let format: Box<dyn FileFormat> = match format_type {
+            Format::Json => Box::new(JsonFormat::default().with_schema_infer_max_rec(Some(0)))
+                as Box<dyn FileFormat>,
+            Format::CSV => Box::new(CsvFormat::default().with_schema_infer_max_rec(Some(0)))
+                as Box<dyn FileFormat>,
+        };
+        eprintln!("Parsing format {:?}", format_type);
 
         let location = Path::from_filesystem_path(file.as_str())?;
         let fmeta = std::fs::metadata(file)?;
@@ -94,18 +117,26 @@ impl LoadJsonFn {
 }
 
 #[async_trait]
-impl FnValue for LoadJsonFn {
+impl FnValue for LoadFileFn {
     async fn execute(&self, args: Vec<Value>) -> Result<Value> {
-        if args.len() != 1 {
-            return fail!("load_json expects exactly one argument");
+        if args.len() < 1 || args.len() > 2 {
+            return fail!("load expects exactly 1-2 arguments");
         }
 
         let file = match &args[0] {
             Value::Utf8(s) => s.clone(),
-            _ => return fail!("load_json expects its first argument to be a string"),
+            _ => return fail!("load expects its first argument to be a string"),
         };
 
-        self.load_json(file).await
+        let mut format = None;
+        if args.len() > 1 {
+            match &args[1] {
+                Value::Utf8(s) => format = Some(s.clone()),
+                _ => return fail!("load expects its second argument to be a string"),
+            }
+        };
+
+        self.load(file, format).await
     }
 
     fn fn_type(&self) -> types::FnType {

@@ -67,7 +67,7 @@ pub fn eval<'a>(
             schema::Expr::NativeFn(name) => {
                 use super::functions::*;
                 match name.as_str() {
-                    "load_json" => Ok(Value::Fn(Arc::new(LoadJsonFn::new(
+                    "load" => Ok(Value::Fn(Arc::new(LoadFileFn::new(
                         &*typed_expr.type_.read()?,
                     )?))),
                     _ => return rt_unimplemented!("native function: {}", name),

@@ -30,7 +30,7 @@ const BUILTIN_TYPES: &'static [BuiltinType] = &[
     // Date/Time. Time precision is defaulted to microseconds
     // but we should make this configurable.
     //
-    ("date", AtomicType::Date64),
+    ("date", AtomicType::Date32),
     ("time", AtomicType::Time64(TimeUnit::Microsecond)),
     (
         "timestamp",
@@ -43,6 +43,10 @@ const BUILTIN_TYPES: &'static [BuiltinType] = &[
     ("null", AtomicType::Null),
 ];
 
+// XXX
+// NEXT STEPS
+// Refactor function interface below (maybe make a macro?)
+// Implement load_csv() (or maybe a load function which can load either?)
 lazy_static! {
     static ref BUILTIN_DECLS: Vec<(String, Decl)> = BUILTIN_TYPES
         .iter()
@@ -57,11 +61,11 @@ lazy_static! {
         ))
         .chain(
             vec![(
-                "load_json".to_string(),
+                "load".to_string(),
                 Decl {
                     public: true,
                     extern_: false,
-                    name: "load_json".to_string(),
+                    name: "load".to_string(),
                     value: SchemaEntry::Expr(mkcref(STypedExpr {
                         type_: mkcref(SType {
                             variables: BTreeSet::from(["R".to_string()]),
@@ -74,7 +78,7 @@ lazy_static! {
                                 ret: mkcref(MType::List(mkcref(MType::Name("R".to_string())))),
                             })),
                         }),
-                        expr: mkcref(Expr::NativeFn("load_json".to_string())),
+                        expr: mkcref(Expr::NativeFn("load".to_string())),
                     })),
                 },
             )]
