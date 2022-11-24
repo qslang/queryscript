@@ -70,7 +70,7 @@ impl From<datafusion::common::DataFusionError> for RuntimeError {
     fn from(e: datafusion::common::DataFusionError) -> RuntimeError {
         RuntimeError::DataFusionError {
             source: Arc::new(e),
-            backtrace: Some(Backtrace::generate()),
+            backtrace: Option::<Backtrace>::generate(),
         }
     }
 }

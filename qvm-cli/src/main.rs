@@ -24,6 +24,10 @@ struct Cli {
 
 fn main() {
     let cli = Cli::parse();
+    if cli.verbose {
+        std::env::set_var("RUST_BACKTRACE", "1");
+    }
+
     let rt = runtime::build().expect("Failed to build runtime");
 
     match cli.file {
