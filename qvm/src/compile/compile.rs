@@ -1,9 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path as FilePath;
-use std::sync::{Arc, RwLockReadGuard};
-
-use snafu::{FromString, Whatever};
+use std::sync::Arc;
 
 use crate::ast;
 use crate::compile::builtin_types::GLOBAL_SCHEMA;
@@ -47,15 +45,6 @@ impl Compiler {
         });
 
         ret
-    }
-}
-
-pub fn read_whatever<'a, T>(
-    r: &'a Ref<T>,
-) -> core::result::Result<RwLockReadGuard<'a, T>, Whatever> {
-    match r.read() {
-        Ok(guard) => Ok(guard),
-        Err(e) => Err(Whatever::without_source(e.to_string())),
     }
 }
 

@@ -28,7 +28,7 @@ pub enum RuntimeError {
     #[snafu(context(false))]
     DataFusionError {
         source: Arc<datafusion::common::DataFusionError>,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(context(false))]
@@ -70,7 +70,7 @@ impl From<datafusion::common::DataFusionError> for RuntimeError {
     fn from(e: datafusion::common::DataFusionError) -> RuntimeError {
         RuntimeError::DataFusionError {
             source: Arc::new(e),
-            backtrace: Backtrace::generate(),
+            backtrace: Some(Backtrace::generate()),
         }
     }
 }

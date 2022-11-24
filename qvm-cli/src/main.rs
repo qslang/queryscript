@@ -1,10 +1,11 @@
 use clap::Parser;
+use snafu::whatever;
 use snafu::ErrorCompat;
-use snafu::{prelude::*, Whatever};
 use std::path::Path;
 
 use qvm::compile;
 use qvm::runtime;
+use qvm::QVMError;
 
 mod repl;
 
@@ -47,30 +48,23 @@ fn main() {
     }
 }
 
-fn run_file(rt: &runtime::Runtime, file: &str, compile_only: bool) -> Result<(), Whatever> {
+fn run_file(rt: &runtime::Runtime, file: &str, compile_only: bool) -> Result<(), QVMError> {
     let path = Path::new(&file);
     if !path.exists() {
         whatever!("Path {:?} does not exist", path);
     }
 
-    let schema = compile::compile_schema_from_file(&Path::new(&file))
-        .with_whatever_context(|e| format!("{}", e))?;
+    let schema = compile::compile_schema_from_file(&Path::new(&file))?;
 
     if compile_only {
         println!("{:#?}", schema);
         return Ok(());
     }
 
-    let locked_schema = compile::read_whatever(&schema)?;
+    let locked_schema = schema.read()?;
     for expr in locked_schema.exprs.iter() {
-        let expr = expr
-            .to_runtime_type()
-            .with_whatever_context(|e| format!("{}", e))?;
-        let value = rt.block_on(async {
-            runtime::eval(schema.clone(), &expr)
-                .await
-                .with_whatever_context(|e| format!("{}", e))
-        })?;
+        let expr = expr.to_runtime_type()?;
+        let value = rt.block_on(async { runtime::eval(schema.clone(), &expr).await })?;
         println!("{:?}", value);
     }
 

@@ -13,43 +13,49 @@ pub enum CompileError {
     #[snafu(display("Parser error: {}", source), context(false))]
     SyntaxError {
         source: ParserError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("Internal error: {}", what))]
-    InternalError { what: String, backtrace: Backtrace },
+    InternalError {
+        what: String,
+        backtrace: Option<Backtrace>,
+    },
 
     #[snafu(display("Typesystem error: {}", source), context(false))]
     TypesystemError {
         source: TypesystemError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("Parser error: {}", source), context(false))]
     RuntimeError {
         source: RuntimeError,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(context(false))]
     FsError {
         source: io::Error,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("Unimplemented: {}", what))]
-    Unimplemented { what: String, backtrace: Backtrace },
+    Unimplemented {
+        what: String,
+        backtrace: Option<Backtrace>,
+    },
 
     #[snafu(display("Duplicate entry: {:?}", path))]
     DuplicateEntry {
         path: ast::Path,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("No such entry: {:?}", path))]
     NoSuchEntry {
         path: ast::Path,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display(
@@ -62,21 +68,21 @@ pub enum CompileError {
         path: ast::Path,
         expected: String,
         actual: Decl,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("Type mismatch: found {:?} not {:?}", rhs, lhs))]
     WrongType {
         lhs: MType,
         rhs: MType,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("Error importing {:?}: {}", path, what))]
     ImportError {
         path: ast::Path,
         what: String,
-        backtrace: Backtrace,
+        backtrace: Option<Backtrace>,
     },
 }
 

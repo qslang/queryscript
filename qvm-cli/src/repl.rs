@@ -1,10 +1,11 @@
 use rustyline::{error::ReadlineError, Editor};
-use snafu::{prelude::*, Whatever};
+use snafu::whatever;
 
 use qvm::compile;
 use qvm::compile::schema;
 use qvm::parser;
 use qvm::runtime;
+use qvm::QVMError;
 
 pub fn run(rt: &runtime::Runtime) {
     let cwd = std::env::current_dir()
@@ -103,20 +104,19 @@ fn run_command(
     rt: &runtime::Runtime,
     repl_schema: schema::SchemaRef,
     cmd: &str,
-) -> Result<RunCommandResult, Whatever> {
-    let tokens = parser::tokenize(&cmd).with_whatever_context(|e| format!("{}", e))?;
+) -> Result<RunCommandResult, QVMError> {
+    let tokens = parser::tokenize(&cmd)?;
     let mut parser = parser::Parser::new(tokens);
 
     match parser.parse_schema() {
         Ok(ast) => {
-            let num_exprs = compile::read_whatever(&repl_schema)?.exprs.len();
+            let num_exprs = repl_schema.read()?.exprs.len();
 
-            let compiler = compile::Compiler::new().with_whatever_context(|e| format!("{}", e))?;
-            compile::compile_schema_ast(compiler.clone(), repl_schema.clone(), &ast)
-                .with_whatever_context(|e| format!("{}", e))?;
+            let compiler = compile::Compiler::new()?;
+            compile::compile_schema_ast(compiler.clone(), repl_schema.clone(), &ast)?;
 
             let compiled = {
-                let locked_schema = compile::read_whatever(&repl_schema)?;
+                let locked_schema = repl_schema.read()?;
                 if locked_schema.exprs.len() > num_exprs {
                     Some(locked_schema.exprs.last().unwrap().clone())
                 } else {
@@ -125,14 +125,9 @@ fn run_command(
             };
 
             if let Some(compiled) = compiled {
-                let expr = compiled
-                    .to_runtime_type()
-                    .with_whatever_context(|e| format!("{}", e))?;
-                let value = rt.block_on(async move {
-                    runtime::eval(repl_schema.clone(), &expr)
-                        .await
-                        .with_whatever_context(|e| format!("{}", e))
-                })?;
+                let expr = compiled.to_runtime_type()?;
+                let value =
+                    rt.block_on(async move { runtime::eval(repl_schema.clone(), &expr).await })?;
                 println!("{:?}", value);
             }
             Ok(RunCommandResult::Done)
