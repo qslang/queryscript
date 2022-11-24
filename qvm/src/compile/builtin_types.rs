@@ -27,11 +27,17 @@ const BUILTIN_TYPES: &'static [BuiltinType] = &[
     ("text", AtomicType::Utf8),
     ("varchar", AtomicType::Utf8),
     //
-    // Date/Time. Time precision is defaulted to microseconds
-    // but we should make this configurable.
+    // Date/Time:
+    // - The parser in rust arrow expects Date32 to be a date (no time) and
+    //   Date64 to be a date and time (w/ optional timezone)
+    //   https://github.com/apache/arrow-rs/blob/27.0.0/arrow-cast/src/parse.rs#L224
+    // - The time types are defaulted to microsecond precision, but we should make
+    //   this configurable.
+    // - The timestamp has no timezone, but we should make this configurable.
     //
-    ("date", AtomicType::Date64),
+    ("date", AtomicType::Date32),
     ("time", AtomicType::Time64(TimeUnit::Microsecond)),
+    ("datetime", AtomicType::Date64),
     (
         "timestamp",
         AtomicType::Timestamp(TimeUnit::Microsecond, None),
