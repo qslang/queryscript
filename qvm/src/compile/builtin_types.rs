@@ -49,11 +49,34 @@ const BUILTIN_TYPES: &'static [BuiltinType] = &[
     ("null", AtomicType::Null),
 ];
 
-// XXX
-// NEXT STEPS
-// Refactor function interface below (maybe make a macro?)
-// Implement load_csv() (or maybe a load function which can load either?)
+macro_rules! arg {
+    ($name: literal, $type_: expr) => {
+        MField {
+            name: $name.to_string(),
+            type_: mkcref($type_),
+            nullable: false,
+        }
+    };
+    ($name: literal, $type_: expr, $nullable: literal) => {
+        MField {
+            name: $name.to_string(),
+            type_: mkcref($type_),
+            nullable: $nullable,
+        }
+    };
+}
+
+type BuiltinFunction = (&'static str, &'static [&'static str], Vec<MField>, MType);
+
 lazy_static! {
+    // A function is a name, generic variables, args, and a return type
+    static ref BUILTIN_FUNCTIONS: Vec<BuiltinFunction> = vec![
+        ("load", &["R"], vec![
+            arg!("file", MType::Atom(AtomicType::Utf8)),
+            arg!("format", MType::Atom(AtomicType::Utf8), true)
+        ], MType::List(mkcref(MType::Name("R".to_string())))),
+    ];
+
     static ref BUILTIN_DECLS: Vec<(String, Decl)> = BUILTIN_TYPES
         .iter()
         .map(|(name, type_)| (
@@ -66,36 +89,26 @@ lazy_static! {
             },
         ))
         .chain(
-            vec![(
-                "load".to_string(),
+            BUILTIN_FUNCTIONS.iter().map(
+                |(name, variables, args, ret)|
+            (
+                name.to_string(),
                 Decl {
                     public: true,
                     extern_: false,
-                    name: "load".to_string(),
+                    name: name.to_string(),
                     value: SchemaEntry::Expr(mkcref(STypedExpr {
                         type_: mkcref(SType {
-                            variables: BTreeSet::from(["R".to_string()]),
+                            variables: BTreeSet::from_iter(variables.iter().map(|s| s.to_string())),
                             body: mkcref(MType::Fn(MFnType {
-                                args: vec![
-                                    MField {
-                                        name: "file".to_string(),
-                                        type_: mkcref(MType::Atom(AtomicType::Utf8)),
-                                        nullable: false,
-                                    },
-                                    MField {
-                                        name: "format".to_string(),
-                                        type_: mkcref(MType::Atom(AtomicType::Utf8)),
-                                        nullable: true,
-                                    }
-                                ],
-                                ret: mkcref(MType::List(mkcref(MType::Name("R".to_string())))),
+                                args: args.clone(),
+                                ret: mkcref(ret.clone()),
                             })),
                         }),
-                        expr: mkcref(Expr::NativeFn("load".to_string())),
+                        expr: mkcref(Expr::NativeFn(name.to_string())),
                     })),
                 },
-            )]
-            .into_iter()
+            ))
         )
         .collect();
     pub static ref GLOBAL_SCHEMA: Ref<Schema> = {
