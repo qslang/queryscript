@@ -5,20 +5,20 @@ use snafu::{Backtrace, Snafu};
 pub enum QVMError {
     #[snafu(display("Parser error: {}", source), context(false))]
     ParserError {
+        #[snafu(backtrace)]
         source: crate::parser::error::ParserError,
-        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("Compiler error: {}", source), context(false))]
     CompileError {
+        #[snafu(backtrace)]
         source: crate::compile::error::CompileError,
-        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("Runtime error: {}", source), context(false))]
     RuntimeError {
+        #[snafu(backtrace)]
         source: crate::runtime::error::RuntimeError,
-        backtrace: Option<Backtrace>,
     },
 
     #[snafu(whatever, display("{message}"))]

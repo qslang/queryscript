@@ -12,8 +12,8 @@ pub type Result<T> = std::result::Result<T, CompileError>;
 pub enum CompileError {
     #[snafu(display("Parser error: {}", source), context(false))]
     SyntaxError {
+        #[snafu(backtrace)]
         source: ParserError,
-        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("Internal error: {}", what))]
@@ -24,14 +24,14 @@ pub enum CompileError {
 
     #[snafu(display("Typesystem error: {}", source), context(false))]
     TypesystemError {
+        #[snafu(backtrace)]
         source: TypesystemError,
-        backtrace: Option<Backtrace>,
     },
 
     #[snafu(display("Parser error: {}", source), context(false))]
     RuntimeError {
+        #[snafu(backtrace)]
         source: RuntimeError,
-        backtrace: Option<Backtrace>,
     },
 
     #[snafu(context(false))]

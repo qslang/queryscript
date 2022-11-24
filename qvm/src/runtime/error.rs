@@ -21,8 +21,8 @@ pub enum RuntimeError {
 
     #[snafu(context(false))]
     TypesystemError {
+        #[snafu(backtrace)]
         source: crate::types::error::TypesystemError,
-        backtrace: Option<Backtrace>,
     },
 
     #[snafu(context(false))]
