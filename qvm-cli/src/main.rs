@@ -65,10 +65,11 @@ fn run_file(rt: &runtime::Runtime, file: &str, compile_only: bool) -> Result<(),
         return Ok(());
     }
 
+    let ctx = (&schema).into();
     let locked_schema = schema.read()?;
     for expr in locked_schema.exprs.iter() {
         let expr = expr.to_runtime_type()?;
-        let value = rt.block_on(async { runtime::eval(schema.clone(), &expr).await })?;
+        let value = rt.block_on(async { runtime::eval(&ctx, &expr).await })?;
         println!("{:?}", value);
     }
 

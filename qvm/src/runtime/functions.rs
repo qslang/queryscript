@@ -14,8 +14,10 @@ use datafusion::physical_plan::collect;
 use datafusion::physical_plan::file_format::FileScanConfig;
 use object_store::path::Path;
 use object_store::ObjectMeta;
+use std::path::{Path as FilePath, PathBuf as FilePathBuf};
 use std::sync::Arc;
 
+use super::context::Context;
 use super::error::{fail, Result};
 use crate::types;
 use crate::types::{FnValue, Value};
@@ -58,15 +60,14 @@ impl LoadFileFn {
         Ok(LoadFileFn { schema })
     }
 
-    pub async fn load(&self, file: String, format: Option<String>) -> Result<Value> {
-        let format_type = match format.map(|s| s.to_lowercase()).as_deref() {
-            None => {
-                if file.ends_with(".csv") {
-                    Format::CSV
-                } else {
-                    Format::Json
-                }
-            }
+    pub async fn load(&self, file: &FilePath, format: Option<String>) -> Result<Value> {
+        let format_lower = format.map(|s| s.to_lowercase());
+        let format_name = match format_lower.as_deref() {
+            None => file.extension().and_then(|s| s.to_str()),
+            Some(fmt) => Some(fmt),
+        };
+
+        let format_type = match format_name {
             Some("csv") => Format::CSV,
             Some("json") | _ => Format::Json,
         };
@@ -77,8 +78,8 @@ impl LoadFileFn {
                 as Box<dyn FileFormat>,
         };
 
-        let location = Path::from_filesystem_path(file.as_str())?;
-        let fmeta = std::fs::metadata(file)?;
+        let location = Path::from_filesystem_path(&file)?;
+        let fmeta = std::fs::metadata(&file)?;
         let ometa = ObjectMeta {
             location,
             last_modified: fmeta.modified().map(chrono::DateTime::from).unwrap(),
@@ -117,13 +118,18 @@ impl LoadFileFn {
 
 #[async_trait]
 impl FnValue for LoadFileFn {
-    async fn execute(&self, args: Vec<Value>) -> Result<Value> {
+    async fn execute(&self, ctx: &Context, args: Vec<Value>) -> Result<Value> {
         if args.len() != 2 {
             return fail!("load expects exactly 2 arguments");
         }
 
-        let file = match &args[0] {
-            Value::Utf8(s) => s.clone(),
+        let mut path_buf = FilePathBuf::new();
+        if let Some(folder) = &ctx.folder {
+            path_buf.push(folder);
+        }
+
+        match &args[0] {
+            Value::Utf8(s) => path_buf.push(s),
             _ => return fail!("load expects its first argument to be a string"),
         };
 
@@ -133,7 +139,7 @@ impl FnValue for LoadFileFn {
             _ => return fail!("load expects its second argument to be a string"),
         };
 
-        self.load(file, format).await
+        self.load(&*path_buf, format).await
     }
 
     fn fn_type(&self) -> types::FnType {

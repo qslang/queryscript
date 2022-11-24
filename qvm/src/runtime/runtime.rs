@@ -1,3 +1,4 @@
+use super::context::Context;
 use super::sql::SQLParam;
 use crate::compile::schema;
 use crate::runtime::error::*;
@@ -16,13 +17,13 @@ pub fn build() -> Result<Runtime> {
     Ok(tokio::runtime::Builder::new_current_thread().build()?)
 }
 
-pub async fn eval_params(
-    schema: schema::SchemaRef,
-    params: &schema::Params<TypeRef>,
+pub async fn eval_params<'a>(
+    ctx: &'a Context,
+    params: &'a schema::Params<TypeRef>,
 ) -> Result<HashMap<String, SQLParam>> {
     let mut param_values = HashMap::new();
     for (name, param) in params {
-        let value = eval(schema.clone(), param).await?;
+        let value = eval(ctx, param).await?;
         param_values.insert(
             name.clone(),
             SQLParam::new(name.clone(), value, &*param.type_.read()?),
@@ -33,7 +34,7 @@ pub async fn eval_params(
 }
 
 pub fn eval<'a>(
-    schema: schema::SchemaRef,
+    ctx: &'a Context,
     typed_expr: &'a schema::TypedExpr<TypeRef>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>> + 'a>> {
     Box::pin(async move {
@@ -45,7 +46,7 @@ pub fn eval<'a>(
                 let ret = match entry {
                     schema::SchemaEntry::Expr(e) => {
                         eval(
-                            schema.clone(),
+                            ctx,
                             &schema::TypedExpr {
                                 type_: typed_expr.type_.clone(),
                                 expr: Arc::new(
@@ -76,23 +77,23 @@ pub fn eval<'a>(
             schema::Expr::FnCall(schema::FnCallExpr { func, args }) => {
                 let mut arg_values = Vec::new();
                 for arg in args.iter() {
-                    arg_values.push(eval(schema.clone(), arg).await?);
+                    arg_values.push(eval(ctx, arg).await?);
                 }
-                let fn_val = match eval(schema.clone(), func.as_ref()).await? {
+                let fn_val = match eval(ctx, func.as_ref()).await? {
                     Value::Fn(f) => f,
                     _ => return fail!("Cannot call non-function"),
                 };
 
-                fn_val.execute(arg_values).await
+                fn_val.execute(ctx, arg_values).await
             }
             schema::Expr::SQLQuery(q) => {
                 let schema::SQLQuery { query, params } = q.as_ref();
-                let sql_params = eval_params(schema.clone(), &params).await?;
+                let sql_params = eval_params(ctx, &params).await?;
                 Ok(Value::Relation(super::sql::eval(&query, sql_params).await?))
             }
             schema::Expr::SQLExpr(e) => {
                 let schema::SQLExpr { expr, params } = e.as_ref();
-                let sql_params = eval_params(schema.clone(), &params).await?;
+                let sql_params = eval_params(ctx, &params).await?;
                 let query = sqlast::Query {
                     with: None,
                     body: Box::new(sqlast::SetExpr::Select(Box::new(sqlast::Select {

@@ -125,9 +125,9 @@ fn run_command(
             };
 
             if let Some(compiled) = compiled {
+                let ctx = (&repl_schema).into();
                 let expr = compiled.to_runtime_type()?;
-                let value =
-                    rt.block_on(async move { runtime::eval(repl_schema.clone(), &expr).await })?;
+                let value = rt.block_on(async move { runtime::eval(&ctx, &expr).await })?;
                 println!("{:?}", value);
             }
             Ok(RunCommandResult::Done)

@@ -10,13 +10,20 @@ mod tests {
     use crate::runtime;
     use crate::types;
 
+    fn is_schema_file(ext: Option<&str>) -> bool {
+        match ext {
+            Some(ext) => ext == "co" || ext == "tql",
+            None => false,
+        }
+    }
+
     fn test_directory(rt: &runtime::Runtime, dir: &PathBuf) {
         println!("Running tests in {}", dir.display());
         for entry in fs::read_dir(dir).expect(format!("Could not read {}", dir.display()).as_str())
         {
             let entry = entry.expect(format!("Could not read {}", dir.display()).as_str());
             let path = entry.path();
-            if path.is_file() && path.extension().and_then(OsStr::to_str) == Some("co") {
+            if path.is_file() && is_schema_file(path.extension().and_then(OsStr::to_str)) {
                 println!("Running {}", path.display());
                 test_schema(&rt, &path);
             } else {
@@ -62,10 +69,10 @@ mod tests {
             let expr = expr
                 .to_runtime_type()
                 .expect(format!("Could not convert expression {:?}", expr).as_str());
-            let async_schema = schema.clone();
+            let async_ctx = (&schema).into();
             let async_expr = expr.clone();
             let value = rt
-                .block_on(async move { runtime::eval(async_schema.clone(), &async_expr).await })
+                .block_on(async move { runtime::eval(&async_ctx, &async_expr).await })
                 .expect("Failed to evaluate expression");
 
             exprs.push(TypedValue {
