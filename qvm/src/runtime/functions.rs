@@ -118,8 +118,8 @@ impl LoadFileFn {
 #[async_trait]
 impl FnValue for LoadFileFn {
     async fn execute(&self, args: Vec<Value>) -> Result<Value> {
-        if args.len() < 1 || args.len() > 2 {
-            return fail!("load expects exactly 1-2 arguments");
+        if args.len() != 2 {
+            return fail!("load expects exactly 2 arguments");
         }
 
         let file = match &args[0] {
@@ -127,12 +127,10 @@ impl FnValue for LoadFileFn {
             _ => return fail!("load expects its first argument to be a string"),
         };
 
-        let mut format = None;
-        if args.len() > 1 {
-            match &args[1] {
-                Value::Utf8(s) => format = Some(s.clone()),
-                _ => return fail!("load expects its second argument to be a string"),
-            }
+        let format = match &args[1] {
+            Value::Utf8(s) => Some(s.clone()),
+            Value::Null => None,
+            _ => return fail!("load expects its second argument to be a string"),
         };
 
         self.load(file, format).await

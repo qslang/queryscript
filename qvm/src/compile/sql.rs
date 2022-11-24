@@ -3,6 +3,7 @@ use crate::compile::error::{CompileError, Result};
 use crate::compile::inference::*;
 use crate::compile::schema::*;
 use crate::types::{number::parse_numeric_type, AtomicType};
+use lazy_static::lazy_static;
 use sqlparser::ast as sqlast;
 
 use std::collections::BTreeMap;
@@ -687,6 +688,17 @@ pub fn compile_sqlquery(
     }
 }
 
+lazy_static! {
+    static ref NULL_SQLEXPR: Arc<SQLExpr<CRef<MType>>> = Arc::new(SQLExpr {
+        params: BTreeMap::new(),
+        expr: sqlast::Expr::Value(sqlast::Value::Null),
+    });
+    static ref NULL: CTypedExpr = CTypedExpr {
+        type_: resolve_global_atom("null").unwrap(),
+        expr: mkcref(Expr::SQLExpr(NULL_SQLEXPR.clone())),
+    };
+}
+
 pub fn compile_sqlexpr(
     compiler: Ref<Compiler>,
     schema: Ref<Schema>,
@@ -720,13 +732,7 @@ pub fn compile_sqlexpr(
                     expr: expr.clone(),
                 }))),
             },
-            sqlast::Value::Null => CTypedExpr {
-                type_: resolve_global_atom("null")?,
-                expr: mkcref(Expr::SQLExpr(Arc::new(SQLExpr {
-                    params: BTreeMap::new(),
-                    expr: expr.clone(),
-                }))),
-            },
+            sqlast::Value::Null => NULL.clone(),
             sqlast::Value::Placeholder(_) => {
                 return Err(CompileError::unimplemented(
                     format!("SQL Parameter syntax: {}", expr).as_str(),
@@ -879,8 +885,17 @@ pub fn compile_sqlexpr(
                 if let Some(compiled_arg) = compiled_args.get_mut(&arg.name) {
                     arg.type_.unify(&compiled_arg.type_)?;
                     arg_sqlexprs.push(compiled_arg.clone());
+                } else if arg.nullable {
+                    // If the argument is missing and nullable, then set it to NULL
+                    // as a default value. Eventually we may want to generalize this
+                    // so that functions can declare other kinds of default values too.
+                    arg_sqlexprs.push(CTypedNameAndSQLExpr {
+                        name: arg.name.clone(),
+                        type_: NULL.type_.clone(),
+                        expr: mkcref(NULL_SQLEXPR.as_ref().clone()),
+                    });
                 } else {
-                    return Err(CompileError::no_such_entry(vec![arg.name.clone()]));
+                    return Err(CompileError::missing_arg(vec![arg.name.clone()]));
                 }
             }
 

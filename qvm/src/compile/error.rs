@@ -46,6 +46,12 @@ pub enum CompileError {
         backtrace: Option<Backtrace>,
     },
 
+    #[snafu(display("Missing argument: {:?}", path))]
+    MissingArg {
+        path: ast::Path,
+        backtrace: Option<Backtrace>,
+    },
+
     #[snafu(display("Duplicate entry: {:?}", path))]
     DuplicateEntry {
         path: ast::Path,
@@ -89,6 +95,10 @@ pub enum CompileError {
 impl CompileError {
     pub fn unimplemented(what: &str) -> CompileError {
         return UnimplementedSnafu { what }.build();
+    }
+
+    pub fn missing_arg(path: ast::Path) -> CompileError {
+        return MissingArgSnafu { path }.build();
     }
 
     pub fn no_such_entry(path: ast::Path) -> CompileError {

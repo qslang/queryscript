@@ -76,11 +76,18 @@ lazy_static! {
                         type_: mkcref(SType {
                             variables: BTreeSet::from(["R".to_string()]),
                             body: mkcref(MType::Fn(MFnType {
-                                args: vec![MField {
-                                    name: "file".to_string(),
-                                    type_: mkcref(MType::Atom(AtomicType::Utf8)),
-                                    nullable: false,
-                                }],
+                                args: vec![
+                                    MField {
+                                        name: "file".to_string(),
+                                        type_: mkcref(MType::Atom(AtomicType::Utf8)),
+                                        nullable: false,
+                                    },
+                                    MField {
+                                        name: "format".to_string(),
+                                        type_: mkcref(MType::Atom(AtomicType::Utf8)),
+                                        nullable: true,
+                                    }
+                                ],
                                 ret: mkcref(MType::List(mkcref(MType::Name("R".to_string())))),
                             })),
                         }),
