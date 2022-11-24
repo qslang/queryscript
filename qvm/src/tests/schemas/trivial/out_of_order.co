@@ -1,7 +1,0 @@
-type Bar record {
-    a number,
-    b number,
-    c number,
-}
-let foo = SELECT * FROM bar;
-let bar [Bar] = load_json('/dev/null');

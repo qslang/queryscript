@@ -39,7 +39,8 @@ mod tests {
                         Box::new(
                             e.must()
                                 .expect("Unresolved declaration after compilation")
-                                .read().unwrap()
+                                .read()
+                                .unwrap()
                                 .type_
                                 .clone(),
                         ),
@@ -96,7 +97,7 @@ mod tests {
     fn test_schemas() {
         let tests = vec![
             Path::new(env!("CARGO_MANIFEST_DIR")),
-            Path::new("src/tests/schemas/"),
+            Path::new("tests/schemas/"),
         ]
         .iter()
         .collect::<PathBuf>();

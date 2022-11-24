@@ -1,9 +1,0 @@
-{
-    "decls": {
-        "let events": [{user_id Float64, description Utf8, ts Utf8}],
-        "let users": [{id Float64, org_id Float64, name Utf8}],
-        "type Event": {user_id Float64, description Utf8, ts Utf8},
-        "type User": {id Float64, org_id Float64, name Utf8},
-    },
-    "queries": [],
-}
