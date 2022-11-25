@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path as FilePath;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::ast;
 use crate::compile::builtin_types::GLOBAL_SCHEMA;
@@ -12,8 +12,9 @@ use crate::compile::sql::*;
 use crate::parser::parse_schema;
 
 pub struct CompilerData {
-    pub next_placeholder: usize,
+    pub next_placeholder: Mutex<usize>,
     pub runtime: tokio::runtime::Runtime,
+    pub handles: Mutex<tokio::task::JoinSet<Result<()>>>,
 }
 
 #[derive(Clone)]
@@ -22,41 +23,63 @@ pub struct Compiler(Ref<CompilerData>);
 impl Compiler {
     pub fn new() -> Result<Compiler> {
         Ok(Compiler(mkref(CompilerData {
-            next_placeholder: 1,
+            next_placeholder: Mutex::new(1),
             runtime: tokio::runtime::Builder::new_current_thread()
                 .thread_name("qvm-compiler")
                 .thread_stack_size(3 * 1024 * 1024)
                 .build()?,
+            handles: Mutex::new(tokio::task::JoinSet::new()),
         })))
     }
 
     pub fn compile_schema_ast(&self, schema: Ref<Schema>, ast: &ast::Schema) -> Result<()> {
-        let l = self.0.read()?;
-        l.runtime
-            .block_on(async { compile_schema_ast(self.clone(), schema.clone(), ast) })
+        let data = self.0.read()?;
+        data.runtime.block_on(async {
+            let r = compile_schema_ast(self.clone(), schema.clone(), ast)?;
+            self.drive().await?;
+            Ok(r)
+        })
     }
 
     pub fn compile_schema_from_file(&self, file_path: &FilePath) -> Result<Ref<Schema>> {
-        let l = self.0.read()?;
-        l.runtime
-            .block_on(async { compile_schema_from_file(self.clone(), file_path) })
+        let data = self.0.read()?;
+        data.runtime.block_on(async {
+            let r = compile_schema_from_file(self.clone(), file_path)?;
+            self.drive().await?;
+            Ok(r)
+        })
+    }
+
+    async fn drive(&self) -> Result<()> {
+        let data = self.0.read()?;
+        loop {
+            let mut set = tokio::task::JoinSet::new();
+            std::mem::swap(&mut *data.handles.lock()?, &mut set);
+            if set.len() == 0 {
+                return Ok(());
+            }
+
+            while let Some(r) = set.join_next().await {
+                r??;
+            }
+        }
     }
 
     pub fn next_placeholder(&self, kind: &str) -> Result<String> {
-        let mut data = self.0.write()?;
-        let placeholder = data.next_placeholder;
-        (*data).next_placeholder += 1;
-        Ok(format!("{}{}", kind, placeholder))
+        let data = self.0.read()?;
+        let mut placeholder = data.next_placeholder.lock()?;
+        (*placeholder) += 1;
+        Ok(format!("{}{}", kind, *placeholder))
     }
 
     pub fn async_cref<T: Constrainable + 'static>(
         &self,
         f: impl std::future::Future<Output = Result<CRef<T>>> + Send + 'static,
     ) -> Result<CRef<T>> {
-        let data = self.0.write()?;
+        let data = self.0.read()?;
         let slot = CRef::<T>::new_unknown("async_slot");
         let ret = slot.clone();
-        data.runtime.spawn(async move {
+        data.handles.lock()?.spawn(async move {
             let r = f.await?;
             slot.unify(&r)
         });

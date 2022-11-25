@@ -53,13 +53,9 @@ impl Constrainable for CTypedSQLQuery {}
 
 pub fn get_rowtype(compiler: Compiler, relation: CRef<MType>) -> Result<CRef<MType>> {
     Ok(compiler.async_cref(async move {
-        eprintln!("AAAAAAAAAAAA");
         let r = &relation;
-        eprintln!("BBBBBBBBBBBB");
         let reltype = r.await?;
-        eprintln!("CCCCCCCCCCCC");
         let locked = reltype.read()?;
-        eprintln!("DDDDDDDDDDDD");
         match &*locked {
             MType::List(inner) => Ok(inner.clone()),
             _ => Ok(relation.clone()),

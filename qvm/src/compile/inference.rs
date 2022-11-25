@@ -62,7 +62,7 @@ where
 {
     Known(Ref<T>),
     Unknown {
-        debug_name: String,
+        debug_names: Vec<String>,
         error: Option<CompileError>,
         constraints: Vec<Ref<dyn Constraint<T>>>,
     },
@@ -73,8 +73,8 @@ impl<T: Constrainable> fmt::Debug for Constrained<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Constrained::Known(t) => t.read().unwrap().fmt(f),
-            Constrained::Unknown { debug_name, .. } => {
-                f.write_str(format!("Unknown({:?})", debug_name).as_str())
+            Constrained::Unknown { debug_names, .. } => {
+                f.write_str(format!("Unknown({:?})", debug_names).as_str())
             }
             Constrained::Ref(r) => r.fmt(f),
         }
@@ -99,7 +99,7 @@ impl<T: Constrainable> fmt::Debug for CRef<T> {
 impl<T: 'static + Constrainable> CRef<T> {
     pub fn new_unknown(debug_name: &str) -> CRef<T> {
         CRef(mkref(Constrained::Unknown {
-            debug_name: debug_name.to_string(),
+            debug_names: vec![debug_name.to_string()],
             error: None,
             constraints: Vec::new(),
         }))
@@ -107,7 +107,7 @@ impl<T: 'static + Constrainable> CRef<T> {
 
     pub fn new_error(e: CompileError) -> CRef<T> {
         CRef(mkref(Constrained::Unknown {
-            debug_name: "error".to_string(),
+            debug_names: vec!["error".to_string()],
             error: Some(e),
             constraints: Vec::new(),
         }))
@@ -223,9 +223,24 @@ impl<T: 'static + Constrainable> CRef<T> {
 
         if !Arc::ptr_eq(&us.0, &them.0) {
             match &mut *them.write()? {
-                Constrained::Unknown { constraints, .. } => {
+                Constrained::Unknown {
+                    constraints,
+                    debug_names,
+                    ..
+                } => {
                     for constraint in constraints.drain(..) {
                         us.add_constraint(constraint)?;
+                    }
+                    match &mut *us.write()? {
+                        Constrained::Unknown {
+                            debug_names: our_debug_names,
+                            ..
+                        } => {
+                            for debug_name in debug_names.drain(..) {
+                                our_debug_names.push(debug_name);
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 _ => {}

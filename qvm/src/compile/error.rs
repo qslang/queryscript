@@ -40,6 +40,12 @@ pub enum CompileError {
         backtrace: Option<Backtrace>,
     },
 
+    #[snafu(context(false))]
+    JoinError {
+        source: tokio::task::JoinError,
+        backtrace: Option<Backtrace>,
+    },
+
     #[snafu(display("Unimplemented: {}", what))]
     Unimplemented {
         what: String,
