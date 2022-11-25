@@ -113,7 +113,7 @@ fn run_command(
             let num_exprs = repl_schema.read()?.exprs.len();
 
             let compiler = compile::Compiler::new()?;
-            compile::compile_schema_ast(compiler.clone(), repl_schema.clone(), &ast)?;
+            compiler.compile_schema_ast(repl_schema.clone(), &ast)?;
 
             let compiled = {
                 let locked_schema = repl_schema.read()?;

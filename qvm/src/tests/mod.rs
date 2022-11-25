@@ -34,7 +34,10 @@ mod tests {
     }
 
     fn test_schema(rt: &runtime::Runtime, path: &PathBuf) {
-        let schema = compile::compile_schema_from_file(path).expect("Failed to compile schema");
+        let compiler = compile::Compiler::new().expect("Failed to create compiler");
+        let schema = compiler
+            .compile_schema_from_file(path)
+            .expect("Failed to compile schema");
         let mut decls = BTreeMap::<String, Box<dyn fmt::Debug>>::new();
         for (name, decl) in &schema.read().unwrap().decls {
             match &decl.value {

@@ -58,7 +58,8 @@ fn run_file(rt: &runtime::Runtime, file: &str, compile_only: bool) -> Result<(),
         whatever!("Path {:?} does not exist", path);
     }
 
-    let schema = compile::compile_schema_from_file(&Path::new(&file))?;
+    let compiler = compile::Compiler::new()?;
+    let schema = compiler.compile_schema_from_file(&Path::new(&file))?;
 
     if compile_only {
         println!("{:#?}", schema);

@@ -11,44 +11,65 @@ use crate::compile::schema::*;
 use crate::compile::sql::*;
 use crate::parser::parse_schema;
 
-pub struct Compiler {
+pub struct CompilerData {
     pub next_placeholder: usize,
     pub runtime: tokio::runtime::Runtime,
 }
 
+#[derive(Clone)]
+pub struct Compiler(Ref<CompilerData>);
+
 impl Compiler {
-    pub fn new() -> Result<Ref<Compiler>> {
-        Ok(mkref(Compiler {
+    pub fn new() -> Result<Compiler> {
+        Ok(Compiler(mkref(CompilerData {
             next_placeholder: 1,
             runtime: tokio::runtime::Builder::new_current_thread()
                 .thread_name("qvm-compiler")
                 .thread_stack_size(3 * 1024 * 1024)
                 .build()?,
-        }))
+        })))
     }
 
-    pub fn next_placeholder(&mut self, kind: &str) -> String {
-        let placeholder = self.next_placeholder;
-        self.next_placeholder += 1;
-        format!("{}{}", kind, placeholder)
+    pub fn compile_schema_ast(&self, schema: Ref<Schema>, ast: &ast::Schema) -> Result<()> {
+        let l = self.0.read()?;
+        l.runtime
+            .block_on(async { compile_schema_ast(self.clone(), schema.clone(), ast) })
+    }
+
+    pub fn compile_schema_from_file(&self, file_path: &FilePath) -> Result<Ref<Schema>> {
+        let l = self.0.read()?;
+        l.runtime
+            .block_on(async { compile_schema_from_file(self.clone(), file_path) })
+    }
+
+    pub fn next_placeholder(&self, kind: &str) -> Result<String> {
+        let mut data = self.0.write()?;
+        let placeholder = data.next_placeholder;
+        (*data).next_placeholder += 1;
+        Ok(format!("{}{}", kind, placeholder))
     }
 
     pub fn async_cref<T: Constrainable + 'static>(
         &self,
         f: impl std::future::Future<Output = Result<CRef<T>>> + Send + 'static,
-    ) -> CRef<T> {
+    ) -> Result<CRef<T>> {
+        let data = self.0.write()?;
         let slot = CRef::<T>::new_unknown("async_slot");
         let ret = slot.clone();
-        self.runtime.spawn(async move {
+        data.runtime.spawn(async move {
             let r = f.await?;
             slot.unify(&r)
         });
 
-        ret
+        Ok(ret)
     }
 }
 
-pub fn lookup_schema(schema: Ref<Schema>, path: &ast::Path) -> Result<Ref<ImportedSchema>> {
+pub fn lookup_schema(
+    compiler: Compiler,
+    schema: Ref<Schema>,
+    path: &ast::Path,
+) -> Result<Ref<ImportedSchema>> {
     if let Some(s) = schema.read()?.imports.get(path) {
         return Ok(s.clone());
     }
@@ -67,7 +88,7 @@ pub fn lookup_schema(schema: Ref<Schema>, path: &ast::Path) -> Result<Ref<Import
         }
         let file_path = file_path_buf.as_path();
 
-        let s = compile_schema_from_file(file_path)?;
+        let s = compile_schema_from_file(compiler.clone(), file_path)?;
         (path.clone(), s.clone())
     } else {
         return Err(CompileError::no_such_entry(path.clone()));
@@ -88,6 +109,7 @@ pub fn lookup_schema(schema: Ref<Schema>, path: &ast::Path) -> Result<Ref<Import
 }
 
 pub fn lookup_path(
+    compiler: Compiler,
     schema: Ref<Schema>,
     path: &ast::Path,
     import_global: bool,
@@ -109,20 +131,28 @@ pub fn lookup_path(
                 }
 
                 match &decl.value {
-                    SchemaEntry::Schema(imported) => lookup_schema(schema.clone(), &imported)?
-                        .read()?
-                        .schema
-                        .clone(),
+                    SchemaEntry::Schema(imported) => {
+                        lookup_schema(compiler.clone(), schema.clone(), &imported)?
+                            .read()?
+                            .schema
+                            .clone()
+                    }
                     _ => return Ok((decl.clone(), path[i + 1..].to_vec())),
                 }
             }
             None => match &schema.read()?.parent_scope {
                 Some(parent) => {
-                    return lookup_path(parent.clone(), &path[i..].to_vec(), import_global)
+                    return lookup_path(
+                        compiler.clone(),
+                        parent.clone(),
+                        &path[i..].to_vec(),
+                        import_global,
+                    )
                 }
                 None => {
                     if import_global {
                         return lookup_path(
+                            compiler.clone(),
                             GLOBAL_SCHEMA.clone(),
                             &path[i..].to_vec(),
                             false, /* import_global */
@@ -140,10 +170,19 @@ pub fn lookup_path(
     return Err(CompileError::no_such_entry(path.clone()));
 }
 
-pub fn resolve_type(schema: Ref<Schema>, ast: &ast::Type) -> Result<CRef<MType>> {
+pub fn resolve_type(
+    compiler: Compiler,
+    schema: Ref<Schema>,
+    ast: &ast::Type,
+) -> Result<CRef<MType>> {
     match ast {
         ast::Type::Reference(path) => {
-            let (decl, r) = lookup_path(schema.clone(), &path, true /* import_global */)?;
+            let (decl, r) = lookup_path(
+                compiler.clone(),
+                schema.clone(),
+                &path,
+                true, /* import_global */
+            )?;
             if r.len() > 0 {
                 return Err(CompileError::no_such_entry(r));
             }
@@ -167,7 +206,7 @@ pub fn resolve_type(schema: Ref<Schema>, ast: &ast::Type) -> Result<CRef<MType>>
                         seen.insert(nt.name.clone());
                         fields.push(MField {
                             name: nt.name.clone(),
-                            type_: resolve_type(schema.clone(), &nt.def)?,
+                            type_: resolve_type(compiler.clone(), schema.clone(), &nt.def)?,
                             nullable: true, /* TODO: implement non-null types */
                         });
                     }
@@ -179,21 +218,22 @@ pub fn resolve_type(schema: Ref<Schema>, ast: &ast::Type) -> Result<CRef<MType>>
 
             Ok(mkcref(MType::Record(fields)))
         }
-        ast::Type::List(inner) => Ok(mkcref(MType::List(resolve_type(schema, inner)?))),
+        ast::Type::List(inner) => Ok(mkcref(MType::List(resolve_type(compiler, schema, inner)?))),
         ast::Type::Exclude { .. } => {
             return Err(CompileError::unimplemented("Struct exclusions"));
         }
     }
 }
 
-pub fn resolve_global_atom(name: &str) -> Result<CRef<MType>> {
+pub fn resolve_global_atom(compiler: Compiler, name: &str) -> Result<CRef<MType>> {
     resolve_type(
+        compiler,
         GLOBAL_SCHEMA.clone(),
         &ast::Type::Reference(vec![name.to_string()]),
     )
 }
 
-fn find_field<'a>(fields: &'a Vec<MField>, name: &str) -> Option<&'a MField> {
+pub fn find_field<'a>(fields: &'a Vec<MField>, name: &str) -> Option<&'a MField> {
     for f in fields.iter() {
         if f.name == name {
             return Some(f);
@@ -249,7 +289,7 @@ pub fn typecheck_path(type_: CRef<MType>, path: &[String]) -> Result<CRef<MType>
 }
 
 pub fn compile_expr(
-    compiler: Ref<Compiler>,
+    compiler: Compiler,
     schema: Ref<Schema>,
     expr: &ast::Expr,
 ) -> Result<CTypedExpr> {
@@ -276,14 +316,7 @@ pub fn rebind_decl(_schema: SchemaInstance, decl: &Decl) -> Result<SchemaEntry> 
     }
 }
 
-pub fn compile_schema_from_string(contents: &str) -> Result<Ref<Schema>> {
-    let ast = parse_schema(contents)?;
-
-    let compiler = Compiler::new()?;
-    compile_schema(compiler.clone(), None, &ast)
-}
-
-pub fn compile_schema_from_file(file_path: &FilePath) -> Result<Ref<Schema>> {
+pub fn compile_schema_from_file(compiler: Compiler, file_path: &FilePath) -> Result<Ref<Schema>> {
     let parsed_path = FilePath::new(file_path).canonicalize()?;
     if !parsed_path.exists() {
         return Err(CompileError::no_such_entry(
@@ -302,12 +335,11 @@ pub fn compile_schema_from_file(file_path: &FilePath) -> Result<Ref<Schema>> {
 
     let ast = parse_schema(contents.as_str())?;
 
-    let compiler = Compiler::new()?;
     compile_schema(compiler.clone(), folder, &ast)
 }
 
 pub fn compile_schema(
-    compiler: Ref<Compiler>,
+    compiler: Compiler,
     folder: Option<String>,
     ast: &ast::Schema,
 ) -> Result<Ref<Schema>> {
@@ -317,23 +349,27 @@ pub fn compile_schema(
 }
 
 pub fn compile_schema_ast(
-    compiler: Ref<Compiler>,
+    compiler: Compiler,
     schema: Ref<Schema>,
     ast: &ast::Schema,
 ) -> Result<()> {
-    declare_schema_entries(schema.clone(), ast)?;
+    declare_schema_entries(compiler.clone(), schema.clone(), ast)?;
     compile_schema_entries(compiler.clone(), schema.clone(), ast)?;
     gather_schema_externs(schema)?;
     Ok(())
 }
 
-pub fn declare_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<()> {
+pub fn declare_schema_entries(
+    compiler: Compiler,
+    schema: Ref<Schema>,
+    ast: &ast::Schema,
+) -> Result<()> {
     for stmt in &ast.stmts {
         let entries: Vec<(String, bool, SchemaEntry)> = match &stmt.body {
             ast::StmtBody::Noop => continue,
             ast::StmtBody::Expr(_) => continue,
             ast::StmtBody::Import { path, list, .. } => {
-                let imported = lookup_schema(schema.clone(), &path)?;
+                let imported = lookup_schema(compiler.clone(), schema.clone(), &path)?;
                 if imported.read()?.args.is_some() {
                     return Err(CompileError::unimplemented("Importing with arguments"));
                 }
@@ -443,6 +479,7 @@ pub fn declare_schema_entries(schema: Ref<Schema>, ast: &ast::Schema) -> Result<
                             }
 
                             let (decl, r) = lookup_path(
+                                compiler.clone(),
                                 imported.read()?.schema.clone(),
                                 &item,
                                 false, /* import_global */
@@ -568,7 +605,7 @@ pub fn unify_expr_decl(schema: Ref<Schema>, name: &str, value: CRef<STypedExpr>)
 }
 
 pub fn compile_schema_entries(
-    compiler: Ref<Compiler>,
+    compiler: Compiler,
     schema: Ref<Schema>,
     ast: &ast::Schema,
 ) -> Result<()> {
@@ -581,7 +618,7 @@ pub fn compile_schema_entries(
             }
             ast::StmtBody::Import { .. } => continue,
             ast::StmtBody::TypeDef(nt) => {
-                let type_ = resolve_type(schema.clone(), &nt.def)?;
+                let type_ = resolve_type(compiler.clone(), schema.clone(), &nt.def)?;
                 unify_type_decl(schema.clone(), nt.name.as_str(), type_)?;
             }
             ast::StmtBody::FnDef {
@@ -603,7 +640,7 @@ pub fn compile_schema_entries(
                     if inner_schema.read()?.decls.get(&arg.name).is_some() {
                         return Err(CompileError::duplicate_entry(vec![name.clone()]));
                     }
-                    let type_ = resolve_type(inner_schema.clone(), &arg.type_)?;
+                    let type_ = resolve_type(compiler.clone(), inner_schema.clone(), &arg.type_)?;
                     inner_schema.write()?.decls.insert(
                         arg.name.clone(),
                         Decl {
@@ -625,7 +662,8 @@ pub fn compile_schema_entries(
 
                 let compiled = compile_expr(compiler.clone(), inner_schema.clone(), body)?;
                 if let Some(ret) = ret {
-                    resolve_type(inner_schema.clone(), ret)?.unify(&compiled.type_)?
+                    resolve_type(compiler.clone(), inner_schema.clone(), ret)?
+                        .unify(&compiled.type_)?
                 }
 
                 unify_expr_decl(
@@ -647,7 +685,7 @@ pub fn compile_schema_entries(
             }
             ast::StmtBody::Let { name, type_, body } => {
                 let lhs_type = if let Some(t) = type_ {
-                    resolve_type(schema.clone(), &t)?
+                    resolve_type(compiler.clone(), schema.clone(), &t)?
                 } else {
                     MType::new_unknown(format!("typeof {}", name).as_str())
                 };
@@ -667,7 +705,11 @@ pub fn compile_schema_entries(
                     schema.clone(),
                     name.as_str(),
                     mkcref(STypedExpr {
-                        type_: SType::new_mono(resolve_type(schema.clone(), type_)?),
+                        type_: SType::new_mono(resolve_type(
+                            compiler.clone(),
+                            schema.clone(),
+                            type_,
+                        )?),
                         expr: mkcref(Expr::Unknown),
                     }),
                 )?;

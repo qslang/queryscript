@@ -5,5 +5,5 @@ pub mod inference;
 pub mod schema;
 pub mod sql;
 
-pub use compile::*;
+pub use compile::Compiler;
 pub use error::CompileError;

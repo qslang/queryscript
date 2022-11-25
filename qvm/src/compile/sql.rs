@@ -51,20 +51,24 @@ impl Constrainable for CTypedNameAndSQLExpr {}
 impl Constrainable for CTypedSQLExpr {}
 impl Constrainable for CTypedSQLQuery {}
 
-pub fn get_rowtype(compiler: Ref<Compiler>, relation: CRef<MType>) -> Result<CRef<MType>> {
-    Ok(compiler.read()?.async_cref(async move {
+pub fn get_rowtype(compiler: Compiler, relation: CRef<MType>) -> Result<CRef<MType>> {
+    Ok(compiler.async_cref(async move {
+        eprintln!("AAAAAAAAAAAA");
         let r = &relation;
+        eprintln!("BBBBBBBBBBBB");
         let reltype = r.await?;
+        eprintln!("CCCCCCCCCCCC");
         let locked = reltype.read()?;
+        eprintln!("DDDDDDDDDDDD");
         match &*locked {
             MType::List(inner) => Ok(inner.clone()),
             _ => Ok(relation.clone()),
         }
-    }))
+    })?)
 }
 
 pub fn compile_sqlreference(
-    compiler: Ref<Compiler>,
+    compiler: Compiler,
     schema: Ref<Schema>,
     scope: Ref<SQLScope>,
     sqlpath: &Vec<sqlast::Ident>,
@@ -158,12 +162,17 @@ pub fn compile_sqlreference(
 }
 
 pub fn compile_reference(
-    compiler: Ref<Compiler>,
+    compiler: Compiler,
     schema: Ref<Schema>,
     sqlpath: &Vec<sqlast::Ident>,
 ) -> Result<TypedExpr<CRef<MType>>> {
     let path: Vec<_> = sqlpath.iter().map(|e| e.value.clone()).collect();
-    let (decl, remainder) = lookup_path(schema.clone(), &path, true /* import_global */)?;
+    let (decl, remainder) = lookup_path(
+        compiler.clone(),
+        schema.clone(),
+        &path,
+        true, /* import_global */
+    )?;
 
     let entry = decl.value.clone();
     let remainder_cpy = remainder.clone();
@@ -217,15 +226,14 @@ pub fn compile_reference(
 }
 
 pub fn intern_placeholder(
-    compiler: Ref<Compiler>,
+    compiler: Compiler,
     kind: &str,
     expr: &TypedExpr<CRef<MType>>,
 ) -> Result<Arc<SQLExpr<CRef<MType>>>> {
     match &*expr.expr {
         Expr::SQLExpr(sqlexpr) => Ok(sqlexpr.clone()),
         _ => {
-            let placeholder_name =
-                "@".to_string() + compiler.write()?.next_placeholder(kind).as_str();
+            let placeholder_name = "@".to_string() + compiler.next_placeholder(kind)?.as_str();
 
             Ok(Arc::new(SQLExpr {
                 params: Params::from([(placeholder_name.clone(), expr.clone())]),
@@ -239,7 +247,7 @@ pub fn intern_placeholder(
 }
 
 pub fn intern_cref_placeholder(
-    compiler: Ref<Compiler>,
+    compiler: Compiler,
     kind: String,
     te: CTypedExpr,
 ) -> Result<CTypedSQLExpr> {
@@ -262,7 +270,7 @@ pub fn intern_cref_placeholder(
 }
 
 pub fn compile_sqlarg(
-    compiler: Ref<Compiler>,
+    compiler: Compiler,
     schema: Ref<Schema>,
     scope: Ref<SQLScope>,
     expr: &sqlast::Expr,
@@ -321,7 +329,7 @@ impl SQLScope {
 
     pub fn get_available_references(
         &self,
-        compiler: Ref<Compiler>,
+        compiler: Compiler,
     ) -> Result<CRef<BTreeMap<String, FieldMatch>>> {
         combine_crefs(
             self.relations
@@ -372,7 +380,7 @@ impl SQLScope {
 impl Constrainable for SQLScope {}
 
 pub fn compile_select(
-    compiler: Ref<Compiler>,
+    compiler: Compiler,
     schema: Ref<Schema>,
     select: &sqlast::Select,
 ) -> Result<CTypedExpr> {
@@ -488,7 +496,7 @@ pub fn compile_select(
     let mut from_params = BTreeMap::new();
     for (name, relation) in &scope.read()?.relations {
         let placeholder_name =
-            QVM_NAMESPACE.to_string() + compiler.write()?.next_placeholder("rel").as_str();
+            QVM_NAMESPACE.to_string() + compiler.next_placeholder("rel")?.as_str();
 
         from.push(sqlast::TableWithJoins {
             relation: sqlast::TableFactor::Table {
@@ -658,7 +666,7 @@ pub fn compile_select(
 }
 
 pub fn compile_sqlquery(
-    compiler: Ref<Compiler>,
+    compiler: Compiler,
     schema: Ref<Schema>,
     query: &sqlast::Query,
 ) -> Result<CTypedExpr> {
@@ -698,18 +706,19 @@ pub fn compile_sqlquery(
 }
 
 lazy_static! {
+    static ref GLOBAL_COMPILER: Compiler = Compiler::new().unwrap();
     static ref NULL_SQLEXPR: Arc<SQLExpr<CRef<MType>>> = Arc::new(SQLExpr {
         params: BTreeMap::new(),
         expr: sqlast::Expr::Value(sqlast::Value::Null),
     });
     static ref NULL: CTypedExpr = CTypedExpr {
-        type_: resolve_global_atom("null").unwrap(),
+        type_: resolve_global_atom(GLOBAL_COMPILER.clone(), "null").unwrap(),
         expr: mkcref(Expr::SQLExpr(NULL_SQLEXPR.clone())),
     };
 }
 
 pub fn compile_sqlexpr(
-    compiler: Ref<Compiler>,
+    compiler: Compiler,
     schema: Ref<Schema>,
     scope: Ref<SQLScope>,
     expr: &sqlast::Expr,
@@ -728,14 +737,14 @@ pub fn compile_sqlexpr(
             | sqlast::Value::NationalStringLiteral(_)
             | sqlast::Value::HexStringLiteral(_)
             | sqlast::Value::DoubleQuotedString(_) => CTypedExpr {
-                type_: resolve_global_atom("string")?,
+                type_: resolve_global_atom(compiler.clone(), "string")?,
                 expr: mkcref(Expr::SQLExpr(Arc::new(SQLExpr {
                     params: BTreeMap::new(),
                     expr: expr.clone(),
                 }))),
             },
             sqlast::Value::Boolean(_) => CTypedExpr {
-                type_: resolve_global_atom("bool")?,
+                type_: resolve_global_atom(compiler.clone(), "bool")?,
                 expr: mkcref(Expr::SQLExpr(Arc::new(SQLExpr {
                     params: BTreeMap::new(),
                     expr: expr.clone(),
