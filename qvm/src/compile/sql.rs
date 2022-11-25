@@ -379,7 +379,7 @@ pub fn compile_select(
     compiler: Compiler,
     schema: Ref<Schema>,
     select: &sqlast::Select,
-) -> Result<CTypedExpr> {
+) -> Result<(CRef<MType>, (Params<CRef<MType>>, Box<sqlast::SetExpr>))> {
     if select.distinct {
         return Err(CompileError::unimplemented("DISTINCT"));
     }
@@ -599,7 +599,7 @@ pub fn compile_select(
         })?;
 
     let select = select.clone();
-    let expr: CRef<Expr<CRef<MType>>> = compiler.async_cref(async move {
+    let expr: CRef<_> = compiler.async_cref(async move {
         let exprs = (&projections).await?;
         let mut proj_exprs = Vec::new();
         let exprs = (*exprs.read()?).clone();
@@ -639,21 +639,13 @@ pub fn compile_select(
         ret.from = from.clone();
         ret.projection = projection;
 
-        Ok(mkcref(Expr::SQLQuery(Arc::new(SQLQuery {
+        Ok(cwrap((
             params,
-            query: sqlast::Query {
-                with: None,
-                body: Box::new(sqlast::SetExpr::Select(Box::new(ret.clone()))),
-                order_by: Vec::new(),
-                limit: None,
-                offset: None,
-                fetch: None,
-                lock: None,
-            },
-        }))))
+            Box::new(sqlast::SetExpr::Select(Box::new(ret.clone()))),
+        )))
     })?;
 
-    Ok(CTypedExpr { type_, expr })
+    Ok((type_, cunwrap(expr)))
 }
 
 pub fn compile_sqlquery(
@@ -685,8 +677,27 @@ pub fn compile_sqlquery(
         return Err(CompileError::unimplemented("FOR { UPDATE | SHARE }"));
     }
 
+    /*
+     */
     match query.body.as_ref() {
-        sqlast::SetExpr::Select(s) => compile_select(compiler.clone(), schema.clone(), s),
+        sqlast::SetExpr::Select(s) => {
+            let (type_, (params, body)) = compile_select(compiler.clone(), schema.clone(), s)?;
+            Ok(CTypedExpr {
+                type_,
+                expr: mkcref(Expr::SQLQuery(Arc::new(SQLQuery {
+                    params,
+                    query: sqlast::Query {
+                        with: None,
+                        body,
+                        order_by: Vec::new(),
+                        limit: None,
+                        offset: None,
+                        fetch: None,
+                        lock: None,
+                    },
+                }))),
+            })
+        }
         sqlast::SetExpr::Query(q) => compile_sqlquery(compiler.clone(), schema.clone(), q),
         sqlast::SetExpr::SetOperation { .. } => {
             Err(CompileError::unimplemented("UNION | EXCEPT | INTERSECT"))

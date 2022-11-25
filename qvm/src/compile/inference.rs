@@ -56,6 +56,38 @@ where
 }
 impl<T> Constrainable for Ref<T> where T: Constrainable {}
 
+#[derive(Clone, Debug)]
+pub struct CWrap<T>(T)
+where
+    T: Clone + fmt::Debug + Send + Sync;
+
+impl<T> CWrap<T>
+where
+    T: Clone + fmt::Debug + Send + Sync + 'static,
+{
+    pub fn wrap(t: T) -> CRef<CWrap<T>> {
+        mkcref(CWrap(t))
+    }
+
+    pub fn unwrap(self: CWrap<T>) -> T {
+        self.0
+    }
+}
+
+pub fn cwrap<T: Clone + fmt::Debug + Send + Sync + 'static>(t: T) -> CRef<CWrap<T>> {
+    CWrap::wrap(t)
+}
+
+pub fn cunwrap<T: Clone + fmt::Debug + Send + Sync + 'static>(t: CRef<CWrap<T>>) -> T {
+    Arc::try_unwrap(t.must().unwrap())
+        .unwrap()
+        .into_inner()
+        .unwrap()
+        .unwrap()
+}
+
+impl<T> Constrainable for CWrap<T> where T: Clone + fmt::Debug + Send + Sync {}
+
 pub enum Constrained<T>
 where
     T: Constrainable,
