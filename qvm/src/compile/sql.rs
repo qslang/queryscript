@@ -425,7 +425,6 @@ pub fn compile_select(
     }
 
     let scope = mkref(SQLScope::new(None));
-
     match select.from.len() {
         0 => {}
         1 => {
@@ -600,65 +599,61 @@ pub fn compile_select(
         })?;
 
     let select = select.clone();
-    let expr: CRef<Expr<CRef<MType>>> =
-        projections.then(move |exprs: Ref<Vec<Ref<Vec<CTypedNameAndSQLExpr>>>>| {
-            let mut proj_exprs = Vec::new();
-            for a in &*exprs.read()? {
-                for b in &*a.read()? {
-                    let n = b.name.clone();
-                    proj_exprs.push(b.expr.then(move |expr: Ref<SQLExpr<CRef<MType>>>| {
-                        Ok(mkcref(NameAndSQLExpr {
-                            name: n.clone(),
-                            expr: Arc::new(expr.read()?.clone()),
-                        }))
-                    })?);
-                }
+    let expr: CRef<Expr<CRef<MType>>> = compiler.async_cref(async move {
+        let exprs = (&projections).await?;
+        let mut proj_exprs = Vec::new();
+        let exprs = (*exprs.read()?).clone();
+        for a in exprs {
+            let a = (*a.read()?).clone();
+            for b in a {
+                let n = b.name.clone();
+                proj_exprs.push(NameAndSQLExpr {
+                    name: n.clone(),
+                    expr: Arc::new((&b.expr).await?.read()?.clone()),
+                });
             }
+        }
 
-            let select = select.clone();
-            let from = from.clone();
-            let from_params = from_params.clone();
-            combine_crefs(proj_exprs)?.then(move |proj_exprs: Ref<Vec<Ref<NameAndSQLExpr>>>| {
-                let mut params = BTreeMap::new();
-                let mut projection = Vec::new();
-                for sqlexpr in &*proj_exprs.read()? {
-                    let b = sqlexpr.read()?;
-                    let expr = &b.expr;
-                    for (n, p) in &expr.params {
-                        params.insert(n.clone(), p.clone());
-                    }
-                    projection.push(sqlast::SelectItem::ExprWithAlias {
-                        alias: sqlast::Ident {
-                            value: b.name.clone(),
-                            quote_style: None,
-                        },
-                        expr: expr.expr.clone(),
-                    });
-                }
-                for (n, p) in &from_params {
-                    params.insert(n.clone(), p.clone());
-                }
+        let select = select.clone();
+        let from = from.clone();
+        let from_params = from_params.clone();
+        let mut params = BTreeMap::new();
+        let mut projection = Vec::new();
+        for sqlexpr in &*proj_exprs {
+            for (n, p) in &sqlexpr.expr.params {
+                params.insert(n.clone(), p.clone());
+            }
+            projection.push(sqlast::SelectItem::ExprWithAlias {
+                alias: sqlast::Ident {
+                    value: sqlexpr.name.clone(),
+                    quote_style: None,
+                },
+                expr: sqlexpr.expr.expr.clone(),
+            });
+        }
+        for (n, p) in &from_params {
+            params.insert(n.clone(), p.clone());
+        }
 
-                let mut ret = select.clone();
-                ret.from = from.clone();
-                ret.projection = projection;
+        let mut ret = select.clone();
+        ret.from = from.clone();
+        ret.projection = projection;
 
-                Ok(mkcref(Expr::SQLQuery(Arc::new(SQLQuery {
-                    params,
-                    query: sqlast::Query {
-                        with: None,
-                        body: Box::new(sqlast::SetExpr::Select(Box::new(ret.clone()))),
-                        order_by: Vec::new(),
-                        limit: None,
-                        offset: None,
-                        fetch: None,
-                        lock: None,
-                    },
-                }))))
-            })
-        })?;
+        Ok(mkcref(Expr::SQLQuery(Arc::new(SQLQuery {
+            params,
+            query: sqlast::Query {
+                with: None,
+                body: Box::new(sqlast::SetExpr::Select(Box::new(ret.clone()))),
+                order_by: Vec::new(),
+                limit: None,
+                offset: None,
+                fetch: None,
+                lock: None,
+            },
+        }))))
+    })?;
 
-    return Ok(CTypedExpr { type_, expr });
+    Ok(CTypedExpr { type_, expr })
 }
 
 pub fn compile_sqlquery(
