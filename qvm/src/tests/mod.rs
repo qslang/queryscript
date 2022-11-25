@@ -12,7 +12,7 @@ mod tests {
 
     fn is_schema_file(ext: Option<&str>) -> bool {
         match ext {
-            Some(ext) => ext == "co" || ext == "tql",
+            Some(ext) => compile::schema::SCHEMA_EXTENSIONS.iter().any(|e| &ext == e),
             None => false,
         }
     }

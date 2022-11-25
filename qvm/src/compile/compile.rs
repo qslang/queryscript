@@ -58,7 +58,13 @@ pub fn lookup_schema(schema: Ref<Schema>, path: &ast::Path) -> Result<Ref<Import
         for p in path {
             file_path_buf.push(FilePath::new(p));
         }
-        file_path_buf.set_extension("co");
+        // XXX support .tql
+        for extension in SCHEMA_EXTENSIONS.iter() {
+            file_path_buf.set_extension(extension);
+            if file_path_buf.as_path().exists() {
+                break;
+            }
+        }
         let file_path = file_path_buf.as_path();
 
         let s = compile_schema_from_file(file_path)?;
