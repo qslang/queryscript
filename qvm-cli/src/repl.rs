@@ -128,7 +128,7 @@ fn run_command(
                 let ctx = (&repl_schema).into();
                 let expr = compiled.to_runtime_type()?;
                 let value = rt.block_on(async move { runtime::eval(&ctx, &expr).await })?;
-                println!("{:?}", value);
+                println!("{}", value);
             }
             Ok(RunCommandResult::Done)
         }

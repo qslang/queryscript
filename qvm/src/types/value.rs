@@ -12,13 +12,16 @@ pub use datafusion::arrow::{
 use datafusion::common::ScalarValue as DFScalarValue;
 use dyn_clone::{clone_trait_object, DynClone};
 pub use std::any::Any;
-use std::fmt::Debug;
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+use std::fmt;
 pub use std::sync::Arc;
+use tabled::builder::Builder as TableBuilder;
 
 use super::error::{ts_fail, Result};
 use super::types::*;
 
-#[derive(Debug, Clone)]
+#[derive(fmt::Debug, Clone)]
 pub enum Value {
     Null,
     Boolean(bool),
@@ -70,13 +73,13 @@ pub enum Value {
     Fn(Arc<dyn FnValue>),
 }
 
-pub trait Record: Debug + Send + Sync {
+pub trait Record: fmt::Debug + Send + Sync {
     fn schema(&self) -> Vec<Field>;
     fn as_any(&self) -> &dyn Any;
     fn column(&self, index: usize) -> &Value;
 }
 
-pub trait List: Debug + Send + Sync {
+pub trait List: fmt::Debug + Send + Sync {
     fn data_type(&self) -> Type;
     fn as_any(&self) -> &dyn Any;
 
@@ -86,7 +89,7 @@ pub trait List: Debug + Send + Sync {
 }
 
 #[async_trait]
-pub trait FnValue: Debug + DynClone + Send + Sync {
+pub trait FnValue: fmt::Debug + DynClone + Send + Sync {
     // NOTE: We may eventually need to tease apart this trait into a pure
     // runtime trait if we separate the runtime crate.
     async fn execute(
@@ -98,7 +101,7 @@ pub trait FnValue: Debug + DynClone + Send + Sync {
     fn as_any(&self) -> &dyn Any;
 }
 
-pub trait Relation: Debug + Send + Sync {
+pub trait Relation: fmt::Debug + Send + Sync {
     fn schema(&self) -> Vec<Field>;
     fn as_any(&self) -> &dyn Any;
 
@@ -110,7 +113,7 @@ pub trait Relation: Debug + Send + Sync {
     fn as_arrow_recordbatch(self: Arc<Self>) -> Arc<Vec<ArrowRecordBatch>>;
 }
 
-pub trait RecordBatch: Debug + Send + Sync {
+pub trait RecordBatch: fmt::Debug + Send + Sync {
     fn schema(&self) -> Vec<Field>;
     fn as_any(&self) -> &dyn Any;
 
@@ -296,5 +299,92 @@ impl TryInto<DFScalarValue> for Value {
             | Self::Time64Nanosecond(..)
             | Self::Relation(..) => return ts_fail!("Unsupported value {:?} in data fusion", self),
         })
+    }
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Null => write!(f, "null"),
+            Self::Boolean(x) => write!(f, "{}", x),
+            Self::Int8(x) => write!(f, "{}", x),
+            Self::Int16(x) => write!(f, "{}", x),
+            Self::Int32(x) => write!(f, "{}", x),
+            Self::Int64(x) => write!(f, "{}", x),
+            Self::UInt8(x) => write!(f, "{}", x),
+            Self::UInt16(x) => write!(f, "{}", x),
+            Self::UInt32(x) => write!(f, "{}", x),
+            Self::UInt64(x) => write!(f, "{}", x),
+            Self::Float16(x) => write!(f, "{}", x),
+            Self::Float32(x) => write!(f, "{}", x),
+            Self::Float64(x) => write!(f, "{}", x),
+            Self::Decimal128(x) => write!(f, "{}", x),
+            Self::Decimal256(x) => write!(f, "{}", x),
+            Self::Utf8(x) => write!(f, "{}", x),
+            Self::LargeUtf8(x) => write!(f, "{}", x),
+
+            // TODO binary strings are printed as their "debug" version (for now)
+            Self::Binary(x) => write!(f, "{:?}", x),
+            Self::FixedSizeBinary(_len, buf) => write!(f, "{:?}", buf),
+            Self::LargeBinary(x) => write!(f, "{:?}", x),
+
+            // TODO times/dates are printed as their "debug" version (for now)
+            Self::TimestampSecond(x, tz) => write!(f, "Timestamp(s) {:?} ({:?})", x, tz),
+            Self::TimestampMillisecond(x, tz) => write!(f, "Timestamp(ms) {:?} ({:?})", x, tz),
+            Self::TimestampMicrosecond(x, tz) => write!(f, "Timestamp(μs) {:?} ({:?})", x, tz),
+            Self::TimestampNanosecond(x, tz) => write!(f, "Timestamp(ns) {:?} ({:?})", x, tz),
+
+            Self::Time32Second(x) => write!(f, "Time(s) {:?}", x),
+            Self::Time32Millisecond(x) => write!(f, "Time(ms) {:?}", x),
+            Self::Time64Microsecond(x) => write!(f, "Time(μs) {:?}", x),
+            Self::Time64Nanosecond(x) => write!(f, "Time(ns) {:?}", x),
+
+            Self::Date32(x) => write!(f, "Date {:?}", x),
+            Self::Date64(x) => write!(f, "DateTime {:?}", x),
+
+            Self::IntervalYearMonth(x) => write!(f, "YearMonth {:?}", x),
+            Self::IntervalDayTime(x) => write!(f, "DayTime {:?}", x),
+            Self::IntervalMonthDayNano(x) => write!(f, "DayNano {:?}", x),
+
+            // TODO: Implement records without Debug
+            // We don't use the table builder for an individual record just yet, because
+            // we might want to do something more horizontally space efficient.
+            Self::Record(r) => {
+                let schema = r.schema();
+                let values = BTreeMap::from_iter(
+                    (0..schema.len()).map(|i| ((schema[i].name.clone(), r.column(i)))),
+                );
+                write!(f, "{:?}", values)
+            }
+
+            Self::Relation(r) => {
+                let schema = r.schema();
+                let ncols = schema.len();
+                let mut builder = TableBuilder::default();
+                builder.set_columns(schema.iter().map(|f| Cow::Borrowed(f.name.as_str())));
+                for idx in 0..r.num_batches() {
+                    for record in r.batch(idx).records().into_iter() {
+                        builder.add_record(
+                            (0..ncols)
+                                .map(|col_idx| Cow::Owned(format!("{}", record.column(col_idx)))),
+                        );
+                    }
+                }
+
+                let mut table = builder.build();
+                table.with(tabled::style::Style::markdown());
+                write!(f, "{}", table)
+            }
+
+            // TODO: Implement list without Debug
+            Self::List(l) => {
+                write!(f, "{:?}", l.as_vec())
+            }
+
+            // TODO: Implement functions without Debug
+            Self::Fn(v) => {
+                write!(f, "{:?}", v.as_ref())
+            }
+        }
     }
 }

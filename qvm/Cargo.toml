@@ -18,3 +18,4 @@ snafu = { version = "0.7.3" }
 sqlparser = { path = "../sqlparser-rs" }
 tokio = "1.0"
 half = "2.1"
+tabled = "0.10"
