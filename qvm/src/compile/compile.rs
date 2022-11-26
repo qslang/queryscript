@@ -354,7 +354,7 @@ pub fn compile_schema_from_file(compiler: Compiler, file_path: &FilePath) -> Res
         Some(p) => p.to_str().map(|f| f.to_string()),
         None => None,
     };
-    let contents = fs::read_to_string(parsed_path).expect("Unable to read file");
+    let contents = fs::read_to_string(parsed_path)?;
 
     let ast = parse_schema(contents.as_str())?;
 

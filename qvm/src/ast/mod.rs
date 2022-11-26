@@ -1,5 +1,7 @@
 use sqlparser::ast as sqlast;
 
+pub use sqlparser::tokenizer::Location;
+
 pub type Ident = String;
 pub type Path = Vec<Ident>;
 
@@ -83,6 +85,8 @@ pub enum StmtBody {
 pub struct Stmt {
     pub export: bool,
     pub body: StmtBody,
+    pub start: Location,
+    pub end: Location,
 }
 
 #[derive(Clone, Debug)]

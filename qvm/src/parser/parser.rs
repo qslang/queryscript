@@ -8,13 +8,15 @@ use sqlparser::{
 
 pub struct Parser<'a> {
     sqlparser: parser::Parser<'a>,
+    eof: Location,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(tokens: Vec<TokenWithLocation>) -> Parser<'a> {
+    pub fn new(tokens: Vec<TokenWithLocation>, eof: Location) -> Parser<'a> {
         let dialect = &GenericDialect {};
         Parser {
             sqlparser: parser::Parser::new_with_locations(tokens, dialect),
+            eof,
         }
     }
 
@@ -94,6 +96,31 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn start_of_current(&mut self) -> Location {
+        self.peek_token().location
+    }
+
+    fn end_of_current(&mut self) -> Location {
+        let i = self.sqlparser.index;
+        let mut end = self
+            .sqlparser
+            .next_token_no_skip()
+            .unwrap_or(&TokenWithLocation {
+                token: Token::EOF,
+                location: self.eof.clone(),
+            })
+            .location
+            .clone();
+        self.sqlparser.index = i;
+
+        // It's always safe to assume the token immediately following a non-whitespace token is
+        // after the start of the line, since newlines count as tokens.
+        //
+        end.column -= 1;
+
+        return end;
+    }
+
     pub fn parse_schema(&mut self) -> Result<Schema> {
         let mut stmts = Vec::new();
         while !matches!(self.peek_token().token, Token::EOF) {
@@ -104,10 +131,13 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_stmt(&mut self) -> Result<Stmt> {
+        let start = self.start_of_current();
         if self.consume_token(&Token::SemiColon) {
             return Ok(Stmt {
                 export: false,
                 body: StmtBody::Noop,
+                start: start.clone(),
+                end: start.clone(),
             });
         }
 
@@ -128,7 +158,14 @@ impl<'a> Parser<'a> {
             self.parse_expr_stmt()?
         };
 
-        Ok(Stmt { export, body })
+        let end = self.end_of_current();
+
+        Ok(Stmt {
+            export,
+            body,
+            start,
+            end,
+        })
     }
 
     pub fn parse_ident(&mut self) -> Result<Ident> {
@@ -439,7 +476,7 @@ impl<'a> Parser<'a> {
     }
 }
 
-pub fn tokenize(text: &str) -> Result<Vec<TokenWithLocation>> {
+pub fn tokenize(text: &str) -> Result<(Vec<TokenWithLocation>, Location)> {
     let dialect = &GenericDialect {};
     let mut tokenizer = Tokenizer::new(dialect, text);
 
@@ -447,8 +484,8 @@ pub fn tokenize(text: &str) -> Result<Vec<TokenWithLocation>> {
 }
 
 pub fn parse_schema(text: &str) -> Result<Schema> {
-    let tokens = tokenize(text)?;
-    let mut parser = Parser::new(tokens);
+    let (tokens, eof) = tokenize(text)?;
+    let mut parser = Parser::new(tokens, eof);
 
     parser.parse_schema()
 }
