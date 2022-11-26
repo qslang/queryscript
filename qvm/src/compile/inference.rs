@@ -57,7 +57,7 @@ where
 impl<T> Constrainable for Ref<T> where T: Constrainable {}
 
 #[derive(Clone, Debug)]
-pub struct CWrap<T>(T)
+pub struct CWrap<T>(Option<T>)
 where
     T: Clone + fmt::Debug + Send + Sync;
 
@@ -66,11 +66,11 @@ where
     T: Clone + fmt::Debug + Send + Sync + 'static,
 {
     pub fn wrap(t: T) -> CRef<CWrap<T>> {
-        mkcref(CWrap(t))
+        mkcref(CWrap(Some(t)))
     }
 
-    pub fn unwrap(self: CWrap<T>) -> T {
-        self.0
+    pub fn take(self: &mut Self) -> T {
+        self.0.take().unwrap()
     }
 }
 
@@ -78,8 +78,9 @@ pub fn cwrap<T: Clone + fmt::Debug + Send + Sync + 'static>(t: T) -> CRef<CWrap<
     CWrap::wrap(t)
 }
 
-pub fn cunwrap<T: Clone + fmt::Debug + Send + Sync + 'static>(t: Ref<CWrap<T>>) -> T {
-    t.read().unwrap().clone().unwrap()
+pub fn cunwrap<T: Clone + fmt::Debug + Send + Sync + 'static>(t: Ref<CWrap<T>>) -> Result<T> {
+    let mut cref = t.write()?;
+    Ok(cref.take())
 }
 
 impl<T> Constrainable for CWrap<T> where T: Clone + fmt::Debug + Send + Sync {}

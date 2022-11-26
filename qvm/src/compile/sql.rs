@@ -686,7 +686,7 @@ pub fn compile_sqlquery(
             Ok(CTypedExpr {
                 type_,
                 expr: compiler.async_cref(async move {
-                    let (params, body) = cunwrap((&select).await?);
+                    let (params, body) = cunwrap((&select).await?)?;
                     Ok(mkcref(Expr::SQLQuery(Arc::new(SQLQuery {
                         params,
                         query: sqlast::Query {
