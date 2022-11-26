@@ -268,11 +268,11 @@ impl CRef<MType> {
     }
 }
 
-impl<TypeRef> CRef<Expr<CRef<TypeRef>>> 
+impl<T> CRef<T> 
 where
-    TypeRef: Constrainable + 'static,
+    T: Constrainable + 'static,
 {
-    pub async fn clone_inner(&self) -> Result<Expr<CRef<TypeRef>>> {
+    pub async fn clone_inner(&self) -> Result<T> {
         let expr = self.await?;
         let expr = expr.read()?;
         Ok(expr.clone())
