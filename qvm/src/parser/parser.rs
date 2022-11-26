@@ -120,6 +120,8 @@ impl<'a> Parser<'a> {
             self.parse_let()?
         } else if self.consume_keyword("type") {
             self.parse_typedef()?
+        } else if self.consume_keyword("record") {
+            self.parse_record_typedef()?
         } else if self.consume_keyword("import") || export {
             self.parse_import()?
         } else if self.peek_keyword("select") {
@@ -357,6 +359,14 @@ impl<'a> Parser<'a> {
             Type::Struct(_) => {}
             _ => self.expect_eos()?,
         }
+        Ok(StmtBody::TypeDef(NameAndType { name, def }))
+    }
+
+    pub fn parse_record_typedef(&mut self) -> Result<StmtBody> {
+        // Assume the leading keywords have already been consumed
+        //
+        let name = self.parse_ident()?;
+        let def = self.parse_struct()?;
         Ok(StmtBody::TypeDef(NameAndType { name, def }))
     }
 
