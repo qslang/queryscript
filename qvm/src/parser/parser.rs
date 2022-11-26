@@ -120,8 +120,6 @@ impl<'a> Parser<'a> {
             self.parse_let()?
         } else if self.consume_keyword("type") {
             self.parse_typedef()?
-        } else if self.consume_keyword("record") {
-            self.parse_record_typedef()?
         } else if self.consume_keyword("import") || export {
             self.parse_import()?
         } else if self.peek_keyword("select") {
@@ -362,20 +360,12 @@ impl<'a> Parser<'a> {
         Ok(StmtBody::TypeDef(NameAndType { name, def }))
     }
 
-    pub fn parse_record_typedef(&mut self) -> Result<StmtBody> {
-        // Assume the leading keywords have already been consumed
-        //
-        let name = self.parse_ident()?;
-        let def = self.parse_struct()?;
-        Ok(StmtBody::TypeDef(NameAndType { name, def }))
-    }
-
     pub fn parse_type(&mut self) -> Result<Type> {
         let mut type_ = if self.consume_token(&Token::LBracket) {
             let inner = self.parse_type()?;
             self.expect_token(&Token::RBracket)?;
             Type::List(Box::new(inner))
-        } else if self.consume_keyword("record") {
+        } else if self.peek_token().token == Token::LBrace {
             self.parse_struct()?
         } else {
             Type::Reference(self.parse_path()?)
