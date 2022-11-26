@@ -656,6 +656,20 @@ pub fn compile_select(
     Ok((type_, expr))
 }
 
+pub async fn finish_sqlexpr(
+    expr: CRef<Expr<CRef<MType>>>,
+    params: &mut Params<CRef<MType>>,
+) -> Result<sqlast::Expr> {
+    let expr = expr.clone_inner().await?;
+    Ok(match expr {
+        Expr::SQLExpr(e) => {
+            params.extend(e.params.clone().into_iter());
+            e.expr.clone()
+        }
+        _ => return Err(CompileError::unimplemented("Non-SQL expression")),
+    })
+}
+
 pub fn compile_sqlquery(
     compiler: Compiler,
     schema: Ref<Schema>,
@@ -681,9 +695,21 @@ pub fn compile_sqlquery(
         None => None,
     };
 
-    if query.offset.is_some() {
-        return Err(CompileError::unimplemented("OFFSET"));
-    }
+    let offset = match &query.offset {
+        Some(offset) => {
+            let expr = compile_sqlexpr(
+                compiler.clone(),
+                schema.clone(),
+                SQLScope::empty(),
+                &offset.value,
+            )?;
+            expr.type_
+                .unify(&resolve_global_atom(compiler.clone(), "bigint")?)?;
+
+            Some((expr, offset.rows.clone()))
+        }
+        None => None,
+    };
 
     if query.fetch.is_some() {
         return Err(CompileError::unimplemented("FETCH"));
@@ -701,16 +727,15 @@ pub fn compile_sqlquery(
                 expr: compiler.async_cref(async move {
                     let (mut params, body) = cunwrap(select.await?)?;
                     let limit = match limit {
-                        Some(limit) => {
-                            let expr = limit.expr.clone_inner().await?;
-                            match expr {
-                                Expr::SQLExpr(e) => {
-                                    params.extend(e.params.clone().into_iter());
-                                    Some(e.expr.clone())
-                                }
-                                _ => return Err(CompileError::unimplemented("Non-SQL LIMIT")),
-                            }
-                        }
+                        Some(limit) => Some(finish_sqlexpr(limit.expr, &mut params).await?),
+                        None => None,
+                    };
+
+                    let offset = match offset {
+                        Some((offset, rows)) => Some(sqlparser::ast::Offset {
+                            value: finish_sqlexpr(offset.expr, &mut params).await?,
+                            rows,
+                        }),
                         None => None,
                     };
 
@@ -721,7 +746,7 @@ pub fn compile_sqlquery(
                             body,
                             order_by: Vec::new(),
                             limit,
-                            offset: None,
+                            offset,
                             fetch: None,
                             lock: None,
                         },
