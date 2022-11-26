@@ -1,9 +1,11 @@
 use clap::Parser;
 use snafu::whatever;
 use snafu::ErrorCompat;
+use std::fs;
 use std::path::Path;
 
 use qvm::compile;
+use qvm::parser;
 use qvm::runtime;
 use qvm::QVMError;
 
@@ -19,7 +21,16 @@ struct Cli {
     compile: bool,
 
     #[arg(short, long, default_value_t = false)]
+    parse: bool,
+
+    #[arg(short, long, default_value_t = false)]
     verbose: bool,
+}
+
+enum Mode {
+    Execute,
+    Compile,
+    Parse,
 }
 
 fn main() {
@@ -30,8 +41,21 @@ fn main() {
 
     let rt = runtime::build().expect("Failed to build runtime");
 
+    if cli.compile && cli.parse {
+        eprintln!("Cannot run with --compile and --parse");
+        return;
+    }
+
+    let mode = if cli.compile {
+        Mode::Compile
+    } else if cli.parse {
+        Mode::Parse
+    } else {
+        Mode::Execute
+    };
+
     match cli.file {
-        Some(file) => match run_file(&rt, &file, cli.compile) {
+        Some(file) => match run_file(&rt, &file, mode) {
             Err(err) => {
                 eprintln!("{}", err);
                 if cli.verbose {
@@ -47,21 +71,37 @@ fn main() {
                 eprintln!("Cannot run with compile-only mode (--compile) in the repl");
                 return;
             }
+            if cli.parse {
+                eprintln!("Cannot run with parse-only mode (--parse) in the repl");
+                return;
+            }
             crate::repl::run(&rt);
         }
     }
 }
 
-fn run_file(rt: &runtime::Runtime, file: &str, compile_only: bool) -> Result<(), QVMError> {
+fn run_file(rt: &runtime::Runtime, file: &str, mode: Mode) -> Result<(), QVMError> {
     let path = Path::new(&file);
     if !path.exists() {
         whatever!("Path {:?} does not exist", path);
     }
 
+    if matches!(mode, Mode::Parse) {
+        let contents = match fs::read_to_string(path) {
+            Ok(p) => p,
+            Err(e) => whatever!("{}", e),
+        };
+        let (tokens, eof) = parser::tokenize(&contents)?;
+        let mut parser = parser::Parser::new(tokens, eof);
+        let schema = parser.parse_schema()?;
+        println!("{:#?}", schema);
+        return Ok(());
+    }
+
     let compiler = compile::Compiler::new()?;
     let schema = compiler.compile_schema_from_file(&Path::new(&file))?;
 
-    if compile_only {
+    if matches!(mode, Mode::Compile) {
         println!("{:#?}", schema);
         return Ok(());
     }
