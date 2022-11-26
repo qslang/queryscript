@@ -24,7 +24,7 @@ pub enum StructEntry {
 }
 
 #[derive(Clone, Debug)]
-pub enum Type {
+pub enum TypeBody {
     Reference(Path),
     Struct(Vec<StructEntry>),
     List(Box<Type>),
@@ -32,6 +32,13 @@ pub enum Type {
         inner: Box<Type>,
         excluded: Vec<Ident>,
     },
+}
+
+#[derive(Clone, Debug)]
+pub struct Type {
+    pub body: TypeBody,
+    pub start: Location,
+    pub end: Location,
 }
 
 #[derive(Clone, Debug)]

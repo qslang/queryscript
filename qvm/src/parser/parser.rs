@@ -402,36 +402,44 @@ impl<'a> Parser<'a> {
         //
         let name = self.parse_ident()?;
         let def = self.parse_type()?;
-        match def {
-            Type::Struct(_) => {}
+        match def.body {
+            TypeBody::Struct(_) => {}
             _ => self.expect_eos()?,
         }
         Ok(StmtBody::TypeDef(NameAndType { name, def }))
     }
 
     pub fn parse_type(&mut self) -> Result<Type> {
-        let mut type_ = if self.consume_token(&Token::LBracket) {
+        let start = self.start_of_current();
+        let mut body = if self.consume_token(&Token::LBracket) {
             let inner = self.parse_type()?;
             self.expect_token(&Token::RBracket)?;
-            Type::List(Box::new(inner))
+            TypeBody::List(Box::new(inner))
         } else if self.peek_token().token == Token::LBrace {
             self.parse_struct()?
         } else {
-            Type::Reference(self.parse_path()?)
+            TypeBody::Reference(self.parse_path()?)
         };
 
         if self.consume_keyword("exclude") {
             let excluded = self.parse_idents()?;
-            type_ = Type::Exclude {
-                inner: Box::new(type_),
+            let end = self.end_of_current();
+            body = TypeBody::Exclude {
+                inner: Box::new(Type {
+                    body,
+                    start: start.clone(),
+                    end,
+                }),
                 excluded,
             };
         }
 
-        Ok(type_)
+        let end = self.end_of_current();
+
+        Ok(Type { body, start, end })
     }
 
-    pub fn parse_struct(&mut self) -> Result<Type> {
+    pub fn parse_struct(&mut self) -> Result<TypeBody> {
         self.expect_token(&Token::LBrace)?;
         let mut struct_ = Vec::new();
         let mut needs_comma = false;
@@ -473,7 +481,7 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        Ok(Type::Struct(struct_))
+        Ok(TypeBody::Struct(struct_))
     }
 
     pub fn parse_expr(&mut self) -> Result<Expr> {

@@ -198,8 +198,8 @@ pub fn resolve_type(
     schema: Ref<Schema>,
     ast: &ast::Type,
 ) -> Result<CRef<MType>> {
-    match ast {
-        ast::Type::Reference(path) => {
+    match &ast.body {
+        ast::TypeBody::Reference(path) => {
             let (decl, r) = lookup_path(
                 compiler.clone(),
                 schema.clone(),
@@ -217,7 +217,7 @@ pub fn resolve_type(
 
             Ok(t)
         }
-        ast::Type::Struct(entries) => {
+        ast::TypeBody::Struct(entries) => {
             let mut fields = Vec::new();
             let mut seen = BTreeSet::new();
             for e in entries {
@@ -241,8 +241,12 @@ pub fn resolve_type(
 
             Ok(mkcref(MType::Record(fields)))
         }
-        ast::Type::List(inner) => Ok(mkcref(MType::List(resolve_type(compiler, schema, inner)?))),
-        ast::Type::Exclude { .. } => {
+        ast::TypeBody::List(inner) => Ok(mkcref(MType::List(resolve_type(
+            compiler,
+            schema,
+            inner.as_ref(),
+        )?))),
+        ast::TypeBody::Exclude { .. } => {
             return Err(CompileError::unimplemented("Struct exclusions"));
         }
     }
@@ -252,7 +256,11 @@ pub fn resolve_global_atom(compiler: Compiler, name: &str) -> Result<CRef<MType>
     resolve_type(
         compiler,
         GLOBAL_SCHEMA.clone(),
-        &ast::Type::Reference(vec![name.to_string()]),
+        &ast::Type {
+            body: ast::TypeBody::Reference(vec![name.to_string()]),
+            start: ast::Location { line: 0, column: 0 },
+            end: ast::Location { line: 0, column: 0 },
+        },
     )
 }
 
