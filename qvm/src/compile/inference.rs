@@ -78,12 +78,8 @@ pub fn cwrap<T: Clone + fmt::Debug + Send + Sync + 'static>(t: T) -> CRef<CWrap<
     CWrap::wrap(t)
 }
 
-pub fn cunwrap<T: Clone + fmt::Debug + Send + Sync + 'static>(t: CRef<CWrap<T>>) -> T {
-    Arc::try_unwrap(t.must().unwrap())
-        .unwrap()
-        .into_inner()
-        .unwrap()
-        .unwrap()
+pub fn cunwrap<T: Clone + fmt::Debug + Send + Sync + 'static>(t: Ref<CWrap<T>>) -> T {
+    t.read().unwrap().clone().unwrap()
 }
 
 impl<T> Constrainable for CWrap<T> where T: Clone + fmt::Debug + Send + Sync {}
