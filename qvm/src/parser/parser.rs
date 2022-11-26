@@ -372,17 +372,29 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_query(&mut self) -> Result<StmtBody> {
+        let start = self.start_of_current();
         let query = wrap_sql_eof(self.sqlparser.parse_query())?;
         self.expect_eos()?;
+        let end = self.end_of_current();
 
-        Ok(StmtBody::Expr(Expr::SQLQuery(query)))
+        Ok(StmtBody::Expr(Expr {
+            body: ExprBody::SQLQuery(query),
+            start,
+            end,
+        }))
     }
 
     pub fn parse_expr_stmt(&mut self) -> Result<StmtBody> {
+        let start = self.start_of_current();
         let expr = wrap_sql_eof(self.sqlparser.parse_expr())?;
         self.expect_eos()?;
+        let end = self.end_of_current();
 
-        Ok(StmtBody::Expr(Expr::SQLExpr(expr)))
+        Ok(StmtBody::Expr(Expr {
+            body: ExprBody::SQLExpr(expr),
+            start,
+            end,
+        }))
     }
 
     pub fn parse_typedef(&mut self) -> Result<StmtBody> {
@@ -465,13 +477,30 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_expr(&mut self) -> Result<Expr> {
+        let start = self.start_of_current();
         Ok(match self.peek_token().token {
             Token::Word(Word {
                 value: _,
                 quote_style: _,
                 keyword: Keyword::SELECT | Keyword::WITH,
-            }) => Expr::SQLQuery(self.sqlparser.parse_query()?),
-            _ => Expr::SQLExpr(self.sqlparser.parse_expr()?),
+            }) => {
+                let query = self.sqlparser.parse_query()?;
+                let end = self.end_of_current();
+                Expr {
+                    body: ExprBody::SQLQuery(query),
+                    start,
+                    end,
+                }
+            }
+            _ => {
+                let expr = self.sqlparser.parse_expr()?;
+                let end = self.end_of_current();
+                Expr {
+                    body: ExprBody::SQLExpr(expr),
+                    start,
+                    end,
+                }
+            }
         })
     }
 }

@@ -316,9 +316,9 @@ pub fn compile_expr(
     schema: Ref<Schema>,
     expr: &ast::Expr,
 ) -> Result<CTypedExpr> {
-    match expr {
-        ast::Expr::SQLQuery(q) => Ok(compile_sqlquery(compiler.clone(), schema.clone(), q)?),
-        ast::Expr::SQLExpr(e) => {
+    match &expr.body {
+        ast::ExprBody::SQLQuery(q) => Ok(compile_sqlquery(compiler.clone(), schema.clone(), q)?),
+        ast::ExprBody::SQLExpr(e) => {
             let scope = mkref(SQLScope::new(None));
             Ok(compile_sqlexpr(compiler.clone(), schema.clone(), scope, e)?)
         }
