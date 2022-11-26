@@ -282,28 +282,38 @@ impl<T: 'static + Constrainable> CRef<T> {
     }
 }
 
-impl<T: Constrainable + 'static> Future for &CRef<T> {
-    type Output = Result<Ref<T>>;
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match || -> Result<_> {
-            let canon = self.find()?;
-            let mut guard = canon.write()?;
-            match &mut *guard {
-                Constrained::Known(t) => Ok(Poll::Ready(Ok(t.clone()))),
-                Constrained::Unknown { constraints, .. } => {
-                    let waker = cx.waker().clone();
-                    constraints.push(mkref(move |_: Ref<T>| {
-                        let waker = waker.clone();
-                        waker.wake();
-                        Ok(())
-                    }));
-                    Ok(Poll::Pending)
+macro_rules! ConstrainableImpl {
+    () => {
+        type Output = Result<Ref<T>>;
+        fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            match || -> Result<_> {
+                let canon = self.find()?;
+                let mut guard = canon.write()?;
+                match &mut *guard {
+                    Constrained::Known(t) => Ok(Poll::Ready(Ok(t.clone()))),
+                    Constrained::Unknown { constraints, .. } => {
+                        let waker = cx.waker().clone();
+                        constraints.push(mkref(move |_: Ref<T>| {
+                            let waker = waker.clone();
+                            waker.wake();
+                            Ok(())
+                        }));
+                        Ok(Poll::Pending)
+                    }
+                    _ => panic!("Canon value should never be a ref"),
                 }
-                _ => panic!("Canon value should never be a ref"),
+            }() {
+                Ok(p) => p,
+                Err(e) => return Poll::Ready(Err(e)),
             }
-        }() {
-            Ok(p) => p,
-            Err(e) => return Poll::Ready(Err(e)),
         }
     }
+}
+
+impl<T: Constrainable + 'static> Future for &CRef<T> {
+    ConstrainableImpl!();
+}
+
+impl<T: Constrainable + 'static> Future for CRef<T> {
+    ConstrainableImpl!();
 }

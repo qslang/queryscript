@@ -268,6 +268,17 @@ impl CRef<MType> {
     }
 }
 
+impl<TypeRef> CRef<Expr<CRef<TypeRef>>> 
+where
+    TypeRef: Constrainable + 'static,
+{
+    pub async fn clone_inner(&self) -> Result<Expr<CRef<TypeRef>>> {
+        let expr = self.await?;
+        let expr = expr.read()?;
+        Ok(expr.clone())
+    }
+}
+
 pub type Ref<T> = Arc<RwLock<T>>;
 
 #[derive(Clone)]

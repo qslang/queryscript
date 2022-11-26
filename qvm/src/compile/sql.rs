@@ -50,6 +50,7 @@ impl Constrainable for NameAndSQLExpr {}
 impl Constrainable for CTypedNameAndSQLExpr {}
 impl Constrainable for CTypedSQLExpr {}
 impl Constrainable for CTypedSQLQuery {}
+impl Constrainable for CTypedExpr {}
 
 pub fn get_rowtype(compiler: Compiler, relation: CRef<MType>) -> Result<CRef<MType>> {
     Ok(compiler.async_cref(async move {
@@ -323,6 +324,10 @@ impl SQLScope {
         }
     }
 
+    pub fn empty() -> Ref<SQLScope> {
+        mkref(Self::new(None))
+    }
+
     pub fn get_available_references(
         &self,
         compiler: Compiler,
@@ -427,7 +432,7 @@ pub fn compile_select(
         return Err(CompileError::unimplemented("QUALIFY"));
     }
 
-    let scope = mkref(SQLScope::new(None));
+    let scope = SQLScope::empty();
     match select.from.len() {
         0 => {}
         1 => {
@@ -603,7 +608,7 @@ pub fn compile_select(
 
     let select = select.clone();
     let expr: CRef<_> = compiler.async_cref(async move {
-        let exprs = (&projections).await?;
+        let exprs = projections.await?;
         let mut proj_exprs = Vec::new();
         let exprs = (*exprs.read()?).clone();
         for a in exprs {
@@ -612,7 +617,7 @@ pub fn compile_select(
                 let n = b.name.clone();
                 proj_exprs.push(NameAndSQLExpr {
                     name: n.clone(),
-                    expr: Arc::new((&b.expr).await?.read()?.clone()),
+                    expr: Arc::new(b.expr.await?.read()?.clone()),
                 });
             }
         }
@@ -664,9 +669,17 @@ pub fn compile_sqlquery(
         return Err(CompileError::unimplemented("ORDER BY"));
     }
 
-    if query.limit.is_some() {
-        return Err(CompileError::unimplemented("LIMIT"));
-    }
+    let limit = match &query.limit {
+        Some(limit) => {
+            let expr =
+                compile_sqlexpr(compiler.clone(), schema.clone(), SQLScope::empty(), &limit)?;
+            expr.type_
+                .unify(&resolve_global_atom(compiler.clone(), "bigint")?)?;
+
+            Some(expr)
+        }
+        None => None,
+    };
 
     if query.offset.is_some() {
         return Err(CompileError::unimplemented("OFFSET"));
@@ -686,14 +699,28 @@ pub fn compile_sqlquery(
             Ok(CTypedExpr {
                 type_,
                 expr: compiler.async_cref(async move {
-                    let (params, body) = cunwrap((&select).await?)?;
+                    let (mut params, body) = cunwrap(select.await?)?;
+                    let limit = match limit {
+                        Some(limit) => {
+                            let expr = limit.expr.clone_inner().await?;
+                            match expr {
+                                Expr::SQLExpr(e) => {
+                                    params.extend(e.params.clone().into_iter());
+                                    Some(e.expr.clone())
+                                }
+                                _ => return Err(CompileError::unimplemented("Non-SQL LIMIT")),
+                            }
+                        }
+                        None => None,
+                    };
+
                     Ok(mkcref(Expr::SQLQuery(Arc::new(SQLQuery {
                         params,
                         query: sqlast::Query {
                             with: None,
                             body,
                             order_by: Vec::new(),
-                            limit: None,
+                            limit,
                             offset: None,
                             fetch: None,
                             lock: None,
