@@ -11,7 +11,7 @@ use std::task::{Context, Poll};
 
 pub trait Constrainable: Clone + fmt::Debug + Send + Sync {
     fn unify(&self, other: &Self) -> Result<()> {
-        return Err(CompileError::internal(
+        Err(CompileError::internal(
             format!(
                 "{} cannot be unified:\n{:#?}\n{:#?}",
                 std::any::type_name::<Self>(),
@@ -19,7 +19,22 @@ pub trait Constrainable: Clone + fmt::Debug + Send + Sync {
                 other
             )
             .as_str(),
-        ));
+        ))
+    }
+
+    fn coerce(
+        left: &Ref<Self>,
+        right: &Ref<Self>,
+    ) -> Result<(Option<Ref<Self>>, Option<Ref<Self>>)> {
+        Err(CompileError::internal(
+            format!(
+                "{} cannot be coerced:\n{:#?}\n{:#?}",
+                std::any::type_name::<Self>(),
+                left,
+                right,
+            )
+            .as_str(),
+        ))
     }
 }
 
@@ -216,6 +231,32 @@ impl<T: 'static + Constrainable> CRef<T> {
         Ok(())
     }
 
+    pub fn coerce(&self, other: &CRef<T>) -> Result<(Option<Ref<T>>, Option<Ref<T>>)> {
+        match self.unify(other) {
+            Ok(()) => Ok((None, None)),
+            Err(CompileError::WrongType {
+                lhs,
+                rhs,
+                backtrace,
+            }) => {
+                let left = self.find()?;
+                let right = other.find()?;
+                if !left.is_known()? || !right.is_known()? {
+                    return Err(CompileError::WrongType {
+                        lhs,
+                        rhs,
+                        backtrace,
+                    });
+                }
+                let left = left.must()?;
+                let right = right.must()?;
+
+                Constrainable::coerce(&left, &right)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     // Private methods
     //
     fn add_constraint(&self, constraint: Ref<dyn Constraint<T>>) -> Result<()> {
@@ -307,7 +348,7 @@ macro_rules! ConstrainableImpl {
                 Err(e) => return Poll::Ready(Err(e)),
             }
         }
-    }
+    };
 }
 
 impl<T: Constrainable + 'static> Future for &CRef<T> {

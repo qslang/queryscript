@@ -31,6 +31,7 @@ pub async fn eval(
 
     let mut ctes = HashMap::new(); // We may eventually want to parse/support these
     let plan = sql_to_rel.query_to_plan(query.clone(), &mut ctes)?;
+    eprintln!("PLAN: {:#?}", plan);
     let plan = ctx.optimize(&plan)?;
 
     let records = execute_plan(&ctx, &plan).await?;

@@ -1,6 +1,9 @@
 pub use datafusion::arrow::datatypes::{
     DataType as ArrowDataType, Field as ArrowField, IntervalUnit, Schema as ArrowSchema, TimeUnit,
 };
+use sqlparser::ast::{
+    DataType as ParserDataType, ExactNumberInfo as ParserNumberInfo, TimezoneInfo as ParserTz,
+};
 
 use super::error::{ts_fail, ts_unimplemented, Result};
 use crate::ast;
@@ -323,6 +326,56 @@ impl TryInto<ArrowDataType> for &Type {
                 true,
             ))),
             Fn(_) => return ts_fail!("Arrow does not support function types"),
+        })
+    }
+}
+
+// NOTE: Arrow supports the opposite conversion (ArrowDataType -> ParserDataType)
+// in the convert_simple_data_type() function
+impl TryInto<ParserDataType> for &Type {
+    type Error = super::error::TypesystemError;
+
+    fn try_into(self) -> Result<ParserDataType> {
+        use AtomicType::*;
+        use Type::*;
+        Ok(match self {
+            Atom(Null) => return ts_fail!("Parser does not support NULL type"),
+            Atom(Boolean) => ParserDataType::Boolean,
+            Atom(Int8) => ParserDataType::TinyInt(None),
+            Atom(Int16) => ParserDataType::SmallInt(None),
+            Atom(Int32) => ParserDataType::Int(None),
+            Atom(Int64) => ParserDataType::BigInt(None),
+            Atom(UInt8) => ParserDataType::UnsignedTinyInt(None),
+            Atom(UInt16) => ParserDataType::UnsignedSmallInt(None),
+            Atom(UInt32) => ParserDataType::UnsignedInt(None),
+            Atom(UInt64) => ParserDataType::UnsignedBigInt(None),
+
+            // The parser data types do not support Float16
+            Atom(Float16) => ParserDataType::Float(None),
+            Atom(Float32) => ParserDataType::Float(None),
+            Atom(Float64) => ParserDataType::Double,
+            Atom(Timestamp(_tu, tz)) => {
+                ParserDataType::Timestamp(tz.as_ref().map_or(ParserTz::None, |_| ParserTz::Tz))
+            }
+            Atom(Date32) => ParserDataType::Date,
+            Atom(Date64) => ParserDataType::Datetime,
+            Atom(Time32(_)) => ParserDataType::Time(ParserTz::None),
+            Atom(Time64(_)) => ParserDataType::Time(ParserTz::None),
+            Atom(Interval(_)) => ParserDataType::Interval,
+            Atom(Binary) => ParserDataType::Varbinary(None),
+            Atom(FixedSizeBinary(len)) => ParserDataType::Binary(Some(*len as u64)),
+            Atom(LargeBinary) => ParserDataType::Varbinary(None),
+            Atom(Utf8) => ParserDataType::String,
+            Atom(LargeUtf8) => ParserDataType::String,
+            Atom(Decimal128(p, s)) => {
+                ParserDataType::Decimal(ParserNumberInfo::PrecisionAndScale(*p as u64, *s as u64))
+            }
+            Atom(Decimal256(p, s)) => {
+                ParserDataType::Decimal(ParserNumberInfo::PrecisionAndScale(*p as u64, *s as u64))
+            }
+            List(_data_type) => return ts_fail!("Parser does not support list types"),
+            Record(_) => return ts_fail!("Parser does not support record types"),
+            Fn(_) => return ts_fail!("Parser does not support function types"),
         })
     }
 }

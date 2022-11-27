@@ -315,9 +315,14 @@ impl fmt::Display for Value {
             Self::UInt16(x) => write!(f, "{}", x),
             Self::UInt32(x) => write!(f, "{}", x),
             Self::UInt64(x) => write!(f, "{}", x),
-            Self::Float16(x) => write!(f, "{}", x),
-            Self::Float32(x) => write!(f, "{}", x),
-            Self::Float64(x) => write!(f, "{}", x),
+
+            // Float types print integer values for exact numbers with {},
+            // e.g. 1.0 will print 1. This is confusing because you don't know
+            // if it's a float or not. The debug version prints 1.0 though...
+            Self::Float16(x) => write!(f, "{:?}", x),
+            Self::Float32(x) => write!(f, "{:?}", x),
+            Self::Float64(x) => write!(f, "{:?}", x),
+
             Self::Decimal128(x) => write!(f, "{}", x),
             Self::Decimal256(x) => write!(f, "{}", x),
             Self::Utf8(x) => write!(f, "{}", x),

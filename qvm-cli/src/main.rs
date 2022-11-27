@@ -111,7 +111,7 @@ fn run_file(rt: &runtime::Runtime, file: &str, mode: Mode) -> Result<(), QVMErro
     for expr in locked_schema.exprs.iter() {
         let expr = expr.to_runtime_type()?;
         let value = rt.block_on(async { runtime::eval(&ctx, &expr).await })?;
-        println!("{:?}", value);
+        println!("{}", value);
     }
 
     Ok(())

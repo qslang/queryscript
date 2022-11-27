@@ -90,6 +90,13 @@ pub enum CompileError {
         backtrace: Option<Backtrace>,
     },
 
+    #[snafu(display("Types cannot be coerced: {:?} and {:?}", lhs, rhs))]
+    CoercionError {
+        lhs: MType,
+        rhs: MType,
+        backtrace: Option<Backtrace>,
+    },
+
     #[snafu(display("Error importing {:?}: {}", path, what))]
     ImportError {
         path: ast::Path,
@@ -126,6 +133,14 @@ impl CompileError {
 
     pub fn wrong_type(lhs: &MType, rhs: &MType) -> CompileError {
         return WrongTypeSnafu {
+            lhs: lhs.clone(),
+            rhs: rhs.clone(),
+        }
+        .build();
+    }
+
+    pub fn coercion(lhs: &MType, rhs: &MType) -> CompileError {
+        return CoercionSnafu {
             lhs: lhs.clone(),
             rhs: rhs.clone(),
         }

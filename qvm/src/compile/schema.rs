@@ -231,6 +231,33 @@ impl Constrainable for MType {
 
         Ok(())
     }
+
+    fn coerce(
+        left: &Ref<Self>,
+        right: &Ref<Self>,
+    ) -> Result<(Option<Ref<Self>>, Option<Ref<Self>>)> {
+        let left_type = left.read()?;
+        let right_type = right.read()?;
+
+        match (&*left_type, &*right_type) {
+            (MType::Atom(aleft), MType::Atom(aright)) => {
+                if *aleft == AtomicType::Int64 && *aright == AtomicType::Float64 {
+                    Ok((Some(right.clone()), None))
+                } else {
+                    Err(CompileError::coercion(&*left_type, &*right_type))
+                }
+            }
+            _ => Err(CompileError::internal(
+                format!(
+                    "{} cannot be coerced:\n{:#?}\n{:#?}",
+                    std::any::type_name::<Self>(),
+                    left,
+                    right
+                )
+                .as_str(),
+            )),
+        }
+    }
 }
 
 impl Constrainable for Vec<MField> {
@@ -268,7 +295,7 @@ impl CRef<MType> {
     }
 }
 
-impl<T> CRef<T> 
+impl<T> CRef<T>
 where
     T: Constrainable + 'static,
 {

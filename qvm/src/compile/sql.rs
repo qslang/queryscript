@@ -4,7 +4,7 @@ use crate::compile::inference::*;
 use crate::compile::schema::*;
 use crate::types::{number::parse_numeric_type, AtomicType};
 use lazy_static::lazy_static;
-use sqlparser::ast as sqlast;
+use sqlparser::{ast as sqlast, ast::DataType as ParserDataType};
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -775,6 +775,29 @@ lazy_static! {
     };
 }
 
+fn apply_sqlcast(
+    compiler: &Compiler,
+    expr: CTypedSQLExpr,
+    target_type: Ref<MType>,
+) -> Result<CTypedSQLExpr> {
+    let target_type = target_type.read()?;
+    let dt: ParserDataType = (&target_type.to_runtime_type()?).try_into()?;
+
+    Ok(CTypedSQLExpr {
+        type_: mkcref(target_type.clone()),
+        expr: compiler.async_cref(async move {
+            let final_expr = expr.expr.clone_inner().await?;
+            Ok(mkcref(SQLExpr {
+                params: final_expr.params,
+                expr: sqlast::Expr::Cast {
+                    expr: Box::new(final_expr.expr),
+                    data_type: dt,
+                },
+            }))
+        })?,
+    })
+}
+
 pub fn compile_sqlexpr(
     compiler: Compiler,
     schema: Ref<Schema>,
@@ -842,21 +865,32 @@ pub fn compile_sqlexpr(
             let op = op.clone();
             let left = left.clone();
             let right = right.clone();
-            let cleft = compile_sqlarg(
+            let mut cleft = compile_sqlarg(
                 compiler.clone(),
                 schema.clone(),
                 scope.clone(),
                 left.as_ref(),
             )?;
-            let cright = compile_sqlarg(
+            let mut cright = compile_sqlarg(
                 compiler.clone(),
                 schema.clone(),
                 scope.clone(),
                 right.as_ref(),
             )?;
+            use sqlast::BinaryOperator::*;
             let type_ = match op {
-                sqlast::BinaryOperator::Plus => {
-                    cleft.type_.unify(&cright.type_)?;
+                Plus | Minus | Multiply | Divide => {
+                    eprintln!("types: {:?} {:?}", cleft.type_, cright.type_);
+                    let (cast_left, cast_right) = cleft.type_.coerce(&cright.type_)?;
+                    cleft = match cast_left {
+                        Some(c) => apply_sqlcast(&compiler, cleft, c)?,
+                        None => cleft,
+                    };
+                    cright = match cast_right {
+                        Some(c) => apply_sqlcast(&compiler, cright, c)?,
+                        None => cright,
+                    };
+
                     cleft.type_
                 }
                 _ => {
