@@ -914,10 +914,9 @@ pub fn compile_sqlexpr(
             use sqlast::BinaryOperator::*;
             let type_ = match op {
                 Plus | Minus | Multiply | Divide => {
-                    eprintln!("types: {:?} {:?}", cleft.type_, cright.type_);
                     let casts = coerce(
                         compiler.clone(),
-                        &op,
+                        op.clone(),
                         cleft.type_.clone(),
                         cright.type_.clone(),
                     )?;

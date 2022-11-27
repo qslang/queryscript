@@ -38,7 +38,6 @@ pub fn eval<'a>(
     typed_expr: &'a schema::TypedExpr<TypeRef>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>> + 'a>> {
     Box::pin(async move {
-        eprintln!("TYPE: {:#?}", typed_expr.type_);
         match &*typed_expr.expr.as_ref() {
             schema::Expr::Unknown => {
                 return Err(RuntimeError::new("unresolved extern"));
