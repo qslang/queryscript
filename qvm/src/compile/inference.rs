@@ -25,7 +25,7 @@ pub trait Constrainable: Clone + fmt::Debug + Send + Sync {
     fn coerce(
         left: &Ref<Self>,
         right: &Ref<Self>,
-    ) -> Result<(Option<Ref<Self>>, Option<Ref<Self>>)> {
+    ) -> Result<(Option<CRef<Self>>, Option<CRef<Self>>)> {
         Err(CompileError::internal(
             format!(
                 "{} cannot be coerced:\n{:#?}\n{:#?}",
@@ -86,6 +86,12 @@ where
 
     pub fn take(self: &mut Self) -> T {
         self.0.take().unwrap()
+    }
+
+    pub async fn clone_inner(cref: &CRef<CWrap<T>>) -> Result<T> {
+        let resolved = cref.await?;
+        let unlocked = resolved.read()?;
+        Ok(unlocked.0.as_ref().unwrap().clone())
     }
 }
 
@@ -229,32 +235,6 @@ impl<T: 'static + Constrainable> CRef<T> {
         }
 
         Ok(())
-    }
-
-    pub fn coerce(&self, other: &CRef<T>) -> Result<(Option<Ref<T>>, Option<Ref<T>>)> {
-        match self.unify(other) {
-            Ok(()) => Ok((None, None)),
-            Err(CompileError::WrongType {
-                lhs,
-                rhs,
-                backtrace,
-            }) => {
-                let left = self.find()?;
-                let right = other.find()?;
-                if !left.is_known()? || !right.is_known()? {
-                    return Err(CompileError::WrongType {
-                        lhs,
-                        rhs,
-                        backtrace,
-                    });
-                }
-                let left = left.must()?;
-                let right = right.must()?;
-
-                Constrainable::coerce(&left, &right)
-            }
-            Err(e) => Err(e),
-        }
     }
 
     // Private methods

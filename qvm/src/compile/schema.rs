@@ -235,14 +235,14 @@ impl Constrainable for MType {
     fn coerce(
         left: &Ref<Self>,
         right: &Ref<Self>,
-    ) -> Result<(Option<Ref<Self>>, Option<Ref<Self>>)> {
+    ) -> Result<(Option<CRef<Self>>, Option<CRef<Self>>)> {
         let left_type = left.read()?;
         let right_type = right.read()?;
 
         match (&*left_type, &*right_type) {
             (MType::Atom(aleft), MType::Atom(aright)) => {
                 if *aleft == AtomicType::Int64 && *aright == AtomicType::Float64 {
-                    Ok((Some(right.clone()), None))
+                    Ok((Some(mkcref((&*right_type).clone())), None))
                 } else {
                     Err(CompileError::coercion(&*left_type, &*right_type))
                 }

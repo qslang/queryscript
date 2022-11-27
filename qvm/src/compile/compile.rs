@@ -772,3 +772,20 @@ pub fn gather_schema_externs(schema: Ref<Schema>) -> Result<()> {
 
     Ok(())
 }
+
+pub fn coerce<T: Constrainable + 'static>(
+    compiler: Compiler,
+    left: CRef<T>,
+    right: CRef<T>,
+) -> Result<CRef<CWrap<(Option<CRef<T>>, Option<CRef<T>>)>>> {
+    match left.unify(&right) {
+        Ok(()) => Ok(cwrap((None, None))),
+        Err(CompileError::WrongType { .. }) => compiler.async_cref(async move {
+            let left = left.await?;
+            let right = right.await?;
+
+            Ok(cwrap(Constrainable::coerce(&left, &right)?))
+        }),
+        Err(e) => Err(e),
+    }
+}

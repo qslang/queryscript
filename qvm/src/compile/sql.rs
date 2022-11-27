@@ -1,4 +1,4 @@
-use crate::compile::compile::{lookup_path, resolve_global_atom, typecheck_path, Compiler};
+use crate::compile::compile::{coerce, lookup_path, resolve_global_atom, typecheck_path, Compiler};
 use crate::compile::error::{CompileError, Result};
 use crate::compile::inference::*;
 use crate::compile::schema::*;
@@ -776,26 +776,78 @@ lazy_static! {
 }
 
 fn apply_sqlcast(
-    compiler: &Compiler,
-    expr: CTypedSQLExpr,
+    compiler: Compiler,
+    expr: CRef<SQLExpr<CRef<MType>>>,
     target_type: Ref<MType>,
-) -> Result<CTypedSQLExpr> {
+) -> Result<CRef<SQLExpr<CRef<MType>>>> {
     let target_type = target_type.read()?;
     let dt: ParserDataType = (&target_type.to_runtime_type()?).try_into()?;
 
-    Ok(CTypedSQLExpr {
-        type_: mkcref(target_type.clone()),
-        expr: compiler.async_cref(async move {
-            let final_expr = expr.expr.clone_inner().await?;
-            Ok(mkcref(SQLExpr {
-                params: final_expr.params,
-                expr: sqlast::Expr::Cast {
-                    expr: Box::new(final_expr.expr),
-                    data_type: dt,
-                },
-            }))
+    Ok(compiler.async_cref(async move {
+        let final_expr = expr.clone_inner().await?;
+        Ok(mkcref(SQLExpr {
+            params: final_expr.params,
+            expr: sqlast::Expr::Cast {
+                expr: Box::new(final_expr.expr),
+                data_type: dt,
+            },
+        }))
+    })?)
+}
+
+fn apply_coerce_casts(
+    compiler: Compiler,
+    left: CTypedSQLExpr,
+    right: CTypedSQLExpr,
+    targets: CRef<CWrap<(Option<CRef<MType>>, Option<CRef<MType>>)>>,
+) -> Result<(CTypedSQLExpr, CTypedSQLExpr)> {
+    let targets1 = targets.clone();
+    let targets2 = targets.clone();
+    let compiler2 = compiler.clone();
+
+    let left = CTypedSQLExpr {
+        type_: compiler.clone().async_cref(async move {
+            let resolved_targets = CWrap::clone_inner(&targets1).await?;
+
+            Ok(match resolved_targets.0 {
+                Some(cast) => cast.clone(),
+                None => left.type_.clone(),
+            })
         })?,
-    })
+        expr: compiler.clone().async_cref(async move {
+            let resolved_targets = CWrap::clone_inner(&targets2).await?;
+
+            Ok(match resolved_targets.0 {
+                Some(cast) => apply_sqlcast(compiler2, left.expr.clone(), cast.await?)?,
+                None => left.expr,
+            })
+        })?,
+    };
+
+    let targets1 = targets.clone();
+    let targets2 = targets.clone();
+    let compiler2 = compiler.clone();
+
+    let right = CTypedSQLExpr {
+        type_: compiler.clone().async_cref(async move {
+            let resolved_targets = CWrap::clone_inner(&targets1).await?;
+
+            Ok(match resolved_targets.1 {
+                Some(cast) => cast.clone(),
+                None => right.type_.clone(),
+            })
+        })?,
+        expr: compiler.clone().async_cref(async move {
+            let resolved_targets = CWrap::clone_inner(&targets2).await?;
+
+            Ok(match resolved_targets.1 {
+                Some(cast) => apply_sqlcast(compiler2, right.expr.clone(), cast.await?)?,
+                None => right.expr,
+            })
+        })?,
+    };
+
+    Ok((left, right))
 }
 
 pub fn compile_sqlexpr(
@@ -881,7 +933,10 @@ pub fn compile_sqlexpr(
             let type_ = match op {
                 Plus | Minus | Multiply | Divide => {
                     eprintln!("types: {:?} {:?}", cleft.type_, cright.type_);
-                    let (cast_left, cast_right) = cleft.type_.coerce(&cright.type_)?;
+                    let casts =
+                        coerce(compiler.clone(), cleft.type_.clone(), cright.type_.clone())?;
+                    (cleft, cright) = apply_coerce_casts(compiler.clone(), cleft, cright, casts)?;
+                    /*
                     cleft = match cast_left {
                         Some(c) => apply_sqlcast(&compiler, cleft, c)?,
                         None => cleft,
@@ -890,6 +945,7 @@ pub fn compile_sqlexpr(
                         Some(c) => apply_sqlcast(&compiler, cright, c)?,
                         None => cright,
                     };
+                    */
 
                     cleft.type_
                 }
