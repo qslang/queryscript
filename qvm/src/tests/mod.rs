@@ -33,11 +33,22 @@ mod tests {
         }
     }
 
-    fn test_schema(rt: &runtime::Runtime, path: &PathBuf) {
+    fn execute_test_schema(
+        rt: &runtime::Runtime,
+        path: &PathBuf,
+    ) -> BTreeMap<String, Box<dyn fmt::Debug>> {
+        let mut result = BTreeMap::<String, Box<dyn fmt::Debug>>::new();
+
         let compiler = compile::Compiler::new().expect("Failed to create compiler");
-        let schema = compiler
-            .compile_schema_from_file(path)
-            .expect("Failed to compile schema");
+
+        let schema = match compiler.compile_schema_from_file(path) {
+            Ok(schema) => schema,
+            Err(e) => {
+                result.insert("compile_error".to_string(), Box::new(e));
+                return result;
+            }
+        };
+
         let mut decls = BTreeMap::<String, Box<dyn fmt::Debug>>::new();
         for (name, decl) in &schema.read().unwrap().decls {
             match &decl.value {
@@ -85,10 +96,13 @@ mod tests {
             });
         }
 
-        let mut result = BTreeMap::<String, Box<dyn fmt::Debug>>::new();
         result.insert("decls".to_string(), Box::new(decls));
         result.insert("queries".to_string(), Box::new(exprs));
+        result
+    }
 
+    fn test_schema(rt: &runtime::Runtime, path: &PathBuf) {
+        let result = execute_test_schema(rt, path);
         let result_str = format!("{:#?}", result);
 
         let mut expected_file = path.clone();
