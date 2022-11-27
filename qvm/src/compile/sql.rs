@@ -915,8 +915,12 @@ pub fn compile_sqlexpr(
             let type_ = match op {
                 Plus | Minus | Multiply | Divide => {
                     eprintln!("types: {:?} {:?}", cleft.type_, cright.type_);
-                    let casts =
-                        coerce(compiler.clone(), cleft.type_.clone(), cright.type_.clone())?;
+                    let casts = coerce(
+                        compiler.clone(),
+                        &op,
+                        cleft.type_.clone(),
+                        cright.type_.clone(),
+                    )?;
                     [cleft, cright] = apply_coerce_casts(compiler.clone(), [cleft, cright], casts)?;
                     cleft.type_
                 }

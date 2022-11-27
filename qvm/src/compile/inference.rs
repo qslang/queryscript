@@ -22,12 +22,17 @@ pub trait Constrainable: Clone + fmt::Debug + Send + Sync {
         ))
     }
 
-    fn coerce(left: &Ref<Self>, right: &Ref<Self>) -> Result<[Option<CRef<Self>>; 2]> {
+    fn coerce(
+        op: &sqlparser::ast::BinaryOperator,
+        left: &Ref<Self>,
+        right: &Ref<Self>,
+    ) -> Result<[Option<CRef<Self>>; 2]> {
         Err(CompileError::internal(
             format!(
-                "{} cannot be coerced:\n{:#?}\n{:#?}",
+                "{} cannot be coerced:{:?} {:?} {:?}",
                 std::any::type_name::<Self>(),
                 left,
+                op,
                 right,
             )
             .as_str(),

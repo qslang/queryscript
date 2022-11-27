@@ -1,3 +1,9 @@
+pub use datafusion::arrow::datatypes::DataType as ArrowDataType;
+use sqlparser::ast as sqlast;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::sync::{Arc, RwLock};
+
 use crate::ast;
 use crate::compile::{
     error::{CompileError, Result},
@@ -5,10 +11,6 @@ use crate::compile::{
 };
 use crate::runtime;
 use crate::types::{AtomicType, Field, FnType, Type};
-use sqlparser::ast as sqlast;
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
-use std::sync::{Arc, RwLock};
 
 pub type Ident = ast::Ident;
 
@@ -83,6 +85,38 @@ impl MType {
             MType::Name(_) => {
                 runtime::error::fail!("Unresolved type name cannot exist at runtime: {:?}", self)
             }
+        }
+    }
+
+    pub fn from_runtime_type(type_: &Type) -> Result<MType> {
+        match type_ {
+            Type::Atom(a) => Ok(MType::Atom(a.clone())),
+            Type::Record(fields) => Ok(MType::Record(
+                fields
+                    .iter()
+                    .map(|f| {
+                        Ok(MField {
+                            name: f.name.clone(),
+                            type_: mkcref(MType::from_runtime_type(&f.type_)?),
+                            nullable: f.nullable,
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+            )),
+            Type::List(inner) => Ok(MType::List(mkcref(MType::from_runtime_type(&inner)?))),
+            Type::Fn(FnType { args, ret }) => Ok(MType::Fn(MFnType {
+                args: args
+                    .iter()
+                    .map(|a| {
+                        Ok(MField {
+                            name: a.name.clone(),
+                            type_: mkcref(MType::from_runtime_type(&a.type_)?),
+                            nullable: a.nullable,
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+                ret: mkcref(MType::from_runtime_type(&ret)?),
+            })),
         }
     }
 
@@ -232,28 +266,45 @@ impl Constrainable for MType {
         Ok(())
     }
 
-    fn coerce(left: &Ref<Self>, right: &Ref<Self>) -> Result<[Option<CRef<Self>>; 2]> {
+    fn coerce(
+        op: &sqlast::BinaryOperator,
+        left: &Ref<Self>,
+        right: &Ref<Self>,
+    ) -> Result<[Option<CRef<Self>>; 2]> {
+        let df_op = match super::datafusion::parser_binop_to_df_binop(op) {
+            Ok(op) => op,
+            Err(e) => return Err(CompileError::unimplemented(&(e.to_string()))),
+        };
+
         let left_type = left.read()?;
         let right_type = right.read()?;
 
-        match (&*left_type, &*right_type) {
-            (MType::Atom(aleft), MType::Atom(aright)) => {
-                if *aleft == AtomicType::Int64 && *aright == AtomicType::Float64 {
-                    Ok([Some(mkcref((&*right_type).clone())), None])
-                } else {
-                    Err(CompileError::coercion(&*left_type, &*right_type))
-                }
-            }
-            _ => Err(CompileError::internal(
-                format!(
-                    "{} cannot be coerced:\n{:#?}\n{:#?}",
-                    std::any::type_name::<Self>(),
-                    left,
-                    right
-                )
-                .as_str(),
-            )),
-        }
+        let left_rt = left_type.to_runtime_type()?;
+        let right_rt = right_type.to_runtime_type()?;
+
+        let left_df: ArrowDataType = (&left_rt).try_into()?;
+        let right_df: ArrowDataType = (&right_rt).try_into()?;
+
+        let coerced_df = match datafusion::logical_expr::type_coercion::binary::coerce_types(
+            &left_df, &df_op, &right_df,
+        ) {
+            Ok(t) => t,
+            Err(e) => return Err(CompileError::internal(&(e.to_string()))),
+        };
+
+        let coerced_type: Type = (&coerced_df).try_into()?;
+        Ok([
+            if coerced_type == left_rt {
+                None
+            } else {
+                Some(mkcref(MType::from_runtime_type(&coerced_type)?))
+            },
+            if coerced_type == right_rt {
+                None
+            } else {
+                Some(mkcref(MType::from_runtime_type(&coerced_type)?))
+            },
+        ])
     }
 }
 

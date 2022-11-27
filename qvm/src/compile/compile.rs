@@ -775,16 +775,18 @@ pub fn gather_schema_externs(schema: Ref<Schema>) -> Result<()> {
 
 pub fn coerce<T: Constrainable + 'static>(
     compiler: Compiler,
+    op: &sqlparser::ast::BinaryOperator,
     left: CRef<T>,
     right: CRef<T>,
 ) -> Result<CRef<CWrap<[Option<CRef<T>>; 2]>>> {
+    let op = op.clone();
     match left.unify(&right) {
         Ok(()) => Ok(cwrap([None, None])),
         Err(CompileError::WrongType { .. }) => compiler.async_cref(async move {
             let left = left.await?;
             let right = right.await?;
 
-            Ok(cwrap(Constrainable::coerce(&left, &right)?))
+            Ok(cwrap(Constrainable::coerce(&op, &left, &right)?))
         }),
         Err(e) => Err(e),
     }
