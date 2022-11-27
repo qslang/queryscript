@@ -1,14 +1,15 @@
+use lazy_static::lazy_static;
+use sqlparser::{ast as sqlast, ast::DataType as ParserDataType};
+use std::collections::BTreeMap;
+use std::fmt;
+use std::sync::Arc;
+
 use crate::compile::compile::{coerce, lookup_path, resolve_global_atom, typecheck_path, Compiler};
 use crate::compile::error::{CompileError, Result};
 use crate::compile::inference::*;
 use crate::compile::schema::*;
+use crate::compile::util::InsertionOrderMap;
 use crate::types::{number::parse_numeric_type, AtomicType};
-use lazy_static::lazy_static;
-use sqlparser::{ast as sqlast, ast::DataType as ParserDataType};
-
-use std::collections::BTreeMap;
-use std::fmt;
-use std::sync::Arc;
 
 const QVM_NAMESPACE: &str = "__qvm";
 
@@ -90,36 +91,38 @@ pub fn compile_sqlreference(
                 let available = scope.read()?.get_available_references(compiler.clone())?;
 
                 let sqlpath = sqlpath.clone();
-                let tse = available.then(move |available: Ref<BTreeMap<String, FieldMatch>>| {
-                    if let Some(fm) = available.read()?.get(&name) {
-                        if let Some(type_) = fm.type_.clone() {
-                            Ok(mkcref(TypedExpr {
-                                type_: type_.clone(),
-                                expr: Arc::new(Expr::SQLExpr(Arc::new(SQLExpr {
-                                    params: BTreeMap::new(),
-                                    expr: sqlast::Expr::CompoundIdentifier(vec![
-                                        sqlast::Ident {
-                                            value: fm.relation.clone(),
-                                            quote_style: None,
-                                        },
-                                        sqlast::Ident {
-                                            value: name.clone(),
-                                            quote_style: None,
-                                        },
-                                    ]),
-                                }))),
-                            }))
+                let tse = available.then(
+                    move |available: Ref<InsertionOrderMap<String, FieldMatch>>| {
+                        if let Some(fm) = available.read()?.get(&name) {
+                            if let Some(type_) = fm.type_.clone() {
+                                Ok(mkcref(TypedExpr {
+                                    type_: type_.clone(),
+                                    expr: Arc::new(Expr::SQLExpr(Arc::new(SQLExpr {
+                                        params: BTreeMap::new(),
+                                        expr: sqlast::Expr::CompoundIdentifier(vec![
+                                            sqlast::Ident {
+                                                value: fm.relation.clone(),
+                                                quote_style: None,
+                                            },
+                                            sqlast::Ident {
+                                                value: name.clone(),
+                                                quote_style: None,
+                                            },
+                                        ]),
+                                    }))),
+                                }))
+                            } else {
+                                Err(CompileError::duplicate_entry(vec![name.clone()]))
+                            }
                         } else {
-                            Err(CompileError::duplicate_entry(vec![name.clone()]))
+                            // If it doesn't match any names of fields in SQL relations,
+                            // compile it as a normal reference.
+                            //
+                            let te = compile_reference(compiler.clone(), schema.clone(), &sqlpath)?;
+                            Ok(mkcref(te))
                         }
-                    } else {
-                        // If it doesn't match any names of fields in SQL relations,
-                        // compile it as a normal reference.
-                        //
-                        let te = compile_reference(compiler.clone(), schema.clone(), &sqlpath)?;
-                        Ok(mkcref(te))
-                    }
-                })?;
+                    },
+                )?;
                 let type_ =
                     tse.then(|tse: Ref<TypedExpr<CRef<MType>>>| Ok(tse.read()?.type_.clone()))?;
                 let expr = tse.then(|tse: Ref<TypedExpr<CRef<MType>>>| {
@@ -331,7 +334,7 @@ impl SQLScope {
     pub fn get_available_references(
         &self,
         compiler: Compiler,
-    ) -> Result<CRef<BTreeMap<String, FieldMatch>>> {
+    ) -> Result<CRef<InsertionOrderMap<String, FieldMatch>>> {
         combine_crefs(
             self.relations
                 .iter()
@@ -363,7 +366,7 @@ impl SQLScope {
                 .collect::<Result<Vec<_>>>()?,
         )?
         .then(|relations: Ref<Vec<Ref<Vec<FieldMatch>>>>| {
-            let mut ret = BTreeMap::<String, FieldMatch>::new();
+            let mut ret = InsertionOrderMap::<String, FieldMatch>::new();
             for a in &*relations.read()? {
                 for b in &*a.read()? {
                     if let Some(existing) = ret.get_mut(&b.field) {
@@ -549,9 +552,9 @@ pub fn compile_select(
                 }
                 sqlast::SelectItem::Wildcard => {
                     let available = scope.read()?.get_available_references(compiler.clone())?;
-                    available.then(|available: Ref<BTreeMap<String, FieldMatch>>| {
+                    available.then(|available: Ref<InsertionOrderMap<String, FieldMatch>>| {
                         let mut ret = Vec::new();
-                        for (_, m) in &*available.read()? {
+                        for (_, m) in available.read()?.iter() {
                             let type_ = match &m.type_ {
                                 Some(t) => t.clone(),
                                 None => {
