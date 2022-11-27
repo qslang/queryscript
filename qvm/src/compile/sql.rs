@@ -795,59 +795,41 @@ fn apply_sqlcast(
     })?)
 }
 
+// NOTE: This is intentionally written to support a length > 2, but  currently constrained to 2
+// elements because of how coerce() is implemented.
 fn apply_coerce_casts(
     compiler: Compiler,
-    left: CTypedSQLExpr,
-    right: CTypedSQLExpr,
-    targets: CRef<CWrap<(Option<CRef<MType>>, Option<CRef<MType>>)>>,
-) -> Result<(CTypedSQLExpr, CTypedSQLExpr)> {
-    let targets1 = targets.clone();
-    let targets2 = targets.clone();
-    let compiler2 = compiler.clone();
+    mut exprs: [CTypedSQLExpr; 2],
+    targets: CRef<CWrap<[Option<CRef<MType>>; 2]>>,
+) -> Result<[CTypedSQLExpr; 2]> {
+    for i in 0..exprs.len() {
+        let targets1 = targets.clone();
+        let targets2 = targets.clone();
+        let compiler2 = compiler.clone();
 
-    let left = CTypedSQLExpr {
-        type_: compiler.clone().async_cref(async move {
-            let resolved_targets = CWrap::clone_inner(&targets1).await?;
+        let expr = exprs[i].clone();
 
-            Ok(match resolved_targets.0 {
-                Some(cast) => cast.clone(),
-                None => left.type_.clone(),
-            })
-        })?,
-        expr: compiler.clone().async_cref(async move {
-            let resolved_targets = CWrap::clone_inner(&targets2).await?;
+        exprs[i] = CTypedSQLExpr {
+            type_: compiler.clone().async_cref(async move {
+                let resolved_targets = CWrap::clone_inner(&targets1).await?;
 
-            Ok(match resolved_targets.0 {
-                Some(cast) => apply_sqlcast(compiler2, left.expr.clone(), cast.await?)?,
-                None => left.expr,
-            })
-        })?,
-    };
+                Ok(match &resolved_targets[i] {
+                    Some(cast) => cast.clone(),
+                    None => expr.type_.clone(),
+                })
+            })?,
+            expr: compiler.clone().async_cref(async move {
+                let resolved_targets = CWrap::clone_inner(&targets2).await?;
 
-    let targets1 = targets.clone();
-    let targets2 = targets.clone();
-    let compiler2 = compiler.clone();
+                Ok(match &resolved_targets[i] {
+                    Some(cast) => apply_sqlcast(compiler2, expr.expr.clone(), cast.await?)?,
+                    None => expr.expr,
+                })
+            })?,
+        };
+    }
 
-    let right = CTypedSQLExpr {
-        type_: compiler.clone().async_cref(async move {
-            let resolved_targets = CWrap::clone_inner(&targets1).await?;
-
-            Ok(match resolved_targets.1 {
-                Some(cast) => cast.clone(),
-                None => right.type_.clone(),
-            })
-        })?,
-        expr: compiler.clone().async_cref(async move {
-            let resolved_targets = CWrap::clone_inner(&targets2).await?;
-
-            Ok(match resolved_targets.1 {
-                Some(cast) => apply_sqlcast(compiler2, right.expr.clone(), cast.await?)?,
-                None => right.expr,
-            })
-        })?,
-    };
-
-    Ok((left, right))
+    Ok(exprs)
 }
 
 pub fn compile_sqlexpr(
@@ -935,18 +917,7 @@ pub fn compile_sqlexpr(
                     eprintln!("types: {:?} {:?}", cleft.type_, cright.type_);
                     let casts =
                         coerce(compiler.clone(), cleft.type_.clone(), cright.type_.clone())?;
-                    (cleft, cright) = apply_coerce_casts(compiler.clone(), cleft, cright, casts)?;
-                    /*
-                    cleft = match cast_left {
-                        Some(c) => apply_sqlcast(&compiler, cleft, c)?,
-                        None => cleft,
-                    };
-                    cright = match cast_right {
-                        Some(c) => apply_sqlcast(&compiler, cright, c)?,
-                        None => cright,
-                    };
-                    */
-
+                    [cleft, cright] = apply_coerce_casts(compiler.clone(), [cleft, cright], casts)?;
                     cleft.type_
                 }
                 _ => {

@@ -22,10 +22,7 @@ pub trait Constrainable: Clone + fmt::Debug + Send + Sync {
         ))
     }
 
-    fn coerce(
-        left: &Ref<Self>,
-        right: &Ref<Self>,
-    ) -> Result<(Option<CRef<Self>>, Option<CRef<Self>>)> {
+    fn coerce(left: &Ref<Self>, right: &Ref<Self>) -> Result<[Option<CRef<Self>>; 2]> {
         Err(CompileError::internal(
             format!(
                 "{} cannot be coerced:\n{:#?}\n{:#?}",

@@ -777,9 +777,9 @@ pub fn coerce<T: Constrainable + 'static>(
     compiler: Compiler,
     left: CRef<T>,
     right: CRef<T>,
-) -> Result<CRef<CWrap<(Option<CRef<T>>, Option<CRef<T>>)>>> {
+) -> Result<CRef<CWrap<[Option<CRef<T>>; 2]>>> {
     match left.unify(&right) {
-        Ok(()) => Ok(cwrap((None, None))),
+        Ok(()) => Ok(cwrap([None, None])),
         Err(CompileError::WrongType { .. }) => compiler.async_cref(async move {
             let left = left.await?;
             let right = right.await?;
