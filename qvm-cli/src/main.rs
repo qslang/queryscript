@@ -9,6 +9,7 @@ use qvm::parser;
 use qvm::runtime;
 use qvm::QVMError;
 
+mod readline_helper;
 mod repl;
 
 #[derive(Debug, Parser)]

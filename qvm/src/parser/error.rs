@@ -22,31 +22,6 @@ pub enum ParserError {
         source: sqlparser::parser::ParserError,
         backtrace: Option<Backtrace>,
     },
-
-    #[snafu(display("Incomplete parse string: {}", original))]
-    Incomplete {
-        original: Box<ParserError>,
-        backtrace: Option<Backtrace>,
-    },
-}
-
-pub fn wrap_sql_eof<T>(
-    result: std::result::Result<T, sqlparser::parser::ParserError>,
-) -> Result<T> {
-    let wrap = if let Err(sqlparser::parser::ParserError::ParserError(s)) = &result {
-        s.ends_with("found: EOF")
-    } else if let Err(sqlparser::parser::ParserError::TokenizerError(s)) = &result {
-        s.contains("before EOF")
-    } else {
-        false
-    };
-
-    if wrap {
-        let err: ParserError = result.err().unwrap().into();
-        IncompleteSnafu { original: err }.fail()
-    } else {
-        Ok(result?)
-    }
 }
 
 #[allow(unused_macros)]

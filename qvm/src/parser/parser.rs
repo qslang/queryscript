@@ -1,22 +1,24 @@
 use crate::ast::*;
-use crate::parser::error::{unexpected_token, wrap_sql_eof, IncompleteSnafu, Result};
+use crate::parser::error::{unexpected_token, Result};
 use sqlparser::{
     dialect::{keywords::Keyword, GenericDialect},
     parser,
-    tokenizer::{Token, TokenWithLocation, Tokenizer, Word},
+    tokenizer::{TokenWithLocation, Tokenizer},
 };
+
+pub use sqlparser::tokenizer::Location;
+pub use sqlparser::tokenizer::Token;
+pub use sqlparser::tokenizer::Word;
 
 pub struct Parser<'a> {
     sqlparser: parser::Parser<'a>,
-    eof: Location,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(tokens: Vec<TokenWithLocation>, eof: Location) -> Parser<'a> {
         let dialect = &GenericDialect {};
         Parser {
-            sqlparser: parser::Parser::new_with_locations(tokens, dialect),
-            eof,
+            sqlparser: parser::Parser::new_with_locations(tokens, eof, dialect),
         }
     }
 
@@ -24,12 +26,20 @@ impl<'a> Parser<'a> {
         self.sqlparser.next_token()
     }
 
-    pub fn peek_token(&mut self) -> TokenWithLocation {
+    pub fn peek_token(&self) -> TokenWithLocation {
         self.sqlparser.peek_token()
     }
 
-    pub fn reset(&mut self) {
-        self.sqlparser.index = 0;
+    pub fn peek_start_location(&self) -> Location {
+        self.sqlparser.peek_start_location()
+    }
+
+    pub fn peek_end_location(&self) -> Location {
+        self.sqlparser.peek_end_location()
+    }
+
+    pub fn is_eof(&self) -> bool {
+        self.peek_token().token == Token::EOF
     }
 
     #[must_use]
@@ -44,16 +54,12 @@ impl<'a> Parser<'a> {
     // This returns a slightly different error code that indicates that we were
     // expecting the statement to end, so we can handle it in the REPL.
     pub fn expect_eos(&mut self) -> Result<()> {
-        match self.expect_token(&Token::SemiColon) {
-            Ok(_) => Ok(()),
-            Err(e) => IncompleteSnafu {
-                original: Box::new(e),
-            }
-            .fail(),
-        }
+        self.expect_token(&Token::SemiColon)
     }
 
     pub fn peek_keyword(&mut self, expected: &str) -> bool {
+        self.sqlparser
+            .autocomplete_tokens(&[Token::make_word(expected, Some('\0'))]);
         match self.peek_token().token {
             Token::Word(w) => {
                 if w.value.to_lowercase() == expected.to_lowercase() {
@@ -87,40 +93,26 @@ impl<'a> Parser<'a> {
     where
         F: FnMut(&mut Parser<'a>) -> Result<T>,
     {
-        let index = self.sqlparser.index;
+        let i = self.sqlparser.current_index();
         if let Ok(t) = f(self) {
             Some(t)
         } else {
-            self.sqlparser.index = index;
+            self.sqlparser.reset(i);
             None
         }
     }
 
-    fn start_of_current(&mut self) -> Location {
-        self.peek_token().location
+    pub fn autocomplete_tokens(&mut self, tokens: &[Token]) {
+        self.sqlparser.autocomplete_tokens(tokens);
     }
 
-    fn end_of_current(&mut self) -> Location {
-        let i = self.sqlparser.index;
-        let mut end = self
-            .sqlparser
-            .next_token_no_skip()
-            .unwrap_or(&TokenWithLocation {
-                token: Token::EOF,
-                location: self.eof.clone(),
-            })
-            .location
-            .clone();
-        self.sqlparser.index = i;
-
-        // It's always safe to assume the token immediately following a non-whitespace token is
-        // after the start of the line, since newlines count as tokens.
-        //
-        end.column -= 1;
-
-        return end;
+    pub fn get_autocomplete(&self, loc: Location) -> (TokenWithLocation, Vec<Token>) {
+        self.sqlparser.get_autocomplete(loc)
     }
 
+    pub fn get_autocompletes(&self) -> Vec<Vec<Token>> {
+        self.sqlparser.get_autocompletes()
+    }
     pub fn parse_schema(&mut self) -> Result<Schema> {
         let mut stmts = Vec::new();
         while !matches!(self.peek_token().token, Token::EOF) {
@@ -131,7 +123,7 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_stmt(&mut self) -> Result<Stmt> {
-        let start = self.start_of_current();
+        let start = self.peek_start_location();
         if self.consume_token(&Token::SemiColon) {
             return Ok(Stmt {
                 export: false,
@@ -158,7 +150,7 @@ impl<'a> Parser<'a> {
             self.parse_expr_stmt()?
         };
 
-        let end = self.end_of_current();
+        let end = self.peek_end_location();
 
         Ok(Stmt {
             export,
@@ -169,6 +161,7 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_ident(&mut self) -> Result<Ident> {
+        self.autocomplete_tokens(&[Token::make_ident("")]);
         let token = self.next_token();
         let location = token.location;
         match token.token {
@@ -185,6 +178,7 @@ impl<'a> Parser<'a> {
         let mut path = Vec::new();
         loop {
             path.push(self.parse_ident()?);
+            self.autocomplete_tokens(&[Token::Period]);
             match self.peek_token().token {
                 Token::Period => {
                     self.next_token();
@@ -218,6 +212,7 @@ impl<'a> Parser<'a> {
                     break;
                 }
             } else {
+                self.autocomplete_tokens(&[Token::Comma]);
                 match self.peek_token().token {
                     Token::Comma => {}
                     _ => break,
@@ -316,6 +311,7 @@ impl<'a> Parser<'a> {
 
                 args.push(FnArg { name, type_ });
 
+                self.autocomplete_tokens(&[Token::Comma, Token::RParen]);
                 match self.next_token().token {
                     Token::Comma => {}
                     Token::RParen => break args,
@@ -351,11 +347,13 @@ impl<'a> Parser<'a> {
         // Assume the leading "let" or "export" keywords have already been consumed
         //
         let name = self.parse_ident()?;
+        self.autocomplete_tokens(&[Token::Eq]);
         let type_ = match self.peek_token().token {
             Token::Eq => None,
             _ => Some(self.parse_type()?),
         };
 
+        self.autocomplete_tokens(&[Token::Eq]);
         let body = match self.peek_token().token {
             Token::Eq => {
                 self.next_token();
@@ -372,10 +370,10 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_query(&mut self) -> Result<StmtBody> {
-        let start = self.start_of_current();
-        let query = wrap_sql_eof(self.sqlparser.parse_query())?;
+        let start = self.peek_start_location();
+        let query = self.sqlparser.parse_query()?;
         self.expect_eos()?;
-        let end = self.end_of_current();
+        let end = self.peek_end_location();
 
         Ok(StmtBody::Expr(Expr {
             body: ExprBody::SQLQuery(query),
@@ -385,10 +383,10 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_expr_stmt(&mut self) -> Result<StmtBody> {
-        let start = self.start_of_current();
-        let expr = wrap_sql_eof(self.sqlparser.parse_expr())?;
+        let start = self.peek_start_location();
+        let expr = self.sqlparser.parse_expr()?;
         self.expect_eos()?;
-        let end = self.end_of_current();
+        let end = self.peek_end_location();
 
         Ok(StmtBody::Expr(Expr {
             body: ExprBody::SQLExpr(expr),
@@ -410,7 +408,8 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_type(&mut self) -> Result<Type> {
-        let start = self.start_of_current();
+        let start = self.peek_start_location();
+        self.autocomplete_tokens(&[Token::LBrace]);
         let mut body = if self.consume_token(&Token::LBracket) {
             let inner = self.parse_type()?;
             self.expect_token(&Token::RBracket)?;
@@ -423,7 +422,7 @@ impl<'a> Parser<'a> {
 
         if self.consume_keyword("exclude") {
             let excluded = self.parse_idents()?;
-            let end = self.end_of_current();
+            let end = self.peek_end_location();
             body = TypeBody::Exclude {
                 inner: Box::new(Type {
                     body,
@@ -434,7 +433,7 @@ impl<'a> Parser<'a> {
             };
         }
 
-        let end = self.end_of_current();
+        let end = self.peek_end_location();
 
         Ok(Type { body, start, end })
     }
@@ -444,6 +443,7 @@ impl<'a> Parser<'a> {
         let mut struct_ = Vec::new();
         let mut needs_comma = false;
         loop {
+            self.autocomplete_tokens(&[Token::RBrace, Token::Comma, Token::Period]);
             match self.peek_token().token {
                 Token::RBrace => {
                     self.next_token();
@@ -459,6 +459,7 @@ impl<'a> Parser<'a> {
                 }
                 Token::Period => {
                     for _ in 0..3 {
+                        self.autocomplete_tokens(&[Token::Period]);
                         if !matches!(self.peek_token().token, Token::Period) {
                             return unexpected_token!(self.peek_token(), "Three periods");
                         }
@@ -485,7 +486,9 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_expr(&mut self) -> Result<Expr> {
-        let start = self.start_of_current();
+        let start = self.peek_start_location();
+        self.sqlparser
+            .autocomplete_tokens(&[Token::make_keyword("SELECT"), Token::make_keyword("WITH")]);
         Ok(match self.peek_token().token {
             Token::Word(Word {
                 value: _,
@@ -493,7 +496,7 @@ impl<'a> Parser<'a> {
                 keyword: Keyword::SELECT | Keyword::WITH,
             }) => {
                 let query = self.sqlparser.parse_query()?;
-                let end = self.end_of_current();
+                let end = self.peek_end_location();
                 Expr {
                     body: ExprBody::SQLQuery(query),
                     start,
@@ -502,7 +505,7 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 let expr = self.sqlparser.parse_expr()?;
-                let end = self.end_of_current();
+                let end = self.peek_end_location();
                 Expr {
                     body: ExprBody::SQLExpr(expr),
                     start,

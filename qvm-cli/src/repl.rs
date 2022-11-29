@@ -7,14 +7,21 @@ use qvm::parser;
 use qvm::runtime;
 use qvm::QVMError;
 
+use crate::readline_helper::ReadlineHelper;
+use std::cell::RefCell;
+use std::rc::Rc;
+
 pub fn run(rt: &runtime::Runtime) {
     let cwd = std::env::current_dir()
         .expect("current working directory")
         .display()
         .to_string();
     let repl_schema = schema::Schema::new(Some(cwd));
+    let curr_buffer = Rc::new(RefCell::new(String::new()));
+    let helper = ReadlineHelper::new(repl_schema.clone(), curr_buffer.clone());
 
-    let mut rl = Editor::<()>::new().expect("readline library failed");
+    let mut rl = Editor::new().expect("readline library failed");
+    rl.set_helper(Some(helper));
 
     let qvm_dir = get_qvm_dir();
     let qvm_history = match &qvm_dir {
@@ -34,9 +41,8 @@ pub fn run(rt: &runtime::Runtime) {
         }
     }
 
-    let mut curr_buffer = String::new();
     loop {
-        let readline = rl.readline(if curr_buffer.len() == 0 {
+        let readline = rl.readline(if curr_buffer.borrow().len() == 0 {
             "qvm> "
         } else {
             "...> "
@@ -44,33 +50,39 @@ pub fn run(rt: &runtime::Runtime) {
 
         match readline {
             Ok(line) => {
-                if curr_buffer.len() == 0 {
-                    curr_buffer = line;
+                if curr_buffer.borrow().len() == 0 {
+                    *curr_buffer.borrow_mut() = line;
                 } else {
-                    curr_buffer.push_str(&format!("\n{}", line));
+                    curr_buffer.borrow_mut().push_str(&format!("\n{}", line));
                 }
-                match curr_buffer.trim().to_lowercase().trim_end_matches(';') {
+                match curr_buffer
+                    .borrow()
+                    .trim()
+                    .to_lowercase()
+                    .trim_end_matches(';')
+                {
                     "exit" | "quit" => {
-                        rl.add_history_entry(curr_buffer.as_str());
+                        rl.add_history_entry(curr_buffer.borrow().as_str());
                         println!("Goodbye!");
                         break;
                     }
                     _ => {}
                 };
 
-                match run_command(rt, repl_schema.clone(), &curr_buffer) {
+                let result = run_command(rt, repl_schema.clone(), &*curr_buffer.borrow());
+                match result {
                     Ok(RunCommandResult::Done) => {
                         // Reset the buffer
-                        rl.add_history_entry(curr_buffer.as_str());
-                        curr_buffer.clear();
+                        rl.add_history_entry(curr_buffer.borrow().as_str());
+                        curr_buffer.borrow_mut().clear();
                     }
                     Ok(RunCommandResult::More) => {
                         // Allow the loop to run again (and parse more)
                     }
                     Err(e) => {
                         eprintln!("Error: {}", e);
-                        rl.add_history_entry(curr_buffer.as_str());
-                        curr_buffer.clear();
+                        rl.add_history_entry(curr_buffer.borrow().as_str());
+                        curr_buffer.borrow_mut().clear();
                     }
                 }
             }
@@ -108,6 +120,16 @@ fn run_command(
     let (tokens, eof) = parser::tokenize(&cmd)?;
     let mut parser = parser::Parser::new(tokens, eof);
 
+    if parser.consume_token(&parser::Token::Placeholder("?".to_string())) {
+        match parser.parse_schema() {
+            Ok(_) => {}
+            Err(_) => {}
+        }
+        let loc = parser.peek_token().location;
+        eprintln!("{:#?}", parser.get_autocomplete(loc));
+        return Ok(RunCommandResult::Done);
+    }
+
     match parser.parse_schema() {
         Ok(ast) => {
             let num_exprs = repl_schema.read()?.exprs.len();
@@ -132,7 +154,7 @@ fn run_command(
             }
             Ok(RunCommandResult::Done)
         }
-        Err(parser::ParserError::Incomplete { .. }) => Ok(RunCommandResult::More),
+        Err(_) if parser.is_eof() => Ok(RunCommandResult::More),
         Err(e) => whatever!("{}", e),
     }
 }
