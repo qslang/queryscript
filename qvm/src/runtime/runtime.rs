@@ -63,7 +63,7 @@ pub fn eval<'a>(
                 ret
             }
             schema::Expr::Fn { .. } => {
-                return Err(RuntimeError::unimplemented("functions"));
+                return Err(RuntimeError::unimplemented("functions: {:?}"));
             }
             schema::Expr::NativeFn(name) => {
                 use super::functions::*;

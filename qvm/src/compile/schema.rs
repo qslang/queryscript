@@ -256,11 +256,20 @@ impl Constrainable for MType {
                 }
                 _ => return Err(CompileError::wrong_type(self, other)),
             },
-            MType::Name(name) => {
-                return Err(CompileError::internal(
-                    format!("Encountered free type variable: {}", name).as_str(),
-                ))
-            }
+            MType::Name(lname) => match other {
+                MType::Name(rname) => {
+                    if lname != rname {
+                        return Err(CompileError::internal(
+                            format!(
+                                "Encountered different free type variables: {} vs. {}",
+                                lname, rname
+                            )
+                            .as_str(),
+                        ));
+                    }
+                }
+                _ => return Err(CompileError::wrong_type(self, other)),
+            },
         }
 
         Ok(())
@@ -368,6 +377,10 @@ impl SType {
             variables: BTreeSet::new(),
             body,
         })
+    }
+
+    pub fn new_poly(body: CRef<MType>, variables: BTreeSet<String>) -> CRef<SType> {
+        mkcref(SType { variables, body })
     }
 }
 

@@ -18,22 +18,41 @@ pub struct CompilerData {
 }
 
 #[derive(Clone)]
-pub struct Compiler(Ref<CompilerData>);
+pub struct Compiler {
+    data: Ref<CompilerData>,
+    builtins: Ref<Schema>,
+}
 
 impl Compiler {
     pub fn new() -> Result<Compiler> {
-        Ok(Compiler(mkref(CompilerData {
-            next_placeholder: Mutex::new(1),
-            runtime: tokio::runtime::Builder::new_current_thread()
-                .thread_name("qvm-compiler")
-                .thread_stack_size(3 * 1024 * 1024)
-                .build()?,
-            handles: Mutex::new(tokio::task::JoinSet::new()),
-        })))
+        {
+            lazy_static::initialize(&GLOBAL_SCHEMA);
+        }
+        Compiler::new_with_builtins(GLOBAL_SCHEMA.clone())
+    }
+
+    pub fn new_with_builtins(schema: Ref<Schema>) -> Result<Compiler> {
+        // This is only used during bootstrapping (where we know we don't need
+        // the GLOBAL_SCHEMA to be initialized).
+        Ok(Compiler {
+            data: mkref(CompilerData {
+                next_placeholder: Mutex::new(1),
+                runtime: tokio::runtime::Builder::new_current_thread()
+                    .thread_name("qvm-compiler")
+                    .thread_stack_size(3 * 1024 * 1024)
+                    .build()?,
+                handles: Mutex::new(tokio::task::JoinSet::new()),
+            }),
+            builtins: schema.clone(),
+        })
+    }
+
+    pub fn builtins(&self) -> Ref<Schema> {
+        self.builtins.clone()
     }
 
     pub fn compile_schema_ast(&self, schema: Ref<Schema>, ast: &ast::Schema) -> Result<()> {
-        let data = self.0.read()?;
+        let data = self.data.read()?;
         data.runtime.block_on(async {
             let r = compile_schema_ast(self.clone(), schema.clone(), ast)?;
             self.drive().await?;
@@ -42,7 +61,7 @@ impl Compiler {
     }
 
     pub fn compile_schema_from_file(&self, file_path: &FilePath) -> Result<Ref<Schema>> {
-        let data = self.0.read()?;
+        let data = self.data.read()?;
         data.runtime.block_on(async {
             let r = compile_schema_from_file(self.clone(), file_path)?;
             self.drive().await?;
@@ -51,7 +70,7 @@ impl Compiler {
     }
 
     async fn drive(&self) -> Result<()> {
-        let data = self.0.read()?;
+        let data = self.data.read()?;
         loop {
             let mut set = tokio::task::JoinSet::new();
             std::mem::swap(&mut *data.handles.lock()?, &mut set);
@@ -66,7 +85,7 @@ impl Compiler {
     }
 
     pub fn next_placeholder(&self, kind: &str) -> Result<String> {
-        let data = self.0.read()?;
+        let data = self.data.read()?;
         let mut placeholder = data.next_placeholder.lock()?;
         (*placeholder) += 1;
         Ok(format!("{}{}", kind, *placeholder))
@@ -76,7 +95,7 @@ impl Compiler {
         &self,
         f: impl std::future::Future<Output = Result<CRef<T>>> + Send + 'static,
     ) -> Result<CRef<T>> {
-        let data = self.0.read()?;
+        let data = self.data.read()?;
         let slot = CRef::<T>::new_unknown("async_slot");
         let ret = slot.clone();
         data.handles.lock()?.spawn(async move {
@@ -176,7 +195,7 @@ pub fn lookup_path(
                     if import_global {
                         return lookup_path(
                             compiler.clone(),
-                            GLOBAL_SCHEMA.clone(),
+                            compiler.builtins(),
                             &path[i..].to_vec(),
                             false, /* import_global */
                         );
@@ -254,8 +273,8 @@ pub fn resolve_type(
 
 pub fn resolve_global_atom(compiler: Compiler, name: &str) -> Result<CRef<MType>> {
     resolve_type(
-        compiler,
-        GLOBAL_SCHEMA.clone(),
+        compiler.clone(),
+        compiler.builtins(),
         &ast::Type {
             body: ast::TypeBody::Reference(vec![name.to_string()]),
             start: ast::Location { line: 0, column: 0 },
@@ -659,12 +678,20 @@ pub fn compile_schema_entries(
                 ret,
                 body,
             } => {
-                if generics.len() > 0 {
-                    return Err(CompileError::unimplemented("function generics"));
-                }
-
                 let inner_schema = Schema::new(schema.read()?.folder.clone());
                 inner_schema.write()?.parent_scope = Some(schema.clone());
+
+                for generic in generics {
+                    inner_schema.write()?.decls.insert(
+                        generic.clone(),
+                        Decl {
+                            public: true,
+                            extern_: true,
+                            name: generic.clone(),
+                            value: SchemaEntry::Type(mkcref(MType::Name(generic.clone()))),
+                        },
+                    );
+                }
 
                 let mut compiled_args = Vec::new();
                 for arg in args {
@@ -697,19 +724,28 @@ pub fn compile_schema_entries(
                         .unify(&compiled.type_)?
                 }
 
+                let fn_type = SType::new_poly(
+                    mkcref(MType::Fn(MFnType {
+                        args: compiled_args,
+                        ret: compiled.type_.clone(),
+                    })),
+                    BTreeSet::from_iter(generics.clone().into_iter()),
+                );
+
                 unify_expr_decl(
                     schema.clone(),
                     name.as_str(),
                     mkcref(STypedExpr {
-                        type_: SType::new_mono(mkcref(MType::Fn(MFnType {
-                            args: compiled_args,
-                            ret: compiled.type_.clone(),
-                        }))),
+                        type_: fn_type,
                         expr: compiled.expr.then(move |expr: Ref<Expr<CRef<MType>>>| {
-                            Ok(mkcref(Expr::Fn(FnExpr {
-                                inner_schema: inner_schema.clone(),
-                                body: Arc::new(expr.read()?.clone()),
-                            })))
+                            let expr = expr.read()?;
+                            Ok(mkcref(match &*expr {
+                                Expr::NativeFn(..) => expr.clone(),
+                                _ => Expr::Fn(FnExpr {
+                                    inner_schema: inner_schema.clone(),
+                                    body: Arc::new(expr.clone()),
+                                }),
+                            }))
                         })?,
                     }),
                 )?;
