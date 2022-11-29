@@ -68,6 +68,12 @@ pub enum ImportList {
 }
 
 #[derive(Clone, Debug)]
+pub enum FnBody {
+    Expr(Expr),
+    Native,
+}
+
+#[derive(Clone, Debug)]
 pub enum StmtBody {
     Noop,
     Expr(Expr),
@@ -82,7 +88,7 @@ pub enum StmtBody {
         generics: Vec<Ident>,
         args: Vec<FnArg>,
         ret: Option<Type>,
-        body: Expr,
+        body: FnBody,
     },
     Let {
         name: Ident,

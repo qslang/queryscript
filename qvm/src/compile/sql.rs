@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::compile::builtin_types::{GLOBAL_COMPILER, NATIVE_FN_NAME};
 use crate::compile::compile::{coerce, lookup_path, resolve_global_atom, typecheck_path, Compiler};
 use crate::compile::error::{CompileError, Result};
 use crate::compile::inference::*;
@@ -768,6 +767,7 @@ pub fn compile_sqlquery(
 }
 
 lazy_static! {
+    static ref GLOBAL_COMPILER: Compiler = Compiler::new().unwrap();
     static ref NULL_SQLEXPR: Arc<SQLExpr<CRef<MType>>> = Arc::new(SQLExpr {
         params: BTreeMap::new(),
         expr: sqlast::Expr::Value(sqlast::Value::Null),
@@ -966,27 +966,6 @@ pub fn compile_sqlexpr(
                 return Err(CompileError::unimplemented(
                     format!("Function calls with OVER").as_str(),
                 ));
-            }
-
-            if name.0[0].value == NATIVE_FN_NAME {
-                // TODO: This should probably be implemented as a macro of some sort, or get
-                // captured by the function inlining logic below. But for now, it's just a
-                // special case.
-                let native_fn = match args.as_slice() {
-                    [sqlast::FunctionArg::Unnamed(sqlast::FunctionArgExpr::Expr(
-                        sqlast::Expr::Value(sqlast::Value::SingleQuotedString(s)),
-                    ))] => s.clone(),
-                    _ => {
-                        return Err(CompileError::internal(
-                            "__native expected to have one literal string argument",
-                        ))
-                    }
-                };
-
-                return Ok(CTypedExpr {
-                    type_: MType::new_unknown(&format!("__native('{}')", native_fn)),
-                    expr: mkcref(Expr::NativeFn(native_fn.to_string())),
-                });
             }
 
             let func = compile_reference(compiler.clone(), schema.clone(), &name.0)?;

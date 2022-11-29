@@ -21,17 +21,16 @@ pub struct CompilerData {
 pub struct Compiler {
     data: Ref<CompilerData>,
     builtins: Ref<Schema>,
+    allow_native: bool,
 }
 
 impl Compiler {
     pub fn new() -> Result<Compiler> {
-        {
-            lazy_static::initialize(&GLOBAL_SCHEMA);
-        }
-        Compiler::new_with_builtins(GLOBAL_SCHEMA.clone())
+        lazy_static::initialize(&GLOBAL_SCHEMA);
+        Compiler::new_with_builtins(GLOBAL_SCHEMA.clone(), false)
     }
 
-    pub fn new_with_builtins(schema: Ref<Schema>) -> Result<Compiler> {
+    pub fn new_with_builtins(schema: Ref<Schema>, allow_native: bool) -> Result<Compiler> {
         // This is only used during bootstrapping (where we know we don't need
         // the GLOBAL_SCHEMA to be initialized).
         Ok(Compiler {
@@ -44,11 +43,16 @@ impl Compiler {
                 handles: Mutex::new(tokio::task::JoinSet::new()),
             }),
             builtins: schema.clone(),
+            allow_native,
         })
     }
 
     pub fn builtins(&self) -> Ref<Schema> {
         self.builtins.clone()
+    }
+
+    pub fn allow_native(&self) -> bool {
+        self.allow_native
     }
 
     pub fn compile_schema_ast(&self, schema: Ref<Schema>, ast: &ast::Schema) -> Result<()> {
@@ -718,7 +722,22 @@ pub fn compile_schema_entries(
                     compiled_args.push(MField::new_nullable(arg.name.clone(), type_.clone()));
                 }
 
-                let compiled = compile_expr(compiler.clone(), inner_schema.clone(), body)?;
+                let compiled = match body {
+                    ast::FnBody::Native => {
+                        if !compiler.allow_native() {
+                            return Err(CompileError::internal("Cannot compile native functions"));
+                        }
+
+                        CTypedExpr {
+                            type_: MType::new_unknown(&format!("__native('{}')", name)),
+                            expr: mkcref(Expr::NativeFn(name.to_string())),
+                        }
+                    }
+                    ast::FnBody::Expr(expr) => {
+                        compile_expr(compiler.clone(), inner_schema.clone(), expr)?
+                    }
+                };
+
                 if let Some(ret) = ret {
                     resolve_type(compiler.clone(), inner_schema.clone(), ret)?
                         .unify(&compiled.type_)?

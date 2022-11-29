@@ -188,7 +188,7 @@ impl<T: 'static + Constrainable> CRef<T> {
         match &*self.find().unwrap().0.read()? {
             Constrained::Known(t) => Ok(t.clone()),
             Constrained::Unknown { .. } => {
-                runtime::error::fail!("Unknown cannot exist at runtime ({:?})", self)
+                runtime::error::fail!("Unknown type cannot exist at runtime ({:?})", self)
             }
             Constrained::Ref(_) => runtime::error::fail!("Canon value should never be a ref"),
         }

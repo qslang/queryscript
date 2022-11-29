@@ -328,11 +328,16 @@ impl<'a> Parser<'a> {
             None
         };
 
-        self.expect_token(&Token::LBrace)?;
+        let body = if self.consume_keyword("native") {
+            FnBody::Native
+        } else {
+            self.expect_token(&Token::LBrace)?;
 
-        let body = self.parse_expr()?;
+            let body = self.parse_expr()?;
 
-        self.expect_token(&Token::RBrace)?;
+            self.expect_token(&Token::RBrace)?;
+            FnBody::Expr(body)
+        };
 
         Ok(StmtBody::FnDef {
             name,
