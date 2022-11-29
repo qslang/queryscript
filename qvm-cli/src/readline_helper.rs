@@ -9,15 +9,15 @@ use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 
 #[derive(Clone, Debug)]
-pub struct ReadlineDebug {
+pub struct ReadlineStats {
     tried: u64,
     completed: u64,
     msg: String,
 }
 
-impl ReadlineDebug {
-    pub fn new() -> ReadlineDebug {
-        ReadlineDebug {
+impl ReadlineStats {
+    pub fn new() -> ReadlineStats {
+        ReadlineStats {
             tried: 0,
             completed: 0,
             msg: String::new(),
@@ -25,7 +25,7 @@ impl ReadlineDebug {
     }
 }
 
-impl fmt::Display for ReadlineDebug {
+impl fmt::Display for ReadlineStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!("{:?}", self))?;
         Ok(())
@@ -35,7 +35,8 @@ impl fmt::Display for ReadlineDebug {
 pub struct ReadlineHelper {
     pub schema: Arc<RwLock<schema::Schema>>,
     pub curr_buffer: Rc<RefCell<String>>,
-    pub debug: Rc<RefCell<ReadlineDebug>>,
+    pub stats: Rc<RefCell<ReadlineStats>>,
+    pub debug: bool,
 }
 
 impl ReadlineHelper {
@@ -46,7 +47,8 @@ impl ReadlineHelper {
         ReadlineHelper {
             schema,
             curr_buffer,
-            debug: Rc::new(RefCell::new(ReadlineDebug::new())),
+            stats: Rc::new(RefCell::new(ReadlineStats::new())),
+            debug: false, // Switch this to true to get diagnostics as you type
         }
     }
 }
@@ -80,7 +82,7 @@ impl Completer for ReadlineHelper {
         pos: usize,
         _ctx: &Context<'_>,
     ) -> Result<(usize, Vec<Self::Candidate>)> {
-        (&mut *self.debug.borrow_mut()).tried += 1;
+        (&mut *self.stats.borrow_mut()).tried += 1;
 
         let mut full = self.curr_buffer.borrow().clone();
         let start_pos = full.len();
@@ -92,7 +94,7 @@ impl Completer for ReadlineHelper {
         let (tokens, eof) = match parser::tokenize(&full) {
             Ok(r) => r,
             Err(e) => {
-                (&mut *self.debug.borrow_mut()).msg = format!("{}", e);
+                (&mut *self.stats.borrow_mut()).msg = format!("{}", e);
                 return Ok((0, Vec::new()));
             }
         };
@@ -104,7 +106,7 @@ impl Completer for ReadlineHelper {
         let suggestion_pos = loc_to_pos(full.as_str(), suggestion_loc);
 
         if suggestion_pos < start_pos {
-            (&mut *self.debug.borrow_mut()).msg = format!("failed before");
+            (&mut *self.stats.borrow_mut()).msg = format!("failed before");
             return Ok((0, Vec::new()));
         }
 
@@ -126,7 +128,7 @@ impl Completer for ReadlineHelper {
             let schema = match self.schema.read() {
                 Ok(s) => s,
                 Err(e) => {
-                    (&mut *self.debug.borrow_mut()).msg = format!("{}", e);
+                    (&mut *self.stats.borrow_mut()).msg = format!("{}", e);
                     return Ok((0, Vec::new()));
                 }
             };
@@ -151,7 +153,7 @@ impl Completer for ReadlineHelper {
         };
 
         let filtered = all.iter().collect::<Vec<&String>>();
-        (&mut *self.debug.borrow_mut()).msg = format!("{} {:?}", suggestion_pos - start_pos, all);
+        (&mut *self.stats.borrow_mut()).msg = format!("{} {:?}", suggestion_pos - start_pos, all);
         let pairs = filtered
             .into_iter()
             .map(|s| Pair {
@@ -160,7 +162,7 @@ impl Completer for ReadlineHelper {
             })
             .collect();
 
-        (&mut *self.debug.borrow_mut()).completed += 1;
+        (&mut *self.stats.borrow_mut()).completed += 1;
 
         Ok((suggestion_pos - start_pos, pairs))
     }
@@ -170,7 +172,11 @@ impl Hinter for ReadlineHelper {
     type Hint = String;
 
     fn hint(&self, _line: &str, _pos: usize, _ctx: &Context<'_>) -> Option<Self::Hint> {
-        Some(format!("         {}", self.debug.borrow()))
+        if self.debug {
+            Some(format!("         {}", self.stats.borrow()))
+        } else {
+            None
+        }
     }
 }
 
