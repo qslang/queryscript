@@ -9,7 +9,7 @@ use crate::compile::error::*;
 use crate::compile::inference::*;
 use crate::compile::schema::*;
 use crate::compile::sql::*;
-use crate::parser::parse_schema;
+use crate::{parser, parser::parse_schema};
 
 pub struct CompilerData {
     pub next_placeholder: Mutex<usize>,
@@ -53,6 +53,14 @@ impl Compiler {
 
     pub fn allow_native(&self) -> bool {
         self.allow_native
+    }
+
+    pub fn compile_string(&self, schema: Ref<Schema>, text: &str) -> Result<()> {
+        let (tokens, eof) = parser::tokenize(text)?;
+        let mut parser = parser::Parser::new(tokens, eof);
+        let schema_ast = parser.parse_schema()?;
+        self.compile_schema_ast(schema.clone(), &schema_ast)?;
+        Ok(())
     }
 
     pub fn compile_schema_ast(&self, schema: Ref<Schema>, ast: &ast::Schema) -> Result<()> {

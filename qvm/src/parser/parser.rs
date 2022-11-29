@@ -328,7 +328,8 @@ impl<'a> Parser<'a> {
             None
         };
 
-        let body = if self.consume_keyword("native") {
+        let body = if self.consume_token(&Token::Eq) {
+            self.expect_keyword("native")?;
             FnBody::Native
         } else {
             self.expect_token(&Token::LBrace)?;

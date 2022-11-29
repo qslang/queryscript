@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use crate::compile::compile::Compiler;
 use crate::compile::inference::mkcref;
 use crate::compile::schema::{Decl, MType, Ref, Schema, SchemaEntry};
-use crate::parser;
 use crate::types::{AtomicType, TimeUnit};
 
 // TODO: Add support for types with arguments
@@ -50,7 +49,7 @@ const BUILTIN_TYPES: &'static [BuiltinType] = &[
 ];
 
 const BUILTIN_FUNCTIONS: &'static str = "
-fn load<R>(file varchar, format varchar) -> [R] native;
+fn load<R>(file varchar, format varchar) -> [R] = native;
 ";
 
 lazy_static! {
@@ -71,15 +70,8 @@ lazy_static! {
         ret.write().unwrap().decls = BTreeMap::from_iter(BUILTIN_TYPE_DECLS.clone().into_iter());
 
         let builtin_compiler = Compiler::new_with_builtins(ret.clone(), true).unwrap();
-
-        let (tokens, eof) =
-            parser::tokenize(BUILTIN_FUNCTIONS).expect("failed to tokenize builtin function");
-        let mut parser = parser::Parser::new(tokens, eof);
-        let schema_ast = parser
-            .parse_schema()
-            .expect("Failed to parse builtin function defs");
         builtin_compiler
-            .compile_schema_ast(ret.clone(), &schema_ast)
+            .compile_string(ret.clone(), BUILTIN_FUNCTIONS)
             .expect("Failed to compile builtin function defs");
 
         ret
