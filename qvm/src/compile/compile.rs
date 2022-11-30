@@ -372,13 +372,7 @@ pub fn rebind_decl(_schema: SchemaInstance, decl: &Decl) -> Result<SchemaEntry> 
     match &decl.value {
         SchemaEntry::Schema(s) => Ok(SchemaEntry::Schema(s.clone())),
         SchemaEntry::Type(t) => Ok(SchemaEntry::Type(t.clone())),
-        SchemaEntry::Expr(e) => Ok(SchemaEntry::Expr(mkcref(STypedExpr {
-            type_: e.then(|e: Ref<STypedExpr>| Ok(e.read()?.type_.clone()))?,
-            expr: mkcref(Expr::SchemaEntry(SchemaEntryExpr {
-                debug_name: decl.name.clone(),
-                entry: decl.value.clone(),
-            })),
-        }))),
+        SchemaEntry::Expr(e) => Ok(SchemaEntry::Expr(e.clone())),
     }
 }
 
@@ -645,7 +639,7 @@ pub fn unify_type_decl(schema: Ref<Schema>, name: &str, type_: CRef<MType>) -> R
     Ok(())
 }
 
-pub fn unify_expr_decl(schema: Ref<Schema>, name: &str, value: CRef<STypedExpr>) -> Result<()> {
+pub fn unify_expr_decl(schema: Ref<Schema>, name: &str, value: &STypedExpr) -> Result<()> {
     let s = schema.read()?;
     let decl = s.decls.get(name).ok_or_else(|| {
         CompileError::internal(
@@ -723,10 +717,10 @@ pub fn compile_schema_entries(
                             public: true,
                             extern_: true,
                             name: arg.name.clone(),
-                            value: SchemaEntry::Expr(mkcref(STypedExpr {
+                            value: SchemaEntry::Expr(STypedExpr {
                                 type_: SType::new_mono(type_.clone()),
                                 expr: mkcref(Expr::Unknown),
-                            })),
+                            }),
                         },
                     );
                     inner_schema
@@ -772,7 +766,7 @@ pub fn compile_schema_entries(
                 unify_expr_decl(
                     schema.clone(),
                     name.as_str(),
-                    mkcref(STypedExpr {
+                    &STypedExpr {
                         type_: fn_type,
                         expr: compiled.expr.then(move |expr: Ref<Expr<CRef<MType>>>| {
                             let expr = expr.read()?;
@@ -784,7 +778,7 @@ pub fn compile_schema_entries(
                                 }),
                             }))
                         })?,
-                    }),
+                    },
                 )?;
             }
             ast::StmtBody::Let { name, type_, body } => {
@@ -798,24 +792,24 @@ pub fn compile_schema_entries(
                 unify_expr_decl(
                     schema.clone(),
                     name.as_str(),
-                    mkcref(STypedExpr {
+                    &STypedExpr {
                         type_: SType::new_mono(lhs_type),
                         expr: compiled.expr,
-                    }),
+                    },
                 )?;
             }
             ast::StmtBody::Extern { name, type_ } => {
                 unify_expr_decl(
                     schema.clone(),
                     name.as_str(),
-                    mkcref(STypedExpr {
+                    &STypedExpr {
                         type_: SType::new_mono(resolve_type(
                             compiler.clone(),
                             schema.clone(),
                             type_,
                         )?),
                         expr: mkcref(Expr::Unknown),
-                    }),
+                    },
                 )?;
             }
         };
@@ -832,10 +826,7 @@ pub fn gather_schema_externs(schema: Ref<Schema>) -> Result<()> {
                 SchemaEntry::Expr(e) => {
                     schema.write()?.externs.insert(
                         name.clone(),
-                        e.must()?
-                            .read()?
-                            .type_
-                            .then(|t: Ref<SType>| Ok(t.read()?.instantiate()?))?,
+                        e.type_.then(|t: Ref<SType>| Ok(t.read()?.instantiate()?))?,
                     );
                 }
                 _ => return Err(CompileError::unimplemented("type externs")),

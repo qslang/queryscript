@@ -489,22 +489,6 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub struct SchemaEntryExpr {
-    pub debug_name: String,
-    pub entry: SchemaEntry,
-}
-
-/*
-impl fmt::Debug for SchemaEntryExpr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SchemaEntryExpr")
-            .field("debug_name", &self.debug_name)
-            .finish_non_exhaustive()
-    }
-}
-*/
-
-#[derive(Clone, Debug)]
 pub enum Expr<TypeRef>
 where
     TypeRef: Clone + fmt::Debug + Send + Sync,
@@ -512,7 +496,7 @@ where
     SQLQuery(Arc<SQLQuery<TypeRef>>),
     SQLExpr(Arc<SQLExpr<TypeRef>>),
     SQLBuiltin,
-    SchemaEntry(SchemaEntryExpr),
+    SchemaEntry(STypedExpr),
     Fn(FnExpr<TypeRef>),
     FnCall(FnCallExpr<TypeRef>),
     NativeFn(String),
@@ -590,8 +574,11 @@ pub struct STypedExpr {
 }
 
 impl STypedExpr {
-    pub fn new_unknown(debug_name: &str) -> CRef<STypedExpr> {
-        CRef::new_unknown(debug_name)
+    pub fn new_unknown(debug_name: &str) -> STypedExpr {
+        STypedExpr {
+            type_: CRef::new_unknown(&format!("{} type", debug_name)),
+            expr: CRef::new_unknown(&format!("{} expr", debug_name)),
+        }
     }
 
     pub fn to_runtime_type(&self) -> runtime::error::Result<TypedExpr<Ref<Type>>> {
@@ -619,13 +606,19 @@ impl fmt::Debug for STypedExpr {
     }
 }
 
-impl Constrainable for STypedExpr {}
+impl Constrainable for STypedExpr {
+    fn unify(&self, other: &Self) -> Result<()> {
+        self.expr.unify(&other.expr)?;
+        self.type_.unify(&other.type_)?;
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum SchemaEntry {
     Schema(ast::Path),
     Type(CRef<MType>),
-    Expr(CRef<STypedExpr>),
+    Expr(STypedExpr),
 }
 
 pub fn mkref<T>(t: T) -> Ref<T> {

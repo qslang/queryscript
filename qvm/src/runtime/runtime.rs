@@ -42,25 +42,15 @@ pub fn eval<'a>(
             schema::Expr::Unknown => {
                 return Err(RuntimeError::new("unresolved extern"));
             }
-            schema::Expr::SchemaEntry(schema::SchemaEntryExpr { entry, .. }) => {
-                let ret = match entry {
-                    schema::SchemaEntry::Expr(e) => {
-                        eval(
-                            ctx,
-                            &schema::TypedExpr {
-                                type_: typed_expr.type_.clone(),
-                                expr: Arc::new(
-                                    e.must()?.read()?.expr.must()?.read()?.to_runtime_type()?,
-                                ),
-                            },
-                        )
-                        .await
-                    }
-                    _ => {
-                        return rt_unimplemented!("evaluating a non-expression");
-                    }
-                };
-                ret
+            schema::Expr::SchemaEntry(schema::STypedExpr { expr, .. }) => {
+                eval(
+                    ctx,
+                    &schema::TypedExpr {
+                        type_: typed_expr.type_.clone(),
+                        expr: Arc::new(expr.must()?.read()?.to_runtime_type()?),
+                    },
+                )
+                .await
             }
             schema::Expr::Fn { .. } => {
                 return Err(RuntimeError::unimplemented("functions"));

@@ -20,8 +20,6 @@ pub async fn eval(
     query: &sqlast::Query,
     params: HashMap<String, SQLParam>,
 ) -> Result<Arc<dyn Relation>> {
-    // eprintln!("query: {:?}", query);
-    // eprintln!("params: {:?}", params);
     let mut ctx =
         SessionContext::with_config_rt(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
 

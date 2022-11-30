@@ -178,24 +178,18 @@ pub fn compile_reference(
     let entry = decl.value.clone();
     let remainder_cpy = remainder.clone();
 
-    let type_ = match &entry {
+    let expr = match &entry {
         SchemaEntry::Expr(v) => v.clone(),
         _ => return Err(CompileError::wrong_kind(path.clone(), "value", &decl)),
-    }
-    .then(move |typed: Ref<STypedExpr>| -> Result<CRef<MType>> {
-        let type_ = typed
-            .read()?
-            .type_
-            .then(|t: Ref<SType>| Ok(t.read()?.instantiate()?))?;
-        typecheck_path(type_.clone(), remainder_cpy.as_slice())
-    })?;
+    };
+    let type_ = expr
+        .type_
+        .then(|t: Ref<SType>| Ok(t.read()?.instantiate()?))?;
+    typecheck_path(type_.clone(), remainder_cpy.as_slice())?;
 
     let top_level_ref = TypedExpr {
         type_: type_.clone(),
-        expr: Arc::new(Expr::SchemaEntry(SchemaEntryExpr {
-            debug_name: decl.name.clone(),
-            entry: entry.clone(),
-        })),
+        expr: Arc::new(Expr::SchemaEntry(expr.clone())),
     };
 
     let r = match remainder.len() {
@@ -1050,8 +1044,62 @@ pub fn compile_sqlexpr(
             // expression if they do.
             //
             let type_ = fn_type.ret.clone();
-            let sql_expr = Arc::new(expr.clone()); // XXX This is awful
-            let expr = if true {
+            let is_builtin = match func.expr.as_ref() {
+                Expr::SchemaEntry(STypedExpr { expr, .. }) => {
+                    expr.is_known()? && matches!(*(expr.must()?.read()?), Expr::SQLBuiltin)
+                }
+                _ => false,
+            };
+
+            let expr = if is_builtin {
+                let arg_exprs: Vec<_> = arg_sqlexprs
+                    .iter()
+                    .map(|e| {
+                        let name = Arc::new(e.name.clone());
+                        e.expr.then(move |expr: Ref<SQLExpr<CRef<MType>>>| {
+                            // This is a bit annoying. It'd be a lot nicer if we didn't
+                            // have to clone the name twice.
+                            Ok(mkcref(NameAndSQLExpr {
+                                name: name.as_ref().clone(),
+                                expr: Arc::new(expr.read()?.clone()),
+                            }))
+                        })
+                    })
+                    .collect::<Result<_>>()?;
+
+                let name_wrapper = Arc::new(name.clone());
+                combine_crefs(arg_exprs)?.then(
+                    move |arg_exprs: Ref<Vec<Ref<NameAndSQLExpr>>>| {
+                        let mut args = Vec::new();
+                        let mut params = BTreeMap::new();
+                        for arg in arg_exprs.read()?.iter() {
+                            let arg = arg.read()?;
+                            args.push(sqlast::FunctionArg::Named {
+                                name: sqlast::Ident {
+                                    value: arg.name.clone(),
+                                    quote_style: None,
+                                },
+                                arg: sqlast::FunctionArgExpr::Expr(arg.expr.expr.clone()),
+                            });
+                            params.extend(arg.expr.params.clone());
+                        }
+
+                        Ok(mkcref(Expr::SQLExpr(Arc::new(SQLExpr {
+                            params,
+                            expr: sqlast::Expr::Function(sqlast::Function {
+                                name: name_wrapper.as_ref().clone(),
+                                args,
+
+                                // TODO: We may want to forward these fields from the
+                                // expr (but doing that blindly causes ownership errors)
+                                over: None,
+                                distinct: false,
+                                special: false,
+                            }),
+                        }))))
+                    },
+                )?
+            } else {
                 let arg_exprs: Vec<_> = arg_sqlexprs
                     .iter()
                     .map(|e| {
@@ -1066,84 +1114,62 @@ pub fn compile_sqlexpr(
                     .collect::<Result<_>>()?;
                 combine_crefs(arg_exprs)?.then(
                     move |arg_exprs: Ref<Vec<Ref<TypedExpr<CRef<MType>>>>>| {
-                        let is_builtin = match func.expr.as_ref() {
-                            Expr::SchemaEntry(SchemaEntryExpr {
-                                entry: SchemaEntry::Expr(e),
-                                ..
-                            }) => {
-                                e.is_known()?
-                                    && matches!(
-                                        *(e.must()?.read()?.expr.must()?.read()?),
-                                        Expr::SQLBuiltin
-                                    )
-                            }
-                            _ => false,
-                        };
-                        Ok(mkcref(if is_builtin {
-                            Expr::SQLExpr(Arc::new(SQLExpr {
-                                params: Params::new(),
-                                expr: sql_expr.as_ref().clone(),
-                            }))
-                        } else {
-                            Expr::FnCall(FnCallExpr {
-                                func: Arc::new(TypedExpr {
-                                    type_: mkcref(MType::Fn(fn_type.clone())),
-                                    expr: func.expr.clone(),
-                                }),
-                                args: arg_exprs
-                                    .read()?
-                                    .iter()
-                                    .map(|e| Ok(e.read()?.clone()))
-                                    .collect::<Result<_>>()?,
-                            })
-                        }))
+                        Ok(mkcref(Expr::FnCall(FnCallExpr {
+                            func: Arc::new(TypedExpr {
+                                type_: mkcref(MType::Fn(fn_type.clone())),
+                                expr: func.expr.clone(),
+                            }),
+                            args: arg_exprs
+                                .read()?
+                                .iter()
+                                .map(|e| Ok(e.read()?.clone()))
+                                .collect::<Result<_>>()?,
+                        })))
                     },
                 )?
-            } else {
-                panic!();
-                // let args_nonames = arg_sqlexprs
-                //     .iter()
-                //     .map(|e| CTypedSQLExpr {
-                //         type_: e.type_.clone(),
-                //         expr: e.expr.clone(),
-                //     })
-                //     .collect::<Vec<_>>();
-                // let mut params = combine_sqlparams(args_nonames.iter().collect())?;
-
-                // let placeholder_name = QVM_NAMESPACE.to_string()
-                //     + new_placeholder_name(schema.clone(), "func").as_str();
-
-                // params.insert(
-                //     placeholder_name.clone(),
-                //     TypedExpr {
-                //         expr: func.expr,
-                //         type_: fn_type.ret.clone(),
-                //     },
-                // );
-
-                // Arc::new(Expr::SQLExpr(Arc::new(SQLExpr {
-                //     params,
-                //     expr: sqlast::Expr::Function(sqlast::Function {
-                //         name: sqlast::ObjectName(vec![sqlast::Ident {
-                //             value: placeholder_name.clone(),
-                //             quote_style: None,
-                //         }]),
-                //         args: arg_sqlexprs
-                //             .iter()
-                //             .map(|e| sqlast::FunctionArg::Named {
-                //                 name: sqlast::Ident {
-                //                     value: e.name.clone(),
-                //                     quote_style: None,
-                //                 },
-                //                 arg: sqlast::FunctionArgExpr::Expr(e.expr.expr.clone()),
-                //             })
-                //             .collect(),
-                //         over: None,
-                //         distinct: false,
-                //         special: false,
-                //     }),
-                // })))
             };
+            // let args_nonames = arg_sqlexprs
+            //     .iter()
+            //     .map(|e| CTypedSQLExpr {
+            //         type_: e.type_.clone(),
+            //         expr: e.expr.clone(),
+            //     })
+            //     .collect::<Vec<_>>();
+            // let mut params = combine_sqlparams(args_nonames.iter().collect())?;
+
+            // let placeholder_name = QVM_NAMESPACE.to_string()
+            //     + new_placeholder_name(schema.clone(), "func").as_str();
+
+            // params.insert(
+            //     placeholder_name.clone(),
+            //     TypedExpr {
+            //         expr: func.expr,
+            //         type_: fn_type.ret.clone(),
+            //     },
+            // );
+
+            // Arc::new(Expr::SQLExpr(Arc::new(SQLExpr {
+            //     params,
+            //     expr: sqlast::Expr::Function(sqlast::Function {
+            //         name: sqlast::ObjectName(vec![sqlast::Ident {
+            //             value: placeholder_name.clone(),
+            //             quote_style: None,
+            //         }]),
+            //         args: arg_sqlexprs
+            //             .iter()
+            //             .map(|e| sqlast::FunctionArg::Named {
+            //                 name: sqlast::Ident {
+            //                     value: e.name.clone(),
+            //                     quote_style: None,
+            //                 },
+            //                 arg: sqlast::FunctionArgExpr::Expr(e.expr.expr.clone()),
+            //             })
+            //             .collect(),
+            //         over: None,
+            //         distinct: false,
+            //         special: false,
+            //     }),
+            // })))
 
             // XXX There are cases here where we could inline eagerly
             //

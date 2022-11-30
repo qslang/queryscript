@@ -56,17 +56,7 @@ mod tests {
                     decls.insert(format!("type {}", name), Box::new(t.clone()));
                 }
                 compile::schema::SchemaEntry::Expr(e) => {
-                    decls.insert(
-                        format!("let {}", name),
-                        Box::new(
-                            e.must()
-                                .expect("Unresolved declaration after compilation")
-                                .read()
-                                .unwrap()
-                                .type_
-                                .clone(),
-                        ),
-                    );
+                    decls.insert(format!("let {}", name), Box::new(e.type_.clone()));
                 }
                 _ => {}
             }
