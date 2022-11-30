@@ -51,6 +51,7 @@ const BUILTIN_TYPES: &'static [BuiltinType] = &[
 const BUILTIN_FUNCTIONS: &'static str = "
 fn load<R>(file varchar, format varchar) -> [R] = native;
 fn min<R>(value R) -> R = sql;
+fn max<R>(value R) -> R = sql;
 ";
 
 lazy_static! {
