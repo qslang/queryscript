@@ -110,12 +110,9 @@ mod tests {
 
     #[test]
     fn test_schemas() {
-        let tests = vec![
-            Path::new(env!("CARGO_MANIFEST_DIR")),
-            Path::new("tests/schemas/"),
-        ]
-        .iter()
-        .collect::<PathBuf>();
+        let tests = vec![Path::new(env!("CARGO_MANIFEST_DIR")), Path::new("tests/")]
+            .iter()
+            .collect::<PathBuf>();
         assert!(tests.is_dir());
 
         let rt = runtime::build().expect("Failed to build runtime");
