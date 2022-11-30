@@ -55,7 +55,7 @@ impl ReadlineHelper {
             schema,
             curr_buffer,
             stats: Rc::new(RefCell::new(ReadlineStats::new())),
-            debug: false, // Switch this to true to get diagnostics as you type
+            debug: true, // Switch this to true to get diagnostics as you type
         }
     }
 }
@@ -272,10 +272,17 @@ impl Completer for ReadlineHelper {
                 Vec::new()
             });
 
-        let keywords = ident_types
+        let mut keywords = ident_types
             .get(&parser::AUTOCOMPLETE_KEYWORD)
             .unwrap_or(&Vec::new())
             .clone();
+
+        if match partial.chars().next() {
+            Some(c) => c.is_lowercase(),
+            None => false,
+        } {
+            keywords = keywords.iter().map(|k| k.to_lowercase()).collect();
+        }
 
         let all = vec![vars, types, schemas, keywords].concat();
         let filtered = all
