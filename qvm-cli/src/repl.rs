@@ -161,6 +161,8 @@ fn run_command(
                 }
             };
 
+            eprintln!("COMPILED QUERY: {:#?}", compiled);
+
             if let Some(compiled) = compiled {
                 let ctx = (&repl_schema).into();
                 let expr = compiled.to_runtime_type()?;

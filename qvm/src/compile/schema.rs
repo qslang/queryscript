@@ -488,12 +488,13 @@ where
     pub args: Vec<TypedExpr<TypeRef>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SchemaEntryExpr {
     pub debug_name: String,
     pub entry: SchemaEntry,
 }
 
+/*
 impl fmt::Debug for SchemaEntryExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SchemaEntryExpr")
@@ -501,6 +502,7 @@ impl fmt::Debug for SchemaEntryExpr {
             .finish_non_exhaustive()
     }
 }
+*/
 
 #[derive(Clone, Debug)]
 pub enum Expr<TypeRef>
@@ -509,6 +511,7 @@ where
 {
     SQLQuery(Arc<SQLQuery<TypeRef>>),
     SQLExpr(Arc<SQLExpr<TypeRef>>),
+    SQLBuiltin,
     SchemaEntry(SchemaEntryExpr),
     Fn(FnExpr<TypeRef>),
     FnCall(FnCallExpr<TypeRef>),
@@ -552,6 +555,7 @@ impl Expr<CRef<MType>> {
             })),
             Expr::SchemaEntry(e) => Ok(Expr::SchemaEntry(e.clone())),
             Expr::NativeFn(f) => Ok(Expr::NativeFn(f.clone())),
+            Expr::SQLBuiltin => Ok(Expr::SQLBuiltin),
             Expr::Unknown => Ok(Expr::Unknown),
         }
     }

@@ -747,6 +747,10 @@ pub fn compile_schema_entries(
                             expr: mkcref(Expr::NativeFn(name.to_string())),
                         }
                     }
+                    ast::FnBody::SQL => CTypedExpr {
+                        type_: MType::new_unknown(&format!("__sql('{}')", name)),
+                        expr: mkcref(Expr::SQLBuiltin),
+                    },
                     ast::FnBody::Expr(expr) => {
                         compile_expr(compiler.clone(), inner_schema.clone(), expr)?
                     }
@@ -773,7 +777,7 @@ pub fn compile_schema_entries(
                         expr: compiled.expr.then(move |expr: Ref<Expr<CRef<MType>>>| {
                             let expr = expr.read()?;
                             Ok(mkcref(match &*expr {
-                                Expr::NativeFn(..) => expr.clone(),
+                                Expr::NativeFn(..) | Expr::SQLBuiltin => expr.clone(),
                                 _ => Expr::Fn(FnExpr {
                                     inner_schema: inner_schema.clone(),
                                     body: Arc::new(expr.clone()),

@@ -1050,6 +1050,7 @@ pub fn compile_sqlexpr(
             // expression if they do.
             //
             let type_ = fn_type.ret.clone();
+            let sql_expr = Arc::new(expr.clone()); // XXX This is awful
             let expr = if true {
                 let arg_exprs: Vec<_> = arg_sqlexprs
                     .iter()
@@ -1065,17 +1066,37 @@ pub fn compile_sqlexpr(
                     .collect::<Result<_>>()?;
                 combine_crefs(arg_exprs)?.then(
                     move |arg_exprs: Ref<Vec<Ref<TypedExpr<CRef<MType>>>>>| {
-                        Ok(mkcref(Expr::FnCall(FnCallExpr {
-                            func: Arc::new(TypedExpr {
-                                type_: mkcref(MType::Fn(fn_type.clone())),
-                                expr: func.expr.clone(),
-                            }),
-                            args: arg_exprs
-                                .read()?
-                                .iter()
-                                .map(|e| Ok(e.read()?.clone()))
-                                .collect::<Result<_>>()?,
-                        })))
+                        let is_builtin = match func.expr.as_ref() {
+                            Expr::SchemaEntry(SchemaEntryExpr {
+                                entry: SchemaEntry::Expr(e),
+                                ..
+                            }) => {
+                                e.is_known()?
+                                    && matches!(
+                                        *(e.must()?.read()?.expr.must()?.read()?),
+                                        Expr::SQLBuiltin
+                                    )
+                            }
+                            _ => false,
+                        };
+                        Ok(mkcref(if is_builtin {
+                            Expr::SQLExpr(Arc::new(SQLExpr {
+                                params: Params::new(),
+                                expr: sql_expr.as_ref().clone(),
+                            }))
+                        } else {
+                            Expr::FnCall(FnCallExpr {
+                                func: Arc::new(TypedExpr {
+                                    type_: mkcref(MType::Fn(fn_type.clone())),
+                                    expr: func.expr.clone(),
+                                }),
+                                args: arg_exprs
+                                    .read()?
+                                    .iter()
+                                    .map(|e| Ok(e.read()?.clone()))
+                                    .collect::<Result<_>>()?,
+                            })
+                        }))
                     },
                 )?
             } else {

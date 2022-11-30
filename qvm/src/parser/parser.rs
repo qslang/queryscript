@@ -354,8 +354,13 @@ impl<'a> Parser<'a> {
         };
 
         let body = if self.consume_token(&Token::Eq) {
-            self.expect_keyword("native")?;
-            FnBody::Native
+            if self.consume_keyword("native") {
+                FnBody::Native
+            } else if self.consume_keyword("sql") {
+                FnBody::SQL
+            } else {
+                return unexpected_token!(self.peek_token(), "Expected: native | sql");
+            }
         } else {
             self.expect_token(&Token::LBrace)?;
 

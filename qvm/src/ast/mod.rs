@@ -70,7 +70,8 @@ pub enum ImportList {
 #[derive(Clone, Debug)]
 pub enum FnBody {
     Expr(Expr),
-    Native,
+    Native, // A NativeFn (e.g. load)
+    SQL,    // A function we expect to exist in the SQL runtime
 }
 
 #[derive(Clone, Debug)]
