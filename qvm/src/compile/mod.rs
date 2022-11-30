@@ -7,5 +7,6 @@ pub mod schema;
 pub mod sql;
 mod util;
 
-pub use compile::Compiler;
-pub use error::CompileError;
+pub use compile::{lookup_path, lookup_schema, Compiler};
+pub use error::{CompileError, Result};
+pub use sql::compile_reference;

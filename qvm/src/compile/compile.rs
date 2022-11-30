@@ -167,9 +167,10 @@ pub fn lookup_path(
     schema: Ref<Schema>,
     path: &ast::Path,
     import_global: bool,
-) -> Result<(Decl, ast::Path)> {
+    resolve_last: bool,
+) -> Result<(Ref<Schema>, Option<Decl>, ast::Path)> {
     if path.len() == 0 {
-        return Err(CompileError::no_such_entry(path.clone()));
+        return Ok((schema, None, path.clone()));
     }
 
     let mut schema = schema;
@@ -180,8 +181,8 @@ pub fn lookup_path(
                     return Err(CompileError::wrong_kind(path.clone(), "public", decl));
                 }
 
-                if i == path.len() - 1 {
-                    return Ok((decl.clone(), vec![]));
+                if i == path.len() - 1 && !resolve_last {
+                    return Ok((schema.clone(), Some(decl.clone()), vec![]));
                 }
 
                 match &decl.value {
@@ -191,7 +192,7 @@ pub fn lookup_path(
                             .schema
                             .clone()
                     }
-                    _ => return Ok((decl.clone(), path[i + 1..].to_vec())),
+                    _ => return Ok((schema.clone(), Some(decl.clone()), path[i + 1..].to_vec())),
                 }
             }
             None => match &schema.read()?.parent_scope {
@@ -201,6 +202,7 @@ pub fn lookup_path(
                         parent.clone(),
                         &path[i..].to_vec(),
                         import_global,
+                        resolve_last,
                     )
                 }
                 None => {
@@ -210,9 +212,10 @@ pub fn lookup_path(
                             compiler.builtins(),
                             &path[i..].to_vec(),
                             false, /* import_global */
+                            resolve_last,
                         );
                     } else {
-                        return Err(CompileError::no_such_entry(path.clone()));
+                        return Ok((schema.clone(), None, path[i..].to_vec()));
                     }
                 }
             },
@@ -221,7 +224,7 @@ pub fn lookup_path(
         schema = new;
     }
 
-    return Err(CompileError::no_such_entry(path.clone()));
+    return Ok((schema.clone(), None, Vec::new()));
 }
 
 pub fn resolve_type(
@@ -231,16 +234,17 @@ pub fn resolve_type(
 ) -> Result<CRef<MType>> {
     match &ast.body {
         ast::TypeBody::Reference(path) => {
-            let (decl, r) = lookup_path(
+            let (_, decl, r) = lookup_path(
                 compiler.clone(),
                 schema.clone(),
                 &path,
                 true, /* import_global */
+                true, /* resolve_last */
             )?;
             if r.len() > 0 {
                 return Err(CompileError::no_such_entry(r));
             }
-
+            let decl = decl.ok_or_else(|| CompileError::no_such_entry(r))?;
             let t = match decl.value {
                 SchemaEntry::Type(t) => t,
                 _ => return Err(CompileError::wrong_kind(path.clone(), "type", &decl)),
@@ -540,15 +544,17 @@ pub fn declare_schema_entries(
                                 return Err(CompileError::unimplemented("path imports"));
                             }
 
-                            let (decl, r) = lookup_path(
+                            let (_, decl, r) = lookup_path(
                                 compiler.clone(),
                                 imported.read()?.schema.clone(),
                                 &item,
                                 false, /* import_global */
+                                false, /* resolve_last */
                             )?;
                             if r.len() > 0 {
                                 return Err(CompileError::no_such_entry(r.clone()));
                             }
+                            let decl = decl.ok_or_else(|| CompileError::no_such_entry(r))?;
 
                             let imported_schema = SchemaInstance {
                                 schema: schema.clone(),

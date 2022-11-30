@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::parser::error::{unexpected_token, Result};
 use sqlparser::{
+    ast as sqlast,
     dialect::{keywords::Keyword, GenericDialect},
     parser,
     tokenizer::{TokenWithLocation, Tokenizer},
@@ -9,6 +10,17 @@ use sqlparser::{
 pub use sqlparser::tokenizer::Location;
 pub use sqlparser::tokenizer::Token;
 pub use sqlparser::tokenizer::Word;
+
+// In order to communicate semantic context to the autocompleter, we encode different kinds of
+// information into the `quote_style` field of `Word`.  These special placeholders indicate various
+// special tokens.
+//
+pub const AUTOCOMPLETE_UNKNOWN: char = 'u'; // Unknown
+pub const AUTOCOMPLETE_KEYWORD: char = 'k'; // A keyword
+pub const AUTOCOMPLETE_ALIAS: char = 'v'; // A new name, which shouldn't be autocompleted
+pub const AUTOCOMPLETE_VARIABLE: char = 'v'; // A variable name
+pub const AUTOCOMPLETE_TYPE: char = 't'; // A type name
+pub const AUTOCOMPLETE_SCHEMA: char = 's'; // A schema
 
 pub struct Parser<'a> {
     sqlparser: parser::Parser<'a>,
@@ -59,7 +71,7 @@ impl<'a> Parser<'a> {
 
     pub fn peek_keyword(&mut self, expected: &str) -> bool {
         self.sqlparser
-            .autocomplete_tokens(&[Token::make_word(expected, Some('\0'))]);
+            .autocomplete_tokens(&[Token::make_word(expected, Some(AUTOCOMPLETE_KEYWORD))]);
         match self.peek_token().token {
             Token::Word(w) => {
                 if w.value.to_lowercase() == expected.to_lowercase() {
@@ -161,7 +173,6 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_ident(&mut self) -> Result<Ident> {
-        self.autocomplete_tokens(&[Token::make_ident("")]);
         let token = self.next_token();
         let location = token.location;
         match token.token {
@@ -174,9 +185,22 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_path(&mut self) -> Result<Path> {
-        let mut path = Vec::new();
+    pub fn parse_path(&mut self, kind: char) -> Result<Path> {
+        let mut path = Vec::<Ident>::new();
         loop {
+            self.autocomplete_tokens(&[Token::make_word(
+                sqlast::ObjectName(
+                    path.iter()
+                        .map(|p| sqlast::Ident {
+                            value: p.clone(),
+                            quote_style: Some('\"'),
+                        })
+                        .collect(),
+                )
+                .to_string()
+                .as_str(),
+                Some(kind),
+            )]);
             path.push(self.parse_ident()?);
             self.autocomplete_tokens(&[Token::Period]);
             match self.peek_token().token {
@@ -206,6 +230,7 @@ impl<'a> Parser<'a> {
         let mut expect_ident = true;
         loop {
             if expect_ident {
+                self.autocomplete_tokens(&[Token::make_ident("")]);
                 if let Ok(ident) = self.parse_ident() {
                     ret.push(ident);
                 } else {
@@ -228,7 +253,7 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_simple_import(&mut self) -> Result<StmtBody> {
-        let path = self.parse_path()?;
+        let path = self.parse_path(AUTOCOMPLETE_SCHEMA)?;
         self.expect_eos()?;
         Ok(StmtBody::Import {
             path,
@@ -254,7 +279,7 @@ impl<'a> Parser<'a> {
         };
         self.expect_keyword("from")?;
 
-        let path = self.parse_path()?;
+        let path = self.parse_path(AUTOCOMPLETE_SCHEMA)?;
         let args = if self.consume_token(&Token::LBrace) {
             let mut args = Vec::new();
             loop {
@@ -423,7 +448,7 @@ impl<'a> Parser<'a> {
         } else if self.peek_token().token == Token::LBrace {
             self.parse_struct()?
         } else {
-            TypeBody::Reference(self.parse_path()?)
+            TypeBody::Reference(self.parse_path(AUTOCOMPLETE_TYPE)?)
         };
 
         if self.consume_keyword("exclude") {
@@ -471,7 +496,7 @@ impl<'a> Parser<'a> {
                         }
                         self.next_token();
                     }
-                    struct_.push(StructEntry::Include(self.parse_path()?));
+                    struct_.push(StructEntry::Include(self.parse_path(AUTOCOMPLETE_TYPE)?));
                     needs_comma = true;
                 }
                 _ => {
@@ -534,4 +559,11 @@ pub fn parse_schema(text: &str) -> Result<Schema> {
     let mut parser = Parser::new(tokens, eof);
 
     parser.parse_schema()
+}
+
+pub fn parse_path(text: &str) -> Result<Path> {
+    let (tokens, eof) = tokenize(text)?;
+    let mut parser = Parser::new(tokens, eof);
+
+    parser.parse_path(AUTOCOMPLETE_UNKNOWN)
 }

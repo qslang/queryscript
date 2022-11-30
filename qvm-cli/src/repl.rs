@@ -16,11 +16,21 @@ pub fn run(rt: &runtime::Runtime) {
         .expect("current working directory")
         .display()
         .to_string();
+    let repl_compiler = compile::Compiler::new().unwrap();
     let repl_schema = schema::Schema::new(Some(cwd));
     let curr_buffer = Rc::new(RefCell::new(String::new()));
-    let helper = ReadlineHelper::new(repl_schema.clone(), curr_buffer.clone());
+    let helper = ReadlineHelper::new(
+        repl_compiler.clone(),
+        repl_schema.clone(),
+        curr_buffer.clone(),
+    );
 
-    let mut rl = Editor::new().expect("readline library failed");
+    let mut rl = Editor::with_config(
+        rustyline::Config::builder()
+            // .completion_type(rustyline::config::CompletionType::List)
+            .build(),
+    )
+    .expect("readline library failed");
     rl.set_helper(Some(helper));
 
     let qvm_dir = get_qvm_dir();
@@ -69,7 +79,12 @@ pub fn run(rt: &runtime::Runtime) {
                     _ => {}
                 };
 
-                let result = run_command(rt, repl_schema.clone(), &*curr_buffer.borrow());
+                let result = run_command(
+                    rt,
+                    repl_compiler.clone(),
+                    repl_schema.clone(),
+                    &*curr_buffer.borrow(),
+                );
                 match result {
                     Ok(RunCommandResult::Done) => {
                         // Reset the buffer
@@ -114,17 +129,27 @@ enum RunCommandResult {
 
 fn run_command(
     rt: &runtime::Runtime,
+    compiler: compile::Compiler,
     repl_schema: schema::SchemaRef,
     cmd: &str,
 ) -> Result<RunCommandResult, QVMError> {
     let (tokens, eof) = parser::tokenize(&cmd)?;
     let mut parser = parser::Parser::new(tokens, eof);
 
+    if parser.consume_token(&parser::Token::Placeholder("?".to_string())) {
+        match parser.parse_schema() {
+            Ok(_) => {}
+            Err(_) => {}
+        }
+        let loc = parser.peek_token().location;
+        eprintln!("{:#?}", parser.get_autocomplete(loc));
+        return Ok(RunCommandResult::Done);
+    }
+
     match parser.parse_schema() {
         Ok(ast) => {
             let num_exprs = repl_schema.read()?.exprs.len();
 
-            let compiler = compile::Compiler::new()?;
             compiler.compile_schema_ast(repl_schema.clone(), &ast)?;
 
             let compiled = {

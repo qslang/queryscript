@@ -1,12 +1,13 @@
 use rustyline::{completion::*, highlight::*, hint::*, validate::*, Context, Helper, Result};
 
+use qvm::compile;
 use qvm::compile::schema;
 use qvm::parser;
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::rc::Rc;
-use std::sync::{Arc, RwLock};
 
 #[derive(Clone, Debug)]
 pub struct ReadlineStats {
@@ -33,7 +34,8 @@ impl fmt::Display for ReadlineStats {
 }
 
 pub struct ReadlineHelper {
-    pub schema: Arc<RwLock<schema::Schema>>,
+    pub compiler: compile::Compiler,
+    pub schema: schema::Ref<schema::Schema>,
     pub curr_buffer: Rc<RefCell<String>>,
     pub stats: Rc<RefCell<ReadlineStats>>,
     pub debug: bool,
@@ -41,10 +43,12 @@ pub struct ReadlineHelper {
 
 impl ReadlineHelper {
     pub fn new(
-        schema: Arc<RwLock<schema::Schema>>,
+        compiler: compile::Compiler,
+        schema: schema::Ref<schema::Schema>,
         curr_buffer: Rc<RefCell<String>>,
     ) -> ReadlineHelper {
         ReadlineHelper {
+            compiler,
             schema,
             curr_buffer,
             stats: Rc::new(RefCell::new(ReadlineStats::new())),
@@ -71,6 +75,62 @@ fn loc_to_pos(text: &str, loc: parser::Location) -> usize {
         .sum::<usize>()
         + loc.column as usize
         - 1
+}
+
+fn parse_longest_path(texts: &Vec<String>) -> Vec<String> {
+    texts
+        .iter()
+        .fold::<Vec<String>, _>(Vec::new(), |acc, item| {
+            let parsed = if item.is_empty() {
+                Vec::new()
+            } else {
+                match parser::parse_path(item.as_str()) {
+                    Ok(path) => path,
+                    Err(_) => Vec::new(),
+                }
+            };
+            if acc.len() < parsed.len() {
+                parsed
+            } else {
+                acc
+            }
+        })
+}
+
+fn get_imported_decls<F: FnMut(&schema::SchemaEntry) -> bool>(
+    compiler: compile::Compiler,
+    schema: schema::Ref<schema::Schema>,
+    path: &Vec<String>,
+    mut f: F,
+) -> compile::Result<Vec<String>> {
+    let (schema, _, remainder) = compile::lookup_path(compiler, schema.clone(), path, true, true)?;
+    if remainder.len() > 0 {
+        return Ok(Vec::new());
+    }
+    return Ok(schema
+        .read()?
+        .decls
+        .iter()
+        .filter_map(move |(k, v)| if f(&v.value) { Some(k.clone()) } else { None })
+        .collect::<Vec<String>>());
+}
+
+fn get_record_fields(
+    compiler: compile::Compiler,
+    schema: schema::Ref<schema::Schema>,
+    path: &Vec<String>,
+) -> compile::Result<Vec<String>> {
+    let expr = compile::compile_reference(compiler.clone(), schema.clone(), path)?;
+    let type_ = expr.type_.must()?.read()?.clone();
+
+    match type_ {
+        schema::MType::Record(fields) => {
+            return Ok(fields.iter().map(|f| f.name.clone()).collect());
+        }
+        _ => {}
+    }
+
+    Ok(Vec::new())
 }
 
 impl Completer for ReadlineHelper {
@@ -102,6 +162,10 @@ impl Completer for ReadlineHelper {
         parser.parse_schema().ok();
 
         let (tok, suggestions) = parser.get_autocomplete(full_loc);
+        let partial = match tok.token {
+            parser::Token::Word(w) => w.value,
+            _ => "".to_string(),
+        };
         let suggestion_loc = tok.location.clone();
         let suggestion_pos = loc_to_pos(full.as_str(), suggestion_loc);
 
@@ -110,50 +174,83 @@ impl Completer for ReadlineHelper {
             return Ok((0, Vec::new()));
         }
 
-        let expects_ident = suggestions
-            .iter()
-            .filter(|t| {
-                matches!(
-                    t,
-                    parser::Token::Word(parser::Word {
-                        quote_style: Some('\"'),
-                        ..
-                    })
-                )
-            })
-            .count()
-            > 0;
-
-        let all: Vec<String> = if expects_ident {
-            let schema = match self.schema.read() {
-                Ok(s) => s,
-                Err(e) => {
-                    (&mut *self.stats.borrow_mut()).msg = format!("{}", e);
-                    return Ok((0, Vec::new()));
+        let mut ident_types = BTreeMap::<char, Vec<String>>::new();
+        for s in suggestions.clone() {
+            match s {
+                parser::Token::Word(w) => {
+                    let style = match w.quote_style {
+                        None | Some(parser::AUTOCOMPLETE_KEYWORD) => parser::AUTOCOMPLETE_KEYWORD,
+                        Some('\"') | Some(parser::AUTOCOMPLETE_VARIABLE) => {
+                            parser::AUTOCOMPLETE_VARIABLE
+                        }
+                        Some(c) => c,
+                    };
+                    ident_types
+                        .entry(style)
+                        .or_insert_with(Vec::new)
+                        .push(w.value);
                 }
-            };
-            schema
-                .decls
-                .iter()
-                .filter_map(|(k, v)| match v.value {
-                    schema::SchemaEntry::Expr(_) | schema::SchemaEntry::Schema(_) => {
-                        Some(k.clone())
-                    }
-                    _ => None,
-                })
-                .collect()
-        } else {
-            suggestions
-                .into_iter()
-                .filter_map(|t| match t {
-                    parser::Token::Word(w) if w.quote_style.is_none() => Some(w.value.clone()),
-                    _ => None,
-                })
-                .collect()
-        };
+                _ => {}
+            }
+        }
 
-        let filtered = all.iter().collect::<Vec<&String>>();
-        (&mut *self.stats.borrow_mut()).msg = format!("{} {:?}", suggestion_pos - start_pos, all);
+        let vars = ident_types
+            .get(&parser::AUTOCOMPLETE_VARIABLE)
+            .map(parse_longest_path)
+            .map_or(Vec::new(), |path| {
+                if let Ok(choices) =
+                    get_imported_decls(self.compiler.clone(), self.schema.clone(), &path, |se| {
+                        matches!(se, schema::SchemaEntry::Expr(_))
+                    })
+                {
+                    return choices;
+                }
+                if let Ok(choices) =
+                    get_record_fields(self.compiler.clone(), self.schema.clone(), &path)
+                {
+                    return choices;
+                }
+                Vec::new()
+            })
+            .clone();
+
+        let longest = ident_types
+            .get(&parser::AUTOCOMPLETE_TYPE)
+            .map(parse_longest_path);
+        let types = ident_types
+            .get(&parser::AUTOCOMPLETE_TYPE)
+            .map(parse_longest_path)
+            .map_or(Vec::new(), |path| {
+                if let Ok(choices) =
+                    get_imported_decls(self.compiler.clone(), self.schema.clone(), &path, |se| {
+                        matches!(se, schema::SchemaEntry::Type(_))
+                            || matches!(se, schema::SchemaEntry::Schema(_))
+                    })
+                {
+                    return choices;
+                }
+                Vec::new()
+            });
+
+        let keywords = ident_types
+            .get(&parser::AUTOCOMPLETE_KEYWORD)
+            .unwrap_or(&Vec::new())
+            .clone();
+
+        let all = vec![vars, types, keywords].concat();
+        let filtered = all
+            .iter()
+            .filter(|a| a.starts_with(partial.as_str()))
+            .collect::<Vec<_>>();
+
+        (&mut *self.stats.borrow_mut()).msg = format!(
+            "{} {:?} {:?} {:?} {:?}",
+            suggestion_pos - start_pos,
+            partial,
+            filtered,
+            longest,
+            suggestions,
+        );
         let pairs = filtered
             .into_iter()
             .map(|s| Pair {

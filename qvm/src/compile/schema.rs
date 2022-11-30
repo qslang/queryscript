@@ -7,10 +7,12 @@ use std::sync::{Arc, RwLock};
 use crate::ast;
 use crate::compile::{
     error::{CompileError, Result},
-    inference::{mkcref, CRef, Constrainable, Constrained},
+    inference::{mkcref, Constrainable, Constrained},
 };
 use crate::runtime;
 use crate::types::{AtomicType, Field, FnType, Type};
+
+pub use crate::compile::inference::CRef;
 
 pub type Ident = ast::Ident;
 

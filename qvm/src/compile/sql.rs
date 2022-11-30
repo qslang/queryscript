@@ -71,6 +71,7 @@ pub fn compile_sqlreference(
     scope: Ref<SQLScope>,
     sqlpath: &Vec<sqlast::Ident>,
 ) -> Result<CTypedExpr> {
+    let path: Vec<_> = sqlpath.iter().map(|e| e.value.clone()).collect();
     match sqlpath.len() {
         0 => {
             return Err(CompileError::internal(
@@ -90,7 +91,6 @@ pub fn compile_sqlreference(
             } else {
                 let available = scope.read()?.get_available_references(compiler.clone())?;
 
-                let sqlpath = sqlpath.clone();
                 let tse = available.then(
                     move |available: Ref<InsertionOrderMap<String, FieldMatch>>| {
                         if let Some(fm) = available.read()?.get(&name) {
@@ -118,7 +118,7 @@ pub fn compile_sqlreference(
                             // If it doesn't match any names of fields in SQL relations,
                             // compile it as a normal reference.
                             //
-                            let te = compile_reference(compiler.clone(), schema.clone(), &sqlpath)?;
+                            let te = compile_reference(compiler.clone(), schema.clone(), &path)?;
                             Ok(mkcref(te))
                         }
                     },
@@ -154,7 +154,7 @@ pub fn compile_sqlreference(
         _ => {}
     }
 
-    let te = compile_reference(compiler.clone(), schema.clone(), sqlpath)?;
+    let te = compile_reference(compiler.clone(), schema.clone(), &path)?;
     Ok(CTypedExpr {
         type_: te.type_.clone(),
         expr: mkcref(te.expr.as_ref().clone()),
@@ -164,16 +164,17 @@ pub fn compile_sqlreference(
 pub fn compile_reference(
     compiler: Compiler,
     schema: Ref<Schema>,
-    sqlpath: &Vec<sqlast::Ident>,
+    path: &Vec<String>,
 ) -> Result<TypedExpr<CRef<MType>>> {
-    let path: Vec<_> = sqlpath.iter().map(|e| e.value.clone()).collect();
-    let (decl, remainder) = lookup_path(
+    let (_, decl, remainder) = lookup_path(
         compiler.clone(),
         schema.clone(),
         &path,
         true, /* import_global */
+        true, /* resolve_last */
     )?;
 
+    let decl = decl.ok_or_else(|| CompileError::no_such_entry(path.clone()))?;
     let entry = decl.value.clone();
     let remainder_cpy = remainder.clone();
 
@@ -461,7 +462,8 @@ pub fn compile_select(
                     // TODO: This currently assumes that table references always come from outside
                     // the query, which is not actually the case.
                     //
-                    let relation = compile_reference(compiler.clone(), schema.clone(), &name.0)?;
+                    let path: Vec<_> = name.0.iter().map(|e| e.value.clone()).collect();
+                    let relation = compile_reference(compiler.clone(), schema.clone(), &path)?;
 
                     let list_type = mkcref(MType::List(MType::new_unknown(
                         format!("FROM {}", name.to_string()).as_str(),
@@ -968,7 +970,8 @@ pub fn compile_sqlexpr(
                 ));
             }
 
-            let func = compile_reference(compiler.clone(), schema.clone(), &name.0)?;
+            let path: Vec<_> = name.0.iter().map(|e| e.value.clone()).collect();
+            let func = compile_reference(compiler.clone(), schema.clone(), &path)?;
             let fn_type = match func.type_.must()?.read()?.clone() {
                 MType::Fn(f) => f,
                 _ => {
