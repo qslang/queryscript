@@ -1131,6 +1131,7 @@ pub fn compile_sqlexpr(
                                 .iter()
                                 .map(|e| Ok(e.read()?.clone()))
                                 .collect::<Result<_>>()?,
+                            ctx_folder: schema.read()?.folder.clone(),
                         })))
                     },
                 )?

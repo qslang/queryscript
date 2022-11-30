@@ -64,17 +64,25 @@ pub fn eval<'a>(
                     _ => return rt_unimplemented!("native function: {}", name),
                 }
             }
-            schema::Expr::FnCall(schema::FnCallExpr { func, args }) => {
+            schema::Expr::FnCall(schema::FnCallExpr {
+                func,
+                args,
+                ctx_folder,
+            }) => {
+                let mut new_ctx = ctx.clone();
+                new_ctx.folder = ctx_folder.clone();
                 let mut arg_values = Vec::new();
                 for arg in args.iter() {
+                    // Eval the arguments in the calling context
+                    //
                     arg_values.push(eval(ctx, arg).await?);
                 }
-                let fn_val = match eval(ctx, func.as_ref()).await? {
+                let fn_val = match eval(&new_ctx, func.as_ref()).await? {
                     Value::Fn(f) => f,
                     _ => return fail!("Cannot call non-function"),
                 };
 
-                fn_val.execute(ctx, arg_values).await
+                fn_val.execute(&new_ctx, arg_values).await
             }
             schema::Expr::SQLQuery(q) => {
                 let schema::SQLQuery { query, params } = q.as_ref();

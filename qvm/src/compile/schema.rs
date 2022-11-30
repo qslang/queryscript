@@ -504,6 +504,7 @@ where
 {
     pub func: Arc<TypedExpr<TypeRef>>,
     pub args: Vec<TypedExpr<TypeRef>>,
+    pub ctx_folder: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -547,12 +548,17 @@ impl Expr<CRef<MType>> {
                 inner_schema: inner_schema.clone(),
                 body: body.to_runtime_type()?,
             })),
-            Expr::FnCall(FnCallExpr { func, args }) => Ok(Expr::FnCall(FnCallExpr {
+            Expr::FnCall(FnCallExpr {
+                func,
+                args,
+                ctx_folder,
+            }) => Ok(Expr::FnCall(FnCallExpr {
                 func: Arc::new(func.to_runtime_type()?),
                 args: args
                     .iter()
                     .map(|a| Ok(a.to_runtime_type()?))
                     .collect::<runtime::error::Result<_>>()?,
+                ctx_folder: ctx_folder.clone(),
             })),
             Expr::SchemaEntry(e) => Ok(Expr::SchemaEntry(e.clone())),
             Expr::NativeFn(f) => Ok(Expr::NativeFn(f.clone())),
