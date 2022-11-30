@@ -6,7 +6,10 @@ use qvm::parser;
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::fmt;
+use std::fs::read_dir;
+use std::path::Path;
 use std::rc::Rc;
 
 #[derive(Clone, Debug)]
@@ -115,6 +118,36 @@ fn get_imported_decls<F: FnMut(&schema::SchemaEntry) -> bool>(
         .collect::<Vec<String>>());
 }
 
+fn get_schema_paths(
+    schema: schema::Ref<schema::Schema>,
+    path: &Vec<String>,
+) -> compile::Result<Vec<String>> {
+    if let Some(folder) = schema.read()?.folder.clone() {
+        let mut folder = Path::new(&folder).to_path_buf();
+        folder.extend(path.iter());
+        let files = read_dir(folder)?;
+        let mut ret = Vec::new();
+        for f in files {
+            if let Ok(f) = f {
+                let file = f.path();
+                let extension = file.extension().and_then(OsStr::to_str).unwrap_or("");
+                if schema::SCHEMA_EXTENSIONS.contains(&extension) {
+                    if let Some(fp) = file.file_stem().and_then(OsStr::to_str) {
+                        ret.push(fp.to_string());
+                    }
+                }
+                if file.is_dir() {
+                    if let Some(fp) = file.file_name().and_then(OsStr::to_str) {
+                        ret.push(fp.to_string());
+                    }
+                }
+            }
+        }
+        return Ok(ret);
+    }
+    Ok(Vec::new())
+}
+
 fn get_record_fields(
     compiler: compile::Compiler,
     schema: schema::Ref<schema::Schema>,
@@ -214,9 +247,6 @@ impl Completer for ReadlineHelper {
             })
             .clone();
 
-        let longest = ident_types
-            .get(&parser::AUTOCOMPLETE_TYPE)
-            .map(parse_longest_path);
         let types = ident_types
             .get(&parser::AUTOCOMPLETE_TYPE)
             .map(parse_longest_path)
@@ -232,24 +262,32 @@ impl Completer for ReadlineHelper {
                 Vec::new()
             });
 
+        let schemas = ident_types
+            .get(&parser::AUTOCOMPLETE_SCHEMA)
+            .map(parse_longest_path)
+            .map_or(Vec::new(), |path| {
+                if let Ok(choices) = get_schema_paths(self.schema.clone(), &path) {
+                    return choices;
+                }
+                Vec::new()
+            });
+
         let keywords = ident_types
             .get(&parser::AUTOCOMPLETE_KEYWORD)
             .unwrap_or(&Vec::new())
             .clone();
 
-        let all = vec![vars, types, keywords].concat();
+        let all = vec![vars, types, schemas, keywords].concat();
         let filtered = all
             .iter()
             .filter(|a| a.starts_with(partial.as_str()))
             .collect::<Vec<_>>();
 
         (&mut *self.stats.borrow_mut()).msg = format!(
-            "{} {:?} {:?} {:?} {:?}",
+            "{} {:?} {:?}",
             suggestion_pos - start_pos,
             partial,
             filtered,
-            longest,
-            suggestions,
         );
         let pairs = filtered
             .into_iter()
