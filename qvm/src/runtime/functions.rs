@@ -6,7 +6,9 @@ use datafusion::arrow::{
 use datafusion::common::Statistics;
 use datafusion::config::ConfigOptions;
 use datafusion::datasource::file_format::FileFormat;
-use datafusion::datasource::file_format::{csv::CsvFormat, json::JsonFormat};
+use datafusion::datasource::file_format::{
+    csv::CsvFormat, json::JsonFormat, parquet::ParquetFormat,
+};
 use datafusion::datasource::object_store::ObjectStoreUrl;
 use datafusion::execution::context::{SessionConfig, SessionContext};
 use datafusion::execution::runtime_env::RuntimeEnv;
@@ -26,6 +28,7 @@ use crate::types::{FnValue, Value};
 enum Format {
     Json,
     CSV,
+    Parquet,
 }
 
 #[derive(Clone, Debug)]
@@ -69,6 +72,7 @@ impl LoadFileFn {
 
         let format_type = match format_name {
             Some("csv") => Format::CSV,
+            Some("parquet") => Format::Parquet,
             Some("json") | _ => Format::Json,
         };
         let format: Box<dyn FileFormat> = match format_type {
@@ -76,6 +80,7 @@ impl LoadFileFn {
                 as Box<dyn FileFormat>,
             Format::CSV => Box::new(CsvFormat::default().with_schema_infer_max_rec(Some(0)))
                 as Box<dyn FileFormat>,
+            Format::Parquet => Box::new(ParquetFormat::default()) as Box<dyn FileFormat>,
         };
 
         let location = Path::from_filesystem_path(&file)?;
