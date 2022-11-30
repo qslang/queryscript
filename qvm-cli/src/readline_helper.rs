@@ -55,7 +55,7 @@ impl ReadlineHelper {
             schema,
             curr_buffer,
             stats: Rc::new(RefCell::new(ReadlineStats::new())),
-            debug: true, // Switch this to true to get diagnostics as you type
+            debug: false, // Switch this to true to get diagnostics as you type
         }
     }
 }
