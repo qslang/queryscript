@@ -462,13 +462,31 @@ impl<T: Clone + fmt::Debug + Send + Sync> fmt::Debug for SQLQuery<T> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum FnBody<TypeRef>
+where
+    TypeRef: Clone + fmt::Debug + Send + Sync,
+{
+    SQLBuiltin,
+    Expr(Arc<Expr<TypeRef>>),
+}
+
+impl FnBody<CRef<MType>> {
+    pub fn to_runtime_type(&self) -> runtime::error::Result<FnBody<Ref<Type>>> {
+        Ok(match self {
+            FnBody::SQLBuiltin => FnBody::SQLBuiltin,
+            FnBody::Expr(e) => FnBody::Expr(Arc::new(e.to_runtime_type()?)),
+        })
+    }
+}
+
 #[derive(Clone)]
 pub struct FnExpr<TypeRef>
 where
     TypeRef: Clone + fmt::Debug + Send + Sync,
 {
     pub inner_schema: Ref<Schema>,
-    pub body: Arc<Expr<TypeRef>>,
+    pub body: FnBody<TypeRef>,
 }
 
 impl<TypeRef: Clone + fmt::Debug + Send + Sync> fmt::Debug for FnExpr<TypeRef> {
@@ -495,7 +513,6 @@ where
 {
     SQLQuery(Arc<SQLQuery<TypeRef>>),
     SQLExpr(Arc<SQLExpr<TypeRef>>),
-    SQLBuiltin,
     SchemaEntry(STypedExpr),
     Fn(FnExpr<TypeRef>),
     FnCall(FnCallExpr<TypeRef>),
@@ -528,7 +545,7 @@ impl Expr<CRef<MType>> {
             }
             Expr::Fn(FnExpr { inner_schema, body }) => Ok(Expr::Fn(FnExpr {
                 inner_schema: inner_schema.clone(),
-                body: Arc::new(body.to_runtime_type()?),
+                body: body.to_runtime_type()?,
             })),
             Expr::FnCall(FnCallExpr { func, args }) => Ok(Expr::FnCall(FnCallExpr {
                 func: Arc::new(func.to_runtime_type()?),
@@ -539,7 +556,6 @@ impl Expr<CRef<MType>> {
             })),
             Expr::SchemaEntry(e) => Ok(Expr::SchemaEntry(e.clone())),
             Expr::NativeFn(f) => Ok(Expr::NativeFn(f.clone())),
-            Expr::SQLBuiltin => Ok(Expr::SQLBuiltin),
             Expr::Unknown => Ok(Expr::Unknown),
         }
     }

@@ -730,24 +730,31 @@ pub fn compile_schema_entries(
                     compiled_args.push(MField::new_nullable(arg.name.clone(), type_.clone()));
                 }
 
-                let compiled = match body {
+                let (compiled, is_sql) = match body {
                     ast::FnBody::Native => {
                         if !compiler.allow_native() {
                             return Err(CompileError::internal("Cannot compile native functions"));
                         }
 
+                        (
+                            CTypedExpr {
+                                type_: MType::new_unknown(&format!("__native('{}')", name)),
+                                expr: mkcref(Expr::NativeFn(name.to_string())),
+                            },
+                            false,
+                        )
+                    }
+                    ast::FnBody::SQL => (
                         CTypedExpr {
-                            type_: MType::new_unknown(&format!("__native('{}')", name)),
-                            expr: mkcref(Expr::NativeFn(name.to_string())),
-                        }
-                    }
-                    ast::FnBody::SQL => CTypedExpr {
-                        type_: MType::new_unknown(&format!("__sql('{}')", name)),
-                        expr: mkcref(Expr::SQLBuiltin),
-                    },
-                    ast::FnBody::Expr(expr) => {
-                        compile_expr(compiler.clone(), inner_schema.clone(), expr)?
-                    }
+                            type_: MType::new_unknown(&format!("__sql('{}')", name)),
+                            expr: mkcref(Expr::Unknown),
+                        },
+                        true,
+                    ),
+                    ast::FnBody::Expr(expr) => (
+                        compile_expr(compiler.clone(), inner_schema.clone(), expr)?,
+                        false,
+                    ),
                 };
 
                 if let Some(ret) = ret {
@@ -771,10 +778,14 @@ pub fn compile_schema_entries(
                         expr: compiled.expr.then(move |expr: Ref<Expr<CRef<MType>>>| {
                             let expr = expr.read()?;
                             Ok(mkcref(match &*expr {
-                                Expr::NativeFn(..) | Expr::SQLBuiltin => expr.clone(),
+                                Expr::NativeFn(..) => expr.clone(),
                                 _ => Expr::Fn(FnExpr {
                                     inner_schema: inner_schema.clone(),
-                                    body: Arc::new(expr.clone()),
+                                    body: if is_sql {
+                                        FnBody::SQLBuiltin
+                                    } else {
+                                        FnBody::Expr(Arc::new(expr.clone()))
+                                    },
                                 }),
                             }))
                         })?,

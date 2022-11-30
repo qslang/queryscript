@@ -128,9 +128,6 @@ pub fn eval<'a>(
                 let row = &rows.batch(0).records()[0];
                 Ok(row.column(0).clone())
             }
-            schema::Expr::SQLBuiltin => {
-                return fail!("SQL Builtins should be optimized away by runtime")
-            }
         }
     })
 }

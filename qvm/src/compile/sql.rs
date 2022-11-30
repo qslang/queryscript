@@ -1046,7 +1046,14 @@ pub fn compile_sqlexpr(
             let type_ = fn_type.ret.clone();
             let is_builtin = match func.expr.as_ref() {
                 Expr::SchemaEntry(STypedExpr { expr, .. }) => {
-                    expr.is_known()? && matches!(*(expr.must()?.read()?), Expr::SQLBuiltin)
+                    expr.is_known()?
+                        && matches!(
+                            *(expr.must()?.read()?),
+                            Expr::Fn(FnExpr {
+                                body: FnBody::SQLBuiltin,
+                                ..
+                            })
+                        )
                 }
                 _ => false,
             };
