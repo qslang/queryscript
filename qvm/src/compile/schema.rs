@@ -569,6 +569,7 @@ where
     Fn(FnExpr<TypeRef>),
     FnCall(FnCallExpr<TypeRef>),
     NativeFn(String),
+    ContextRef(String),
     Unknown,
 }
 
@@ -603,6 +604,7 @@ impl Expr<CRef<MType>> {
             })),
             Expr::SchemaEntry(e) => Ok(Expr::SchemaEntry(e.clone())),
             Expr::NativeFn(f) => Ok(Expr::NativeFn(f.clone())),
+            Expr::ContextRef(r) => Ok(Expr::ContextRef(r.clone())),
             Expr::Unknown => Ok(Expr::Unknown),
         }
     }

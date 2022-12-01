@@ -51,8 +51,23 @@ pub fn eval<'a>(
                 )
                 .await
             }
-            schema::Expr::Fn { .. } => {
-                return Err(RuntimeError::unimplemented("functions"));
+            schema::Expr::ContextRef(r) => match ctx.values.get(r) {
+                Some(v) => Ok(v.clone()), // Can we avoid this clone??
+                None => Err(RuntimeError::new(
+                    format!("No such context value {}", r).as_str(),
+                )),
+            },
+            schema::Expr::Fn(f) => {
+                use super::functions::*;
+                let body = match &f.body {
+                    schema::FnBody::Expr(e) => e.clone(),
+                    _ => {
+                        return fail!(
+                            "Non-expression function body should have been optimized away"
+                        )
+                    }
+                };
+                QVMFn::new(typed_expr.type_.clone(), body)
             }
             schema::Expr::NativeFn(name) => {
                 use super::functions::*;

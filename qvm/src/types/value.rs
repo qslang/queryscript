@@ -92,11 +92,11 @@ pub trait List: fmt::Debug + Send + Sync {
 pub trait FnValue: fmt::Debug + DynClone + Send + Sync {
     // NOTE: We may eventually need to tease apart this trait into a pure
     // runtime trait if we separate the runtime crate.
-    async fn execute(
+    fn execute(
         &self,
         ctx: &crate::runtime::context::Context,
         args: Vec<Value>,
-    ) -> crate::runtime::error::Result<Value>;
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::runtime::error::Result<Value>>>>;
     fn fn_type(&self) -> FnType;
     fn as_any(&self) -> &dyn Any;
 }

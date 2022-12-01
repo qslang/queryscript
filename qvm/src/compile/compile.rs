@@ -719,7 +719,7 @@ pub fn compile_schema_entries(
                             name: arg.name.clone(),
                             value: SchemaEntry::Expr(STypedExpr {
                                 type_: SType::new_mono(type_.clone()),
-                                expr: mkcref(Expr::Unknown),
+                                expr: mkcref(Expr::ContextRef(arg.name.clone())),
                             }),
                         },
                     );

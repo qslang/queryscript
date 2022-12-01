@@ -21,8 +21,72 @@ use std::sync::Arc;
 
 use super::context::Context;
 use super::error::{fail, Result};
+use super::runtime;
+use crate::compile::schema;
 use crate::types;
 use crate::types::{FnValue, Value};
+
+type TypeRef = schema::Ref<types::Type>;
+
+#[derive(Clone, Debug)]
+pub struct QVMFn {
+    type_: types::FnType,
+    body: schema::TypedExpr<TypeRef>,
+}
+
+impl QVMFn {
+    pub fn new(type_: TypeRef, body: Arc<schema::Expr<TypeRef>>) -> Result<Value> {
+        let type_ = match &*type_.read()? {
+            types::Type::Fn(f) => f.clone(),
+            _ => return fail!("Function must have function type"),
+        };
+        let body_type = schema::mkref(type_.ret.as_ref().clone());
+        Ok(Value::Fn(Arc::new(QVMFn {
+            type_,
+            body: schema::TypedExpr {
+                type_: body_type,
+                expr: body.clone(),
+            },
+        })))
+    }
+}
+
+#[async_trait]
+impl FnValue for QVMFn {
+    fn execute(
+        &self,
+        ctx: &Context,
+        args: Vec<Value>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>>>> {
+        let new_ctx = ctx.clone();
+        let type_ = self.type_.clone();
+        let body = self.body.clone();
+        Box::pin(async move {
+            let mut new_ctx = new_ctx.clone();
+            if args.len() != type_.args.len() {
+                return fail!("Wrong number of arguments to function");
+            }
+
+            for i in 0..args.len() {
+                // Can we avoid cloning the value here
+                //
+                new_ctx
+                    .values
+                    .insert(type_.args[i].name.clone(), args[i].clone());
+            }
+
+            runtime::eval(&new_ctx, &body).await
+        })
+    }
+
+    fn fn_type(&self) -> types::FnType {
+        self.type_.clone()
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
 
 #[derive(Clone, Debug)]
 enum Format {
@@ -123,28 +187,36 @@ impl LoadFileFn {
 
 #[async_trait]
 impl FnValue for LoadFileFn {
-    async fn execute(&self, ctx: &Context, args: Vec<Value>) -> Result<Value> {
-        if args.len() != 2 {
-            return fail!("load expects exactly 2 arguments");
-        }
+    fn execute(
+        &self,
+        ctx: &Context,
+        args: Vec<Value>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>>>> {
+        let us = self.clone();
+        let folder = ctx.folder.clone();
+        Box::pin(async move {
+            if args.len() != 2 {
+                return fail!("load expects exactly 2 arguments");
+            }
 
-        let mut path_buf = FilePathBuf::new();
-        if let Some(folder) = &ctx.folder {
-            path_buf.push(folder);
-        }
+            let mut path_buf = FilePathBuf::new();
+            if let Some(folder) = &folder {
+                path_buf.push(folder);
+            }
 
-        match &args[0] {
-            Value::Utf8(s) => path_buf.push(s),
-            _ => return fail!("load expects its first argument to be a string"),
-        };
+            match &args[0] {
+                Value::Utf8(s) => path_buf.push(s),
+                _ => return fail!("load expects its first argument to be a string"),
+            };
 
-        let format = match &args[1] {
-            Value::Utf8(s) => Some(s.clone()),
-            Value::Null => None,
-            _ => return fail!("load expects its second argument to be a string"),
-        };
+            let format = match &args[1] {
+                Value::Utf8(s) => Some(s.clone()),
+                Value::Null => None,
+                _ => return fail!("load expects its second argument to be a string"),
+            };
 
-        self.load(&*path_buf, format).await
+            us.load(&*path_buf, format).await
+        })
     }
 
     fn fn_type(&self) -> types::FnType {
