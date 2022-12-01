@@ -89,8 +89,8 @@ pub fn eval<'a>(
                 let sql_params = eval_params(ctx, &params).await?;
                 Ok(Value::Relation(super::sql::eval(&query, sql_params).await?))
             }
-            schema::Expr::SQLExpr(e) => {
-                let schema::SQLExpr { expr, params } = e.as_ref();
+            schema::Expr::SQL(e) => {
+                let schema::SQL { expr, params } = e.as_ref();
                 let sql_params = eval_params(ctx, &params).await?;
                 let query = sqlast::Query {
                     with: None,

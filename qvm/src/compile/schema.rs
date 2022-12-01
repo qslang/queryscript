@@ -427,7 +427,7 @@ pub type Value = crate::types::Value;
 pub type Params<TypeRef> = BTreeMap<ast::Ident, TypedExpr<TypeRef>>;
 
 #[derive(Clone)]
-pub struct SQLExpr<TypeRef>
+pub struct SQL<TypeRef>
 where
     TypeRef: Clone + fmt::Debug + Send + Sync,
 {
@@ -435,9 +435,9 @@ where
     pub expr: sqlast::Expr,
 }
 
-impl<T: Clone + fmt::Debug + Send + Sync> fmt::Debug for SQLExpr<T> {
+impl<T: Clone + fmt::Debug + Send + Sync> fmt::Debug for SQL<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SQLExpr")
+        f.debug_struct("SQL")
             .field("params", &self.params)
             .field("expr", &self.expr.to_string())
             .finish()
@@ -513,7 +513,7 @@ where
     TypeRef: Clone + fmt::Debug + Send + Sync,
 {
     SQLQuery(Arc<SQLQuery<TypeRef>>),
-    SQLExpr(Arc<SQLExpr<TypeRef>>),
+    SQL(Arc<SQL<TypeRef>>),
     SchemaEntry(STypedExpr),
     Fn(FnExpr<TypeRef>),
     FnCall(FnCallExpr<TypeRef>),
@@ -534,9 +534,9 @@ impl Expr<CRef<MType>> {
                     query: query.clone(),
                 })))
             }
-            Expr::SQLExpr(e) => {
-                let SQLExpr { params, expr } = e.as_ref();
-                Ok(Expr::SQLExpr(Arc::new(SQLExpr {
+            Expr::SQL(e) => {
+                let SQL { params, expr } = e.as_ref();
+                Ok(Expr::SQL(Arc::new(SQL {
                     params: params
                         .iter()
                         .map(|(name, param)| Ok((name.clone(), param.to_runtime_type()?)))
