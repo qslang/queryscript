@@ -427,19 +427,75 @@ pub type Value = crate::types::Value;
 pub type Params<TypeRef> = BTreeMap<ast::Ident, TypedExpr<TypeRef>>;
 
 #[derive(Clone)]
+pub enum SQLBody {
+    Expr(sqlast::Expr),
+    Query(sqlast::Query),
+}
+
+impl SQLBody {
+    pub fn as_expr(&self) -> runtime::error::Result<sqlast::Expr> {
+        match self {
+            SQLBody::Expr(expr) => Ok(expr.clone()),
+            SQLBody::Query(_) => Err(runtime::error::RuntimeError::unimplemented(
+                "Scalar subqueries",
+            )),
+        }
+    }
+
+    pub fn as_query(&self) -> runtime::error::Result<sqlast::Query> {
+        match self {
+            SQLBody::Expr(expr) => Ok(sqlast::Query {
+                with: None,
+                body: Box::new(sqlast::SetExpr::Select(Box::new(sqlast::Select {
+                    distinct: false,
+                    top: None,
+                    projection: vec![sqlast::SelectItem::ExprWithAlias {
+                        expr: expr.clone(),
+                        alias: sqlast::Ident {
+                            value: "value".to_string(),
+                            quote_style: None,
+                        },
+                    }],
+                    into: None,
+                    from: Vec::new(),
+                    lateral_views: Vec::new(),
+                    selection: None,
+                    group_by: Vec::new(),
+                    cluster_by: Vec::new(),
+                    distribute_by: Vec::new(),
+                    sort_by: Vec::new(),
+                    having: None,
+                    qualify: None,
+                }))),
+                order_by: Vec::new(),
+                limit: None,
+                offset: None,
+                fetch: None,
+                lock: None,
+            }),
+            SQLBody::Query(query) => Ok(query.clone()),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct SQL<TypeRef>
 where
     TypeRef: Clone + fmt::Debug + Send + Sync,
 {
     pub params: Params<TypeRef>,
-    pub expr: sqlast::Expr,
+    pub body: SQLBody,
 }
 
 impl<T: Clone + fmt::Debug + Send + Sync> fmt::Debug for SQL<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let body = match &self.body {
+            SQLBody::Expr(expr) => expr.to_string(),
+            SQLBody::Query(query) => query.to_string(),
+        };
         f.debug_struct("SQL")
             .field("params", &self.params)
-            .field("expr", &self.expr.to_string())
+            .field("body", &body)
             .finish()
     }
 }
@@ -535,13 +591,13 @@ impl Expr<CRef<MType>> {
                 })))
             }
             Expr::SQL(e) => {
-                let SQL { params, expr } = e.as_ref();
+                let SQL { params, body } = e.as_ref();
                 Ok(Expr::SQL(Arc::new(SQL {
                     params: params
                         .iter()
                         .map(|(name, param)| Ok((name.clone(), param.to_runtime_type()?)))
                         .collect::<runtime::error::Result<_>>()?,
-                    expr: expr.clone(),
+                    body: body.clone(),
                 })))
             }
             Expr::Fn(FnExpr { inner_schema, body }) => Ok(Expr::Fn(FnExpr {

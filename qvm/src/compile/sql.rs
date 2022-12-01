@@ -85,7 +85,7 @@ pub fn compile_sqlreference(
                 let type_ = get_rowtype(compiler.clone(), relation.type_.clone())?;
                 let expr = mkcref(Expr::SQL(Arc::new(SQL {
                     params: BTreeMap::new(),
-                    expr: sqlast::Expr::CompoundIdentifier(sqlpath.clone()),
+                    body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
                 })));
                 return Ok(CTypedExpr { type_, expr });
             } else {
@@ -99,16 +99,18 @@ pub fn compile_sqlreference(
                                     type_: type_.clone(),
                                     expr: Arc::new(Expr::SQL(Arc::new(SQL {
                                         params: BTreeMap::new(),
-                                        expr: sqlast::Expr::CompoundIdentifier(vec![
-                                            sqlast::Ident {
-                                                value: fm.relation.clone(),
-                                                quote_style: None,
-                                            },
-                                            sqlast::Ident {
-                                                value: name.clone(),
-                                                quote_style: None,
-                                            },
-                                        ]),
+                                        body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(
+                                            vec![
+                                                sqlast::Ident {
+                                                    value: fm.relation.clone(),
+                                                    quote_style: None,
+                                                },
+                                                sqlast::Ident {
+                                                    value: name.clone(),
+                                                    quote_style: None,
+                                                },
+                                            ],
+                                        )),
                                     }))),
                                 }))
                             } else {
@@ -143,7 +145,7 @@ pub fn compile_sqlreference(
                 let type_ = typecheck_path(rowtype, vec![field_name].as_slice())?;
                 let expr = mkcref(Expr::SQL(Arc::new(SQL {
                     params: BTreeMap::new(),
-                    expr: sqlast::Expr::CompoundIdentifier(sqlpath.clone()),
+                    body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
                 })));
                 return Ok(CTypedExpr { type_, expr });
             }
@@ -198,8 +200,8 @@ pub fn compile_reference(
             // Turn the top level reference into a SQL placeholder, and return
             // a path accessing it
             let placeholder = intern_placeholder(compiler.clone(), "param", &top_level_ref)?;
-            let placeholder_name = match &placeholder.expr {
-                sqlast::Expr::Identifier(i) => i,
+            let placeholder_name = match &placeholder.body {
+                SQLBody::Expr(sqlast::Expr::Identifier(i)) => i,
                 _ => panic!("placeholder expected to be an identifier"),
             };
             let mut full_name = vec![placeholder_name.clone()];
@@ -210,7 +212,7 @@ pub fn compile_reference(
 
             let expr = Arc::new(Expr::SQL(Arc::new(SQL {
                 params: placeholder.params.clone(),
-                expr: sqlast::Expr::CompoundIdentifier(full_name),
+                body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(full_name)),
             })));
 
             TypedExpr { type_, expr }
@@ -232,10 +234,10 @@ pub fn intern_placeholder(
 
             Ok(Arc::new(SQL {
                 params: Params::from([(placeholder_name.clone(), expr.clone())]),
-                expr: sqlast::Expr::Identifier(sqlast::Ident {
+                body: SQLBody::Expr(sqlast::Expr::Identifier(sqlast::Ident {
                     value: placeholder_name.clone(),
                     quote_style: None,
-                }),
+                })),
             }))
         }
     }
@@ -561,7 +563,7 @@ pub fn compile_select(
                                 type_,
                                 expr: mkcref(SQL {
                                     params: BTreeMap::new(),
-                                    expr: sqlast::Expr::CompoundIdentifier(vec![
+                                    body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(vec![
                                         sqlast::Ident {
                                             value: m.relation.clone(),
                                             quote_style: None,
@@ -570,7 +572,7 @@ pub fn compile_select(
                                             value: m.field.clone(),
                                             quote_style: None,
                                         },
-                                    ]),
+                                    ])),
                                 }),
                             });
                         }
@@ -629,7 +631,7 @@ pub fn compile_select(
                     value: sqlexpr.name.clone(),
                     quote_style: None,
                 },
-                expr: sqlexpr.expr.expr.clone(),
+                expr: sqlexpr.expr.body.as_expr()?,
             });
         }
         for (n, p) in &from_params {
@@ -645,7 +647,7 @@ pub fn compile_select(
                     .unify(&resolve_global_atom(compiler.clone(), "bool")?)?;
                 let expr = compiled.expr.await?.read()?.clone();
                 insert_sqlparams(&mut params, &expr)?;
-                Some(expr.expr)
+                Some(expr.body.as_expr()?)
             }
             None => None,
         };
@@ -655,7 +657,7 @@ pub fn compile_select(
             let compiled = compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), gb)?;
             let expr = compiled.expr.await?.read()?.clone();
             insert_sqlparams(&mut params, &expr)?;
-            group_by.push(expr.expr);
+            group_by.push(expr.body.as_expr()?);
         }
 
         let mut ret = select.clone();
@@ -679,9 +681,9 @@ pub async fn finish_sqlexpr(
 ) -> Result<sqlast::Expr> {
     let expr = expr.clone_inner().await?;
     Ok(match expr {
-        Expr::SQL(e) => {
-            params.extend(e.params.clone().into_iter());
-            e.expr.clone()
+        Expr::SQL(s) => {
+            params.extend(s.params.clone().into_iter());
+            s.body.as_expr()?.clone()
         }
         _ => return Err(CompileError::unimplemented("Non-SQL expression")),
     })
@@ -784,7 +786,7 @@ lazy_static! {
     static ref GLOBAL_COMPILER: Compiler = Compiler::new().unwrap();
     static ref NULL_SQLEXPR: Arc<SQL<CRef<MType>>> = Arc::new(SQL {
         params: BTreeMap::new(),
-        expr: sqlast::Expr::Value(sqlast::Value::Null),
+        body: SQLBody::Expr(sqlast::Expr::Value(sqlast::Value::Null)),
     });
     static ref NULL: CTypedExpr = CTypedExpr {
         type_: resolve_global_atom(GLOBAL_COMPILER.clone(), "null").unwrap(),
@@ -804,10 +806,10 @@ fn apply_sqlcast(
         let final_expr = expr.clone_inner().await?;
         Ok(mkcref(SQL {
             params: final_expr.params,
-            expr: sqlast::Expr::Cast {
-                expr: Box::new(final_expr.expr),
+            body: SQLBody::Expr(sqlast::Expr::Cast {
+                expr: Box::new(final_expr.body.as_expr()?),
                 data_type: dt,
-            },
+            }),
         }))
     })?)
 }
@@ -861,7 +863,7 @@ pub fn compile_sqlexpr(
                 type_: mkcref(MType::Atom(parse_numeric_type(n)?)),
                 expr: mkcref(Expr::SQL(Arc::new(SQL {
                     params: BTreeMap::new(),
-                    expr: expr.clone(),
+                    body: SQLBody::Expr(expr.clone()),
                 }))),
             },
             sqlast::Value::SingleQuotedString(_)
@@ -872,14 +874,14 @@ pub fn compile_sqlexpr(
                 type_: resolve_global_atom(compiler.clone(), "string")?,
                 expr: mkcref(Expr::SQL(Arc::new(SQL {
                     params: BTreeMap::new(),
-                    expr: expr.clone(),
+                    body: SQLBody::Expr(expr.clone()),
                 }))),
             },
             sqlast::Value::Boolean(_) => CTypedExpr {
                 type_: resolve_global_atom(compiler.clone(), "bool")?,
                 expr: mkcref(Expr::SQL(Arc::new(SQL {
                     params: BTreeMap::new(),
-                    expr: expr.clone(),
+                    body: SQLBody::Expr(expr.clone()),
                 }))),
             },
             sqlast::Value::Null => NULL.clone(),
@@ -908,7 +910,7 @@ pub fn compile_sqlexpr(
                 type_: data_type,
                 expr: mkcref(Expr::SQL(Arc::new(SQL {
                     params: BTreeMap::new(),
-                    expr: expr.clone(),
+                    body: SQLBody::Expr(expr.clone()),
                 }))),
             }
         }
@@ -924,7 +926,9 @@ pub fn compile_sqlexpr(
                 expr: compiled.expr.then(move |sqlexpr: Ref<SQL<CRef<MType>>>| {
                     Ok(mkcref(Expr::SQL(Arc::new(SQL {
                         params: sqlexpr.read()?.params.clone(),
-                        expr: sqlast::Expr::IsNotNull(Box::new(sqlexpr.read()?.expr.clone())),
+                        body: SQLBody::Expr(sqlast::Expr::IsNotNull(Box::new(
+                            sqlexpr.read()?.body.as_expr()?,
+                        ))),
                     }))))
                 })?,
             }
@@ -980,11 +984,11 @@ pub fn compile_sqlexpr(
                         let params = combine_sqlparams(&*args.read()?)?;
                         Ok(mkcref(Expr::SQL(Arc::new(SQL {
                             params,
-                            expr: sqlast::Expr::BinaryOp {
-                                left: Box::new(args.read()?[0].read()?.expr.clone()),
+                            body: SQLBody::Expr(sqlast::Expr::BinaryOp {
+                                left: Box::new(args.read()?[0].read()?.body.as_expr()?),
                                 op: op.clone(),
-                                right: Box::new(args.read()?[1].read()?.expr.clone()),
-                            },
+                                right: Box::new(args.read()?[1].read()?.body.as_expr()?),
+                            }),
                         }))))
                     },
                 )?,
@@ -1130,14 +1134,14 @@ pub fn compile_sqlexpr(
                                 value: arg.name.clone(),
                                 quote_style: None,
                             },
-                            arg: sqlast::FunctionArgExpr::Expr(arg.expr.expr.clone()),
+                            arg: sqlast::FunctionArgExpr::Expr(arg.expr.body.as_expr()?),
                         });
                         params.extend(arg.expr.params.clone());
                     }
 
                     Ok(mkcref(Expr::SQL(Arc::new(SQL {
                         params,
-                        expr: sqlast::Expr::Function(sqlast::Function {
+                        body: SQLBody::Expr(sqlast::Expr::Function(sqlast::Function {
                             name: name_wrapper.as_ref().clone(),
                             args,
 
@@ -1146,7 +1150,7 @@ pub fn compile_sqlexpr(
                             over: None,
                             distinct: false,
                             special: false,
-                        }),
+                        })),
                     }))))
                 })?
             } else {

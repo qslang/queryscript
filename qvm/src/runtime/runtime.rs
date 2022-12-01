@@ -4,7 +4,6 @@ use crate::compile::schema;
 use crate::runtime::error::*;
 use crate::types;
 use crate::types::{Arc, Value};
-use sqlparser::ast as sqlast;
 use std::collections::HashMap;
 
 type TypeRef = schema::Ref<types::Type>;
@@ -90,51 +89,28 @@ pub fn eval<'a>(
                 Ok(Value::Relation(super::sql::eval(&query, sql_params).await?))
             }
             schema::Expr::SQL(e) => {
-                let schema::SQL { expr, params } = e.as_ref();
+                let schema::SQL { body, params } = e.as_ref();
                 let sql_params = eval_params(ctx, &params).await?;
-                let query = sqlast::Query {
-                    with: None,
-                    body: Box::new(sqlast::SetExpr::Select(Box::new(sqlast::Select {
-                        distinct: false,
-                        top: None,
-                        projection: vec![sqlast::SelectItem::ExprWithAlias {
-                            expr: expr.clone(),
-                            alias: sqlast::Ident {
-                                value: "value".to_string(),
-                                quote_style: None,
-                            },
-                        }],
-                        into: None,
-                        from: Vec::new(),
-                        lateral_views: Vec::new(),
-                        selection: None,
-                        group_by: Vec::new(),
-                        cluster_by: Vec::new(),
-                        distribute_by: Vec::new(),
-                        sort_by: Vec::new(),
-                        having: None,
-                        qualify: None,
-                    }))),
-                    order_by: Vec::new(),
-                    limit: None,
-                    offset: None,
-                    fetch: None,
-                    lock: None,
-                };
+                let query = body.as_query()?;
 
                 // TODO: This ownership model implies some necessary copying (below).
                 let rows = super::sql::eval(&query, sql_params).await?;
 
-                // TODO: These runtime checks may only be necessary in debug mode
-                if rows.num_batches() != 1 {
-                    return fail!("Expected an expression to have exactly one row");
-                }
-                if rows.schema().len() != 1 {
-                    return fail!("Expected an expression to have exactly one column");
-                }
+                match body {
+                    schema::SQLBody::Expr(_) => {
+                        // TODO: These runtime checks may only be necessary in debug mode
+                        if rows.num_batches() != 1 {
+                            return fail!("Expected an expression to have exactly one row");
+                        }
+                        if rows.schema().len() != 1 {
+                            return fail!("Expected an expression to have exactly one column");
+                        }
 
-                let row = &rows.batch(0).records()[0];
-                Ok(row.column(0).clone())
+                        let row = &rows.batch(0).records()[0];
+                        Ok(row.column(0).clone())
+                    }
+                    schema::SQLBody::Query(_) => Ok(Value::Relation(rows)),
+                }
             }
         }
     })
