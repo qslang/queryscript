@@ -407,10 +407,6 @@ pub fn compile_select(
         return Err(CompileError::unimplemented("Lateral views"));
     }
 
-    if select.group_by.len() > 0 {
-        return Err(CompileError::unimplemented("GROUP BY"));
-    }
-
     if select.cluster_by.len() > 0 {
         return Err(CompileError::unimplemented("CLUSTER BY"));
     }
@@ -655,10 +651,19 @@ pub fn compile_select(
             None => None,
         };
 
+        let mut group_by = Vec::new();
+        for gb in &select.group_by {
+            let compiled = compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), gb)?;
+            let expr = compiled.expr.await?.read()?.clone();
+            insert_sqlparams(&mut params, &expr)?;
+            group_by.push(expr.expr);
+        }
+
         let mut ret = select.clone();
         ret.from = from.clone();
         ret.projection = projection;
         ret.selection = selection;
+        ret.group_by = group_by;
 
         Ok(cwrap((
             params,
