@@ -14,26 +14,26 @@ use crate::types::{number::parse_numeric_type, AtomicType};
 const QVM_NAMESPACE: &str = "__qvm";
 
 #[derive(Clone, Debug)]
-pub struct TypedSQLExpr {
+pub struct TypedSQL {
     pub type_: CRef<MType>,
     pub expr: Ref<SQL<CRef<MType>>>,
 }
 
 #[derive(Clone, Debug)]
-pub struct CTypedNameAndSQLExpr {
+pub struct CTypedNameAndSQL {
     pub name: String,
     pub type_: CRef<MType>,
     pub expr: CRef<SQL<CRef<MType>>>,
 }
 
 #[derive(Clone, Debug)]
-pub struct NameAndSQLExpr {
+pub struct NameAndSQL {
     pub name: String,
     pub expr: Arc<SQL<CRef<MType>>>,
 }
 
 #[derive(Clone, Debug)]
-pub struct CTypedSQLExpr {
+pub struct CTypedSQL {
     pub type_: CRef<MType>,
     pub expr: CRef<SQL<CRef<MType>>>,
 }
@@ -46,10 +46,10 @@ pub struct CTypedSQLQuery {
 
 impl<Ty: Clone + fmt::Debug + Send + Sync> Constrainable for SQL<Ty> {}
 impl<Ty: Clone + fmt::Debug + Send + Sync> Constrainable for SQLQuery<Ty> {}
-impl Constrainable for TypedSQLExpr {}
-impl Constrainable for NameAndSQLExpr {}
-impl Constrainable for CTypedNameAndSQLExpr {}
-impl Constrainable for CTypedSQLExpr {}
+impl Constrainable for TypedSQL {}
+impl Constrainable for NameAndSQL {}
+impl Constrainable for CTypedNameAndSQL {}
+impl Constrainable for CTypedSQL {}
 impl Constrainable for CTypedSQLQuery {}
 impl Constrainable for CTypedExpr {}
 
@@ -245,7 +245,7 @@ pub fn intern_cref_placeholder(
     compiler: Compiler,
     kind: String,
     te: CTypedExpr,
-) -> Result<CTypedSQLExpr> {
+) -> Result<CTypedSQL> {
     let type_ = te.type_.clone();
     let expr = te.expr.clone().then(move |expr: Ref<Expr<CRef<MType>>>| {
         let te = te.clone();
@@ -261,7 +261,7 @@ pub fn intern_cref_placeholder(
         .clone();
         Ok(mkcref(sqlexpr))
     })?;
-    Ok(CTypedSQLExpr { type_, expr })
+    Ok(CTypedSQL { type_, expr })
 }
 
 pub fn compile_sqlarg(
@@ -269,7 +269,7 @@ pub fn compile_sqlarg(
     schema: Ref<Schema>,
     scope: Ref<SQLScope>,
     expr: &sqlast::Expr,
-) -> Result<CTypedSQLExpr> {
+) -> Result<CTypedSQL> {
     let compiled = compile_sqlexpr(compiler.clone(), schema.clone(), scope.clone(), expr)?;
     intern_cref_placeholder(compiler.clone(), "param".to_string(), compiled)
 }
@@ -527,7 +527,7 @@ pub fn compile_select(
                     let name = format!("{}", expr);
                     let compiled =
                         compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), expr)?;
-                    mkcref(vec![CTypedNameAndSQLExpr {
+                    mkcref(vec![CTypedNameAndSQL {
                         name,
                         type_: compiled.type_,
                         expr: compiled.expr,
@@ -537,7 +537,7 @@ pub fn compile_select(
                     let name = alias.value.clone();
                     let compiled =
                         compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), expr)?;
-                    mkcref(vec![CTypedNameAndSQLExpr {
+                    mkcref(vec![CTypedNameAndSQL {
                         name,
                         type_: compiled.type_,
                         expr: compiled.expr,
@@ -556,7 +556,7 @@ pub fn compile_select(
                                         .clone()]))
                                 }
                             };
-                            ret.push(CTypedNameAndSQLExpr {
+                            ret.push(CTypedNameAndSQL {
                                 name: m.field.clone(),
                                 type_,
                                 expr: mkcref(SQL {
@@ -586,21 +586,20 @@ pub fn compile_select(
 
     let projections = combine_crefs(exprs)?;
 
-    let type_: CRef<MType> =
-        projections.then(|exprs: Ref<Vec<Ref<Vec<CTypedNameAndSQLExpr>>>>| {
-            let mut fields = Vec::new();
-            for a in &*exprs.read()? {
-                for b in &*a.read()? {
-                    fields.push(MField {
-                        name: b.name.clone(),
-                        type_: b.type_.clone(),
-                        nullable: true,
-                    });
-                }
+    let type_: CRef<MType> = projections.then(|exprs: Ref<Vec<Ref<Vec<CTypedNameAndSQL>>>>| {
+        let mut fields = Vec::new();
+        for a in &*exprs.read()? {
+            for b in &*a.read()? {
+                fields.push(MField {
+                    name: b.name.clone(),
+                    type_: b.type_.clone(),
+                    nullable: true,
+                });
             }
+        }
 
-            Ok(mkcref(MType::List(mkcref(MType::Record(fields)))))
-        })?;
+        Ok(mkcref(MType::List(mkcref(MType::Record(fields)))))
+    })?;
 
     let select = select.clone();
     let expr: CRef<_> = compiler.clone().async_cref(async move {
@@ -611,7 +610,7 @@ pub fn compile_select(
             let a = (*a.read()?).clone();
             for b in a {
                 let n = b.name.clone();
-                proj_exprs.push(NameAndSQLExpr {
+                proj_exprs.push(NameAndSQL {
                     name: n.clone(),
                     expr: Arc::new(b.expr.await?.read()?.clone()),
                 });
@@ -817,9 +816,9 @@ fn apply_sqlcast(
 // elements because of how coerce() is implemented.
 fn apply_coerce_casts(
     compiler: Compiler,
-    mut exprs: [CTypedSQLExpr; 2],
+    mut exprs: [CTypedSQL; 2],
     targets: CRef<CWrap<[Option<CRef<MType>>; 2]>>,
-) -> Result<[CTypedSQLExpr; 2]> {
+) -> Result<[CTypedSQL; 2]> {
     for i in 0..exprs.len() {
         let targets1 = targets.clone();
         let targets2 = targets.clone();
@@ -827,7 +826,7 @@ fn apply_coerce_casts(
 
         let expr = exprs[i].clone();
 
-        exprs[i] = CTypedSQLExpr {
+        exprs[i] = CTypedSQL {
             type_: compiler.clone().async_cref(async move {
                 let resolved_targets = CWrap::clone_inner(&targets1).await?;
 
@@ -1024,7 +1023,7 @@ pub fn compile_sqlexpr(
                     ))
                 }
             };
-            let mut compiled_args: BTreeMap<String, CTypedNameAndSQLExpr> = BTreeMap::new();
+            let mut compiled_args: BTreeMap<String, CTypedNameAndSQL> = BTreeMap::new();
             let mut pos: usize = 0;
             for arg in args {
                 let (name, expr) = match arg {
@@ -1058,7 +1057,7 @@ pub fn compile_sqlexpr(
                     compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), &expr)?;
                 compiled_args.insert(
                     name.clone(),
-                    CTypedNameAndSQLExpr {
+                    CTypedNameAndSQL {
                         name: name.clone(),
                         type_: compiled_arg.type_.clone(),
                         expr: compiled_arg.expr.clone(),
@@ -1075,7 +1074,7 @@ pub fn compile_sqlexpr(
                     // If the argument is missing and nullable, then set it to NULL
                     // as a default value. Eventually we may want to generalize this
                     // so that functions can declare other kinds of default values too.
-                    arg_sqlexprs.push(CTypedNameAndSQLExpr {
+                    arg_sqlexprs.push(CTypedNameAndSQL {
                         name: arg.name.clone(),
                         type_: NULL.type_.clone(),
                         expr: mkcref(NULL_SQLEXPR.as_ref().clone()),
@@ -1112,7 +1111,7 @@ pub fn compile_sqlexpr(
                         e.expr.then(move |expr: Ref<SQL<CRef<MType>>>| {
                             // This is a bit annoying. It'd be a lot nicer if we didn't
                             // have to clone the name twice.
-                            Ok(mkcref(NameAndSQLExpr {
+                            Ok(mkcref(NameAndSQL {
                                 name: name.as_ref().clone(),
                                 expr: Arc::new(expr.read()?.clone()),
                             }))
@@ -1121,37 +1120,35 @@ pub fn compile_sqlexpr(
                     .collect::<Result<_>>()?;
 
                 let name_wrapper = Arc::new(name.clone());
-                combine_crefs(arg_exprs)?.then(
-                    move |arg_exprs: Ref<Vec<Ref<NameAndSQLExpr>>>| {
-                        let mut args = Vec::new();
-                        let mut params = BTreeMap::new();
-                        for arg in arg_exprs.read()?.iter() {
-                            let arg = arg.read()?;
-                            args.push(sqlast::FunctionArg::Named {
-                                name: sqlast::Ident {
-                                    value: arg.name.clone(),
-                                    quote_style: None,
-                                },
-                                arg: sqlast::FunctionArgExpr::Expr(arg.expr.expr.clone()),
-                            });
-                            params.extend(arg.expr.params.clone());
-                        }
+                combine_crefs(arg_exprs)?.then(move |arg_exprs: Ref<Vec<Ref<NameAndSQL>>>| {
+                    let mut args = Vec::new();
+                    let mut params = BTreeMap::new();
+                    for arg in arg_exprs.read()?.iter() {
+                        let arg = arg.read()?;
+                        args.push(sqlast::FunctionArg::Named {
+                            name: sqlast::Ident {
+                                value: arg.name.clone(),
+                                quote_style: None,
+                            },
+                            arg: sqlast::FunctionArgExpr::Expr(arg.expr.expr.clone()),
+                        });
+                        params.extend(arg.expr.params.clone());
+                    }
 
-                        Ok(mkcref(Expr::SQL(Arc::new(SQL {
-                            params,
-                            expr: sqlast::Expr::Function(sqlast::Function {
-                                name: name_wrapper.as_ref().clone(),
-                                args,
+                    Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                        params,
+                        expr: sqlast::Expr::Function(sqlast::Function {
+                            name: name_wrapper.as_ref().clone(),
+                            args,
 
-                                // TODO: We may want to forward these fields from the
-                                // expr (but doing that blindly causes ownership errors)
-                                over: None,
-                                distinct: false,
-                                special: false,
-                            }),
-                        }))))
-                    },
-                )?
+                            // TODO: We may want to forward these fields from the
+                            // expr (but doing that blindly causes ownership errors)
+                            over: None,
+                            distinct: false,
+                            special: false,
+                        }),
+                    }))))
+                })?
             } else {
                 let arg_exprs: Vec<_> = arg_sqlexprs
                     .iter()
@@ -1184,7 +1181,7 @@ pub fn compile_sqlexpr(
             };
             // let args_nonames = arg_sqlexprs
             //     .iter()
-            //     .map(|e| CTypedSQLExpr {
+            //     .map(|e| CTypedSQL {
             //         type_: e.type_.clone(),
             //         expr: e.expr.clone(),
             //     })
