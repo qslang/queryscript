@@ -38,19 +38,11 @@ pub struct CTypedSQL {
     pub sql: CRef<SQL<CRef<MType>>>,
 }
 
-#[derive(Clone, Debug)]
-pub struct CTypedSQLQuery {
-    pub type_: CRef<MType>,
-    pub query: CRef<SQLQuery<CRef<MType>>>,
-}
-
 impl<Ty: Clone + fmt::Debug + Send + Sync> Constrainable for SQL<Ty> {}
-impl<Ty: Clone + fmt::Debug + Send + Sync> Constrainable for SQLQuery<Ty> {}
 impl Constrainable for TypedSQL {}
 impl Constrainable for NameAndSQL {}
 impl Constrainable for CTypedNameAndSQL {}
 impl Constrainable for CTypedSQL {}
-impl Constrainable for CTypedSQLQuery {}
 impl Constrainable for CTypedExpr {}
 
 pub fn get_rowtype(compiler: Compiler, relation: CRef<MType>) -> Result<CRef<MType>> {
@@ -758,9 +750,9 @@ pub fn compile_sqlquery(
                         None => None,
                     };
 
-                    Ok(mkcref(Expr::SQLQuery(Arc::new(SQLQuery {
+                    Ok(mkcref(Expr::SQL(Arc::new(SQL {
                         params,
-                        query: sqlast::Query {
+                        body: SQLBody::Query(sqlast::Query {
                             with: None,
                             body,
                             order_by: Vec::new(),
@@ -768,7 +760,7 @@ pub fn compile_sqlquery(
                             offset,
                             fetch: None,
                             lock: None,
-                        },
+                        }),
                     }))))
                 })?,
             })

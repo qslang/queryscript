@@ -500,24 +500,6 @@ impl<T: Clone + fmt::Debug + Send + Sync> fmt::Debug for SQL<T> {
     }
 }
 
-#[derive(Clone)]
-pub struct SQLQuery<TypeRef>
-where
-    TypeRef: Clone + fmt::Debug + Send + Sync,
-{
-    pub params: Params<TypeRef>,
-    pub query: sqlast::Query,
-}
-
-impl<T: Clone + fmt::Debug + Send + Sync> fmt::Debug for SQLQuery<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SQLQuery")
-            .field("params", &self.params)
-            .field("query", &self.query.to_string())
-            .finish()
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum FnBody<TypeRef>
 where
@@ -568,7 +550,6 @@ pub enum Expr<TypeRef>
 where
     TypeRef: Clone + fmt::Debug + Send + Sync,
 {
-    SQLQuery(Arc<SQLQuery<TypeRef>>),
     SQL(Arc<SQL<TypeRef>>),
     SchemaEntry(STypedExpr),
     Fn(FnExpr<TypeRef>),
@@ -580,16 +561,6 @@ where
 impl Expr<CRef<MType>> {
     pub fn to_runtime_type(&self) -> runtime::error::Result<Expr<Ref<Type>>> {
         match self {
-            Expr::SQLQuery(q) => {
-                let SQLQuery { params, query } = q.as_ref();
-                Ok(Expr::SQLQuery(Arc::new(SQLQuery {
-                    params: params
-                        .iter()
-                        .map(|(name, param)| Ok((name.clone(), param.to_runtime_type()?)))
-                        .collect::<runtime::error::Result<_>>()?,
-                    query: query.clone(),
-                })))
-            }
             Expr::SQL(e) => {
                 let SQL { params, body } = e.as_ref();
                 Ok(Expr::SQL(Arc::new(SQL {
