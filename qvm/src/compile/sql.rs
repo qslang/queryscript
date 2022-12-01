@@ -913,6 +913,25 @@ pub fn compile_sqlexpr(
                 }))),
             }
         }
+        sqlast::Expr::IsNotNull(expr) => {
+            let compiled = compile_sqlarg(
+                compiler.clone(),
+                schema.clone(),
+                scope.clone(),
+                expr.as_ref(),
+            )?;
+            CTypedExpr {
+                type_: resolve_global_atom(compiler.clone(), "bool")?,
+                expr: compiled
+                    .expr
+                    .then(move |sqlexpr: Ref<SQLExpr<CRef<MType>>>| {
+                        Ok(mkcref(Expr::SQLExpr(Arc::new(SQLExpr {
+                            params: sqlexpr.read()?.params.clone(),
+                            expr: sqlast::Expr::IsNotNull(Box::new(sqlexpr.read()?.expr.clone())),
+                        }))))
+                    })?,
+            }
+        }
         sqlast::Expr::BinaryOp { left, op, right } => {
             let op = op.clone();
             let left = left.clone();
