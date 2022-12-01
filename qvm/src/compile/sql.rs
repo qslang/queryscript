@@ -291,11 +291,16 @@ pub fn combine_crefs<T: 'static + Constrainable>(all: Vec<CRef<T>>) -> Result<CR
 pub fn combine_sqlparams(all: &Vec<Ref<SQLExpr<CRef<MType>>>>) -> Result<CParams> {
     let mut ret = BTreeMap::new();
     for e in all {
-        for (n, p) in &e.read()?.params {
-            ret.insert(n.clone(), p.clone());
-        }
+        insert_sqlparams(&mut ret, &*e.read()?)?;
     }
     Ok(ret)
+}
+
+pub fn insert_sqlparams(dest: &mut CParams, src: &SQLExpr<CRef<MType>>) -> Result<()> {
+    for (n, p) in &src.params {
+        dest.insert(n.clone(), p.clone());
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug)]
@@ -400,10 +405,6 @@ pub fn compile_select(
 
     if select.lateral_views.len() > 0 {
         return Err(CompileError::unimplemented("Lateral views"));
-    }
-
-    if select.selection.is_some() {
-        return Err(CompileError::unimplemented("WHERE"));
     }
 
     if select.group_by.len() > 0 {
@@ -606,7 +607,7 @@ pub fn compile_select(
         })?;
 
     let select = select.clone();
-    let expr: CRef<_> = compiler.async_cref(async move {
+    let expr: CRef<_> = compiler.clone().async_cref(async move {
         let exprs = projections.await?;
         let mut proj_exprs = Vec::new();
         let exprs = (*exprs.read()?).clone();
@@ -627,9 +628,7 @@ pub fn compile_select(
         let mut params = BTreeMap::new();
         let mut projection = Vec::new();
         for sqlexpr in &*proj_exprs {
-            for (n, p) in &sqlexpr.expr.params {
-                params.insert(n.clone(), p.clone());
-            }
+            insert_sqlparams(&mut params, sqlexpr.expr.as_ref())?;
             projection.push(sqlast::SelectItem::ExprWithAlias {
                 alias: sqlast::Ident {
                     value: sqlexpr.name.clone(),
@@ -642,9 +641,24 @@ pub fn compile_select(
             params.insert(n.clone(), p.clone());
         }
 
+        let selection = match &select.selection {
+            Some(selection) => {
+                let compiled =
+                    compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), selection)?;
+                compiled
+                    .type_
+                    .unify(&resolve_global_atom(compiler.clone(), "bool")?)?;
+                let expr = compiled.expr.await?.read()?.clone();
+                insert_sqlparams(&mut params, &expr)?;
+                Some(expr.expr)
+            }
+            None => None,
+        };
+
         let mut ret = select.clone();
         ret.from = from.clone();
         ret.projection = projection;
+        ret.selection = selection;
 
         Ok(cwrap((
             params,
@@ -921,6 +935,16 @@ pub fn compile_sqlexpr(
                     )?;
                     [cleft, cright] = apply_coerce_casts(compiler.clone(), [cleft, cright], casts)?;
                     cleft.type_
+                }
+                Eq | NotEq | Lt | LtEq | Gt | GtEq => {
+                    let casts = coerce(
+                        compiler.clone(),
+                        op.clone(),
+                        cleft.type_.clone(),
+                        cright.type_.clone(),
+                    )?;
+                    [cleft, cright] = apply_coerce_casts(compiler.clone(), [cleft, cright], casts)?;
+                    resolve_global_atom(compiler.clone(), "bool")?
                 }
                 _ => {
                     return Err(CompileError::unimplemented(
