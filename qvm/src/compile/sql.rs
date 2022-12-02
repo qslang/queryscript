@@ -232,7 +232,7 @@ pub fn intern_placeholder(
     expr: &TypedExpr<CRef<MType>>,
 ) -> Result<Arc<SQL<CRef<MType>>>> {
     match &*expr.expr {
-        Expr::SQL(sqlexpr) => Ok(sqlexpr.clone()),
+        Expr::SQL(sql) => Ok(sql.clone()),
         _ => {
             let placeholder_name = "@".to_string() + compiler.next_placeholder(kind)?.as_str();
 
@@ -1154,7 +1154,7 @@ pub fn compile_sqlexpr(
                     ))
                 }
             };
-            let mut compiled_args: BTreeMap<String, CTypedNameAndSQL> = BTreeMap::new();
+            let mut compiled_args: BTreeMap<String, CTypedNameAndExpr> = BTreeMap::new();
             let mut pos: usize = 0;
             for arg in args {
                 let (name, expr) = match arg {
@@ -1185,30 +1185,30 @@ pub fn compile_sqlexpr(
                 }
 
                 let compiled_arg =
-                    compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), &expr)?;
+                    compile_sqlexpr(compiler.clone(), schema.clone(), scope.clone(), &expr)?;
                 compiled_args.insert(
                     name.clone(),
-                    CTypedNameAndSQL {
+                    CTypedNameAndExpr {
                         name: name.clone(),
-                        type_: compiled_arg.type_.clone(),
-                        sql: compiled_arg.sql.clone(),
+                        type_: compiled_arg.type_,
+                        expr: compiled_arg.expr,
                     },
                 );
             }
 
-            let mut arg_sqlexprs = Vec::new();
+            let mut arg_exprs = Vec::new();
             for arg in &fn_type.args {
                 if let Some(compiled_arg) = compiled_args.get_mut(&arg.name) {
                     arg.type_.unify(&compiled_arg.type_)?;
-                    arg_sqlexprs.push(compiled_arg.clone());
+                    arg_exprs.push(compiled_arg.clone());
                 } else if arg.nullable {
                     // If the argument is missing and nullable, then set it to NULL
                     // as a default value. Eventually we may want to generalize this
                     // so that functions can declare other kinds of default values too.
-                    arg_sqlexprs.push(CTypedNameAndSQL {
+                    arg_exprs.push(CTypedNameAndExpr {
                         name: arg.name.clone(),
                         type_: NULL.type_.clone(),
-                        sql: mkcref(NULL_SQLEXPR.as_ref().clone()),
+                        expr: NULL.expr.clone(),
                     });
                 } else {
                     return Err(CompileError::missing_arg(vec![arg.name.clone()]));
@@ -1235,11 +1235,19 @@ pub fn compile_sqlexpr(
             };
 
             let expr = if is_builtin {
-                let arg_exprs: Vec<_> = arg_sqlexprs
+                let arg_exprs: Vec<_> = arg_exprs
                     .iter()
                     .map(|e| {
+                        let ts = intern_cref_placeholder(
+                            compiler.clone(),
+                            "arg".to_string(),
+                            CTypedExpr {
+                                type_: e.type_.clone(),
+                                expr: e.expr.clone(),
+                            },
+                        )?;
                         let name = Arc::new(e.name.clone());
-                        e.sql.then(move |sql: Ref<SQL<CRef<MType>>>| {
+                        ts.sql.then(move |sql: Ref<SQL<CRef<MType>>>| {
                             // This is a bit annoying. It'd be a lot nicer if we didn't
                             // have to clone the name twice.
                             Ok(mkcref(NameAndSQL {
@@ -1281,18 +1289,17 @@ pub fn compile_sqlexpr(
                     }))))
                 })?
             } else {
-                let arg_exprs: Vec<_> = arg_sqlexprs
-                    .iter()
-                    .map(|e| {
-                        let type_ = e.type_.clone();
-                        e.sql.then(move |sql: Ref<SQL<CRef<MType>>>| {
+                let arg_exprs = arg_exprs
+                    .into_iter()
+                    .map(move |cte| {
+                        cte.expr.then(move |expr: Ref<Expr<CRef<MType>>>| {
                             Ok(mkcref(TypedExpr {
-                                type_: type_.clone(),
-                                expr: Arc::new(Expr::SQL(Arc::new(sql.read()?.clone()))),
+                                type_: cte.type_.clone(),
+                                expr: Arc::new(expr.read()?.clone()),
                             }))
                         })
                     })
-                    .collect::<Result<_>>()?;
+                    .collect::<Result<Vec<_>>>()?;
                 combine_crefs(arg_exprs)?.then(
                     move |arg_exprs: Ref<Vec<Ref<TypedExpr<CRef<MType>>>>>| {
                         Ok(mkcref(Expr::FnCall(FnCallExpr {
