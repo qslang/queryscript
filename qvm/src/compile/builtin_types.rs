@@ -53,6 +53,7 @@ fn load<R>(file varchar, format varchar) -> [R] = native;
 fn min<R>(value R) -> R = sql;
 fn max<R>(value R) -> R = sql;
 fn count<R>(value R) -> bigint = sql;
+fn sum<R>(value R) -> R = sql;
 ";
 
 lazy_static! {

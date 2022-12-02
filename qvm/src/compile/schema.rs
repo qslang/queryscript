@@ -161,6 +161,20 @@ impl MType {
     }
 }
 
+pub trait HasCExpr<E>
+where
+    E: Constrainable,
+{
+    fn expr(&self) -> &CRef<E>;
+}
+
+pub trait HasCType<T>
+where
+    T: Constrainable,
+{
+    fn type_(&self) -> &CRef<T>;
+}
+
 #[derive(Clone, Debug)]
 pub struct CTypedExpr {
     pub type_: CRef<MType>,

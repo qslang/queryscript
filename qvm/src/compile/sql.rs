@@ -38,6 +38,18 @@ pub struct CTypedSQL {
     pub sql: CRef<SQL<CRef<MType>>>,
 }
 
+impl HasCExpr<SQL<CRef<MType>>> for &CTypedSQL {
+    fn expr(&self) -> &CRef<SQL<CRef<MType>>> {
+        &self.sql
+    }
+}
+
+impl HasCType<MType> for &CTypedSQL {
+    fn type_(&self) -> &CRef<MType> {
+        &self.type_
+    }
+}
+
 impl<Ty: Clone + fmt::Debug + Send + Sync> Constrainable for SQL<Ty> {}
 impl Constrainable for TypedSQL {}
 impl Constrainable for NameAndSQL {}
@@ -843,12 +855,47 @@ fn apply_coerce_casts(
     Ok(args)
 }
 
+pub fn unify_all<T, C, I>(mut iter: I, unknown_debug_name: &str) -> Result<CRef<T>>
+where
+    T: Constrainable + 'static,
+    C: HasCType<T>,
+    I: Iterator<Item = C>,
+{
+    if let Some(first) = iter.next() {
+        for next in iter {
+            first.type_().unify(&next.type_())?;
+        }
+        Ok(first.type_().clone())
+    } else {
+        Ok(CRef::new_unknown(unknown_debug_name))
+    }
+}
+
+pub fn combine_sql_exprs<'a, T, I>(
+    iter: I,
+    params: &mut Params<CRef<T>>,
+) -> Result<Vec<sqlast::Expr>>
+where
+    T: Constrainable + 'static,
+    I: Iterator<Item = &'a Ref<SQL<CRef<T>>>>,
+{
+    iter.map(|c| {
+        let c = c.read()?;
+        params.extend(c.params.clone());
+        Ok(c.body.as_expr()?)
+    })
+    .collect::<Result<Vec<_>>>()
+}
+
 pub fn compile_sqlexpr(
     compiler: Compiler,
     schema: Ref<Schema>,
     scope: Ref<SQLScope>,
     expr: &sqlast::Expr,
 ) -> Result<CTypedExpr> {
+    let c_sqlarg =
+        |e: &sqlast::Expr| compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), e);
+
     let ret = match expr {
         sqlast::Expr::Value(v) => match v {
             sqlast::Value::Number(n, _) => CTypedExpr {
@@ -927,8 +974,6 @@ pub fn compile_sqlexpr(
         }
         sqlast::Expr::BinaryOp { left, op, right } => {
             let op = op.clone();
-            let left = left.clone();
-            let right = right.clone();
             let mut cleft = compile_sqlarg(
                 compiler.clone(),
                 schema.clone(),
@@ -984,6 +1029,96 @@ pub fn compile_sqlexpr(
                         }))))
                     },
                 )?,
+            }
+        }
+        sqlast::Expr::Case {
+            operand,
+            conditions,
+            results,
+            else_result,
+        } => {
+            let c_operand = match operand {
+                Some(o) => Some(c_sqlarg(&o)?),
+                None => None,
+            };
+
+            let c_conditions = conditions
+                .iter()
+                .map(|c| c_sqlarg(&c))
+                .collect::<Result<Vec<_>>>()?;
+
+            // If there's an operand, then unify the conditions against it, otherwise
+            // unify them to bool.
+            let condition_type = match &c_operand {
+                Some(o) => o.type_.clone(),
+                None => resolve_global_atom(compiler.clone(), "bool")?,
+            };
+
+            for c_cond in c_conditions.iter() {
+                c_cond.type_.unify(&condition_type)?;
+            }
+
+            let c_results = results
+                .iter()
+                .map(|c| c_sqlarg(&c))
+                .collect::<Result<Vec<_>>>()?;
+            let result_type = unify_all(c_results.iter(), "case statement results")?;
+            let c_else_result = match else_result {
+                Some(e) => {
+                    let ret = c_sqlarg(e)?;
+                    ret.type_.unify(&result_type)?;
+                    Some(ret)
+                }
+                None => None,
+            };
+
+            let combined_conditions =
+                combine_crefs(c_conditions.iter().map(|s| s.sql.clone()).collect())?;
+            let combined_results =
+                combine_crefs(c_results.iter().map(|s| s.sql.clone()).collect())?;
+
+            CTypedExpr {
+                type_: result_type,
+                expr: compiler.async_cref(async move {
+                    let mut params = BTreeMap::new();
+                    let operand = match c_operand {
+                        Some(ref o) => {
+                            let operand = (&o.sql).await?;
+                            let operand = operand.read()?;
+                            params.extend(operand.params.clone());
+                            Some(Box::new(operand.body.as_expr()?))
+                        }
+                        None => None,
+                    };
+
+                    let conditions =
+                        combine_sql_exprs(combined_conditions.await?.read()?.iter(), &mut params)?;
+
+                    let results =
+                        combine_sql_exprs(combined_results.await?.read()?.iter(), &mut params)?;
+
+                    let else_result = match c_else_result {
+                        Some(ref o) => {
+                            let operand = (&o.sql).await?;
+                            let operand = operand.read()?;
+                            params.extend(operand.params.clone());
+                            Some(Box::new(operand.body.as_expr()?))
+                        }
+                        None => None,
+                    };
+
+                    let body = sqlast::Expr::Case {
+                        operand,
+                        conditions,
+                        results,
+                        else_result,
+                    };
+
+                    Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                        params,
+                        body: SQLBody::Expr(body),
+                    }))))
+                })?,
             }
         }
         sqlast::Expr::Function(sqlast::Function {
