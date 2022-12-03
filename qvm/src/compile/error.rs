@@ -5,6 +5,7 @@ use crate::runtime::error::RuntimeError;
 use crate::types::error::TypesystemError;
 use snafu::{Backtrace, Snafu};
 use std::io;
+
 pub type Result<T> = std::result::Result<T, CompileError>;
 
 #[derive(Debug, Snafu)]

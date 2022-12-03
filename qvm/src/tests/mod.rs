@@ -41,12 +41,16 @@ mod tests {
 
         let compiler = compile::Compiler::new().expect("Failed to create compiler");
 
-        let schema = match compiler.compile_schema_from_file(path) {
-            Ok(schema) => schema,
-            Err(e) => {
-                result.insert("compile_error".to_string(), Box::new(e));
-                return result;
-            }
+        let mut schema_result = compiler.compile_schema_from_file(path);
+
+        result.insert(
+            "compile_errors".to_string(),
+            Box::new(schema_result.errors.drain(..).collect::<Vec<_>>()),
+        );
+
+        let schema = match schema_result.result {
+            Some(schema) => schema,
+            None => return result,
         };
 
         let mut decls = BTreeMap::<String, Box<dyn fmt::Debug>>::new();
@@ -71,19 +75,29 @@ mod tests {
                 pub value: String,
             }
 
-            let expr = expr
-                .to_runtime_type()
-                .expect(format!("Could not convert expression {:?}", expr).as_str());
+            let expr = match expr.to_runtime_type() {
+                Ok(e) => e,
+                Err(e) => {
+                    exprs.push(Err(e));
+                    continue;
+                }
+            };
             let async_ctx = (&schema).into();
             let async_expr = expr.clone();
-            let value = rt
-                .block_on(async move { runtime::eval(&async_ctx, &async_expr).await })
-                .expect("Failed to evaluate expression");
 
-            exprs.push(TypedValue {
+            let value =
+                match rt.block_on(async move { runtime::eval(&async_ctx, &async_expr).await }) {
+                    Ok(e) => e,
+                    Err(e) => {
+                        exprs.push(Err(e));
+                        continue;
+                    }
+                };
+
+            exprs.push(Ok(TypedValue {
                 type_: expr.type_.read().unwrap().clone(),
                 value: format!("{}", value),
-            });
+            }));
         }
 
         result.insert("decls".to_string(), Box::new(decls));

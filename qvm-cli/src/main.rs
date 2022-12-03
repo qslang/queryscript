@@ -100,7 +100,10 @@ fn run_file(rt: &runtime::Runtime, file: &str, mode: Mode) -> Result<(), QVMErro
     }
 
     let compiler = compile::Compiler::new()?;
-    let schema = compiler.compile_schema_from_file(&Path::new(&file))?;
+    let schema = compiler
+        .compile_schema_from_file(&Path::new(&file))
+        .as_result()?
+        .unwrap();
 
     if matches!(mode, Mode::Compile) {
         println!("{:#?}", schema);

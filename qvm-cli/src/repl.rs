@@ -153,7 +153,9 @@ fn run_command(
         Ok(ast) => {
             let num_exprs = repl_schema.read()?.exprs.len();
 
-            compiler.compile_schema_ast(repl_schema.clone(), &ast)?;
+            compiler
+                .compile_schema_ast(repl_schema.clone(), &ast)
+                .as_result()?;
 
             let compiled = {
                 let locked_schema = repl_schema.read()?;
