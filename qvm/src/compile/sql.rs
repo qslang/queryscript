@@ -1,5 +1,6 @@
 use lazy_static::lazy_static;
 use sqlparser::{ast as sqlast, ast::DataType as ParserDataType};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
@@ -1141,7 +1142,8 @@ pub fn compile_sqlexpr(
                 ));
             }
 
-            let func = compile_reference(compiler.clone(), schema.clone(), &name.to_path())?;
+            let func_name = name.to_path();
+            let func = compile_reference(compiler.clone(), schema.clone(), &func_name)?;
             let fn_type = match func.type_.must()?.read()?.clone() {
                 MType::Fn(f) => f,
                 _ => {
@@ -1172,11 +1174,22 @@ pub fn compile_sqlexpr(
                 };
 
                 let expr = match expr {
-                    sqlast::FunctionArgExpr::Expr(e) => e,
-                    _ => {
-                        return Err(CompileError::unimplemented(
-                            format!("Weird function arguments").as_str(),
-                        ))
+                    sqlast::FunctionArgExpr::Expr(e) => Cow::Borrowed(e),
+                    sqlast::FunctionArgExpr::Wildcard
+                    | sqlast::FunctionArgExpr::QualifiedWildcard(_) => {
+                        // Wildcards (qualified or not) are only supported for certain functions
+                        // (count as far as we know, and potentially others).
+                        match func_name.as_slice().first().map(|s| s.as_str()) {
+                            Some("count") => Cow::Owned(sqlast::Expr::Value(
+                                sqlast::Value::Number("1".to_string(), false),
+                            )),
+                            _ => {
+                                return Err(CompileError::unimplemented(&format!(
+                                    "wildcard arguments for {:?} function",
+                                    name
+                                )))
+                            }
+                        }
                     }
                 };
 
