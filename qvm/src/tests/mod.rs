@@ -68,7 +68,7 @@ mod tests {
             #[allow(dead_code)]
             struct TypedValue {
                 pub type_: types::Type,
-                pub value: types::Value,
+                pub value: String,
             }
 
             let expr = expr
@@ -82,7 +82,7 @@ mod tests {
 
             exprs.push(TypedValue {
                 type_: expr.type_.read().unwrap().clone(),
-                value,
+                value: format!("{}", value),
             });
         }
 
