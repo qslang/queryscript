@@ -1,5 +1,5 @@
 use rustyline::{error::ReadlineError, Editor};
-use snafu::whatever;
+use snafu::{whatever, ErrorCompat};
 
 use qvm::compile;
 use qvm::compile::schema;
@@ -96,6 +96,9 @@ pub fn run(rt: &runtime::Runtime) {
                     }
                     Err(e) => {
                         eprintln!("Error: {}", e);
+                        if let Some(bt) = ErrorCompat::backtrace(&e) {
+                            eprintln!("{:?}", bt);
+                        }
                         rl.add_history_entry(curr_buffer.borrow().as_str());
                         curr_buffer.borrow_mut().clear();
                     }

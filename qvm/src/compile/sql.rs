@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use sqlparser::{ast as sqlast, ast::DataType as ParserDataType};
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{btree_map, BTreeMap};
 use std::fmt;
 use std::sync::Arc;
 
@@ -391,6 +391,217 @@ impl SQLScope {
 
 impl Constrainable for SQLScope {}
 
+pub fn compile_relation(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    scope: &Ref<SQLScope>,
+    relation: &sqlast::TableFactor,
+    from_params: &mut Params<CRef<MType>>,
+) -> Result<sqlast::TableFactor> {
+    Ok(match relation {
+        sqlast::TableFactor::Table {
+            name,
+            alias,
+            args,
+            with_hints,
+        } => {
+            if args.is_some() {
+                return Err(CompileError::unimplemented("Table valued functions"));
+            }
+
+            if with_hints.len() > 0 {
+                return Err(CompileError::unimplemented("WITH hints"));
+            }
+
+            // TODO: This currently assumes that table references always come from outside
+            // the query, which is not actually the case.
+            //
+            let relation = compile_reference(compiler.clone(), schema.clone(), &name.to_path())?;
+
+            let list_type = mkcref(MType::List(MType::new_unknown(
+                format!("FROM {}", name.to_string()).as_str(),
+            )));
+            list_type.unify(&relation.type_)?;
+
+            let name = match alias {
+                Some(a) => a.name.value.clone(),
+                None => name
+                    .0
+                    .last()
+                    .ok_or_else(|| {
+                        CompileError::internal("Table name must have at least one part")
+                    })?
+                    .value
+                    .clone(),
+            };
+            match scope.write()?.relations.entry(name.clone()) {
+                btree_map::Entry::Occupied(_) => {
+                    return Err(CompileError::duplicate_entry(vec![name]))
+                }
+                btree_map::Entry::Vacant(e) => {
+                    let relation = e.insert(relation).clone();
+
+                    let placeholder_name =
+                        QVM_NAMESPACE.to_string() + compiler.next_placeholder("rel")?.as_str();
+                    from_params.insert(placeholder_name.clone(), relation);
+
+                    sqlast::TableFactor::Table {
+                        name: sqlast::ObjectName(vec![sqlast::Ident {
+                            value: placeholder_name,
+                            quote_style: None,
+                        }]),
+                        alias: Some(sqlast::TableAlias {
+                            name: sqlast::Ident {
+                                value: name.to_string(),
+                                quote_style: None,
+                            },
+                            columns: Vec::new(),
+                        }),
+                        args: None,
+                        with_hints: Vec::new(),
+                    }
+                }
+            }
+        }
+        sqlast::TableFactor::Derived { .. } => {
+            return Err(CompileError::unimplemented("Subqueries"))
+        }
+        sqlast::TableFactor::TableFunction { .. } => {
+            return Err(CompileError::unimplemented("TABLE"))
+        }
+        sqlast::TableFactor::UNNEST { .. } => return Err(CompileError::unimplemented("UNNEST")),
+        sqlast::TableFactor::NestedJoin { .. } => {
+            return Err(CompileError::unimplemented("Nested JOIN"))
+        }
+    })
+}
+
+pub fn compile_join_constraint(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    scope: &Ref<SQLScope>,
+    join_constraint: &sqlast::JoinConstraint,
+) -> Result<CRef<CWrap<(Params<CRef<MType>>, sqlast::JoinConstraint)>>> {
+    use sqlast::JoinConstraint::*;
+    Ok(match join_constraint {
+        On(e) => {
+            let sql = compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), &e)?;
+            sql.type_
+                .unify(&resolve_global_atom(compiler.clone(), "bool")?)?;
+            compiler.async_cref(async move {
+                let sql = sql.sql.await?;
+                let sql = sql.read()?;
+                Ok(cwrap((sql.params.clone(), On(sql.body.as_expr()?))))
+            })?
+        }
+        Using(_) => return Err(CompileError::unimplemented("JOIN ... USING")),
+        Natural => cwrap((Params::new(), Natural)),
+        None => cwrap((Params::new(), None)),
+    })
+}
+
+pub fn compile_join_operator(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    scope: &Ref<SQLScope>,
+    join_operator: &sqlast::JoinOperator,
+) -> Result<CRef<CWrap<(Params<CRef<MType>>, sqlast::JoinOperator)>>> {
+    use sqlast::JoinOperator::*;
+    let join_constructor = match join_operator {
+        Inner(_) => Some(Inner),
+        LeftOuter(_) => Some(Inner),
+        RightOuter(_) => Some(Inner),
+        FullOuter(_) => Some(Inner),
+        _ => None,
+    };
+
+    Ok(match join_operator {
+        Inner(c) | LeftOuter(c) | RightOuter(c) | FullOuter(c) => {
+            let constraint = compile_join_constraint(compiler, schema, scope, c)?;
+            compiler.async_cref(async move {
+                let (params, sql) = cunwrap(constraint.await?)?;
+                Ok(cwrap((params, join_constructor.unwrap()(sql))))
+            })?
+        }
+        o => return Err(CompileError::unimplemented(format!("{:?}", o).as_str())),
+    })
+}
+
+pub fn compile_table_with_joins(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    scope: &Ref<SQLScope>,
+    table: &sqlast::TableWithJoins,
+) -> Result<CRef<CWrap<(Params<CRef<MType>>, sqlast::TableWithJoins)>>> {
+    let mut table_params = BTreeMap::new();
+    let relation = compile_relation(compiler, schema, scope, &table.relation, &mut table_params)?;
+
+    let mut join_rels = Vec::new();
+    let mut join_ops = Vec::new();
+    for join in &table.joins {
+        let join_relation =
+            compile_relation(compiler, schema, scope, &join.relation, &mut table_params)?;
+
+        join_rels.push(join_relation);
+        join_ops.push(compile_join_operator(
+            compiler,
+            schema,
+            scope,
+            &join.join_operator,
+        )?);
+    }
+    compiler.async_cref(async move {
+        let mut joins = Vec::new();
+        for (jo, relation) in join_ops.into_iter().zip(join_rels.into_iter()) {
+            let (params, join_operator) = cunwrap(jo.await?)?;
+            table_params.extend(params);
+            joins.push(sqlast::Join {
+                relation,
+                join_operator,
+            });
+        }
+        Ok(cwrap((
+            table_params,
+            sqlast::TableWithJoins { relation, joins },
+        )))
+    })
+}
+
+pub fn compile_from(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    from: &Vec<sqlast::TableWithJoins>,
+) -> Result<(
+    Ref<SQLScope>,
+    CRef<CWrap<(Params<CRef<MType>>, Vec<sqlast::TableWithJoins>)>>,
+)> {
+    let scope = SQLScope::empty();
+    let from = match from.len() {
+        0 => cwrap((Params::new(), Vec::new())),
+        _ => {
+            let tables = from
+                .iter()
+                .map(|table| compile_table_with_joins(compiler, schema, &scope, table))
+                .collect::<Result<Vec<_>>>()?;
+
+            compiler.async_cref(async move {
+                let mut all_params = Params::new();
+                let mut all_tables = Vec::new();
+
+                for table in tables.into_iter() {
+                    let (params, table) = cunwrap(table.await?)?;
+                    all_params.extend(params);
+                    all_tables.push(table);
+                }
+
+                Ok(cwrap((all_params, all_tables)))
+            })?
+        }
+    };
+
+    Ok((scope, from))
+}
+
 pub fn compile_select(
     compiler: Compiler,
     schema: Ref<Schema>,
@@ -435,96 +646,7 @@ pub fn compile_select(
         return Err(CompileError::unimplemented("QUALIFY"));
     }
 
-    let scope = SQLScope::empty();
-    match select.from.len() {
-        0 => {}
-        1 => {
-            if select.from[0].joins.len() > 0 {
-                return Err(CompileError::unimplemented("JOIN"));
-            }
-
-            match &select.from[0].relation {
-                sqlast::TableFactor::Table {
-                    name,
-                    alias,
-                    args,
-                    with_hints,
-                } => {
-                    if args.is_some() {
-                        return Err(CompileError::unimplemented("Table valued functions"));
-                    }
-
-                    if with_hints.len() > 0 {
-                        return Err(CompileError::unimplemented("WITH hints"));
-                    }
-
-                    // TODO: This currently assumes that table references always come from outside
-                    // the query, which is not actually the case.
-                    //
-                    let relation =
-                        compile_reference(compiler.clone(), schema.clone(), &name.to_path())?;
-
-                    let list_type = mkcref(MType::List(MType::new_unknown(
-                        format!("FROM {}", name.to_string()).as_str(),
-                    )));
-                    list_type.unify(&relation.type_)?;
-
-                    let name = match alias {
-                        Some(a) => a.name.value.clone(),
-                        None => name
-                            .0
-                            .last()
-                            .ok_or_else(|| {
-                                CompileError::internal("Table name must have at least one part")
-                            })?
-                            .value
-                            .clone(),
-                    };
-                    scope.write()?.relations.insert(name, relation);
-                }
-                sqlast::TableFactor::Derived { .. } => {
-                    return Err(CompileError::unimplemented("Subqueries"))
-                }
-                sqlast::TableFactor::TableFunction { .. } => {
-                    return Err(CompileError::unimplemented("TABLE"))
-                }
-                sqlast::TableFactor::UNNEST { .. } => {
-                    return Err(CompileError::unimplemented("UNNEST"))
-                }
-                sqlast::TableFactor::NestedJoin { .. } => {
-                    return Err(CompileError::unimplemented("JOIN"))
-                }
-            }
-        }
-        _ => return Err(CompileError::unimplemented("JOIN")),
-    };
-
-    let mut from = Vec::new();
-    let mut from_params = BTreeMap::new();
-    for (name, relation) in &scope.read()?.relations {
-        let placeholder_name =
-            QVM_NAMESPACE.to_string() + compiler.next_placeholder("rel")?.as_str();
-
-        from.push(sqlast::TableWithJoins {
-            relation: sqlast::TableFactor::Table {
-                name: sqlast::ObjectName(vec![sqlast::Ident {
-                    value: placeholder_name.clone(),
-                    quote_style: None,
-                }]),
-                alias: Some(sqlast::TableAlias {
-                    name: sqlast::Ident {
-                        value: name.clone(),
-                        quote_style: None,
-                    },
-                    columns: Vec::new(),
-                }),
-                args: None,
-                with_hints: Vec::new(),
-            },
-            joins: Vec::new(),
-        });
-        from_params.insert(placeholder_name.clone(), relation.clone());
-    }
+    let (scope, from) = compile_from(&compiler, &schema, &select.from)?;
 
     let exprs = select
         .projection
@@ -611,6 +733,8 @@ pub fn compile_select(
 
     let select = select.clone();
     let expr: CRef<_> = compiler.clone().async_cref(async move {
+        let (from_params, from) = cunwrap(from.await?)?;
+
         let exprs = projections.await?;
         let mut proj_exprs = Vec::new();
         let exprs = (*exprs.read()?).clone();
@@ -626,8 +750,7 @@ pub fn compile_select(
         }
 
         let select = select.clone();
-        let from = from.clone();
-        let from_params = from_params.clone();
+
         let mut params = BTreeMap::new();
         let mut projection = Vec::new();
         for sqlexpr in &*proj_exprs {
@@ -640,9 +763,7 @@ pub fn compile_select(
                 expr: sqlexpr.sql.body.as_expr()?,
             });
         }
-        for (n, p) in &from_params {
-            params.insert(n.clone(), p.clone());
-        }
+        params.extend(from_params.into_iter());
 
         let selection = match &select.selection {
             Some(selection) => {

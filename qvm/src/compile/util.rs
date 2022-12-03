@@ -1,5 +1,5 @@
 use core::borrow::Borrow;
-use std::collections::BTreeMap;
+use std::collections::{btree_map, BTreeMap};
 
 use crate::compile::inference::Constrainable;
 
@@ -54,6 +54,19 @@ impl<K, V> InsertionOrderMap<K, V> {
             map: &self.map,
         }
     }
+
+    pub fn entry(&mut self, key: K) -> Entry<'_, K, V>
+    where
+        K: Ord,
+    {
+        match self.map.entry(key) {
+            btree_map::Entry::Vacant(entry) => Entry::Vacant(VacantEntry {
+                entry,
+                order: &mut self.order,
+            }),
+            btree_map::Entry::Occupied(entry) => Entry::Occupied(entry),
+        }
+    }
 }
 
 pub struct Iter<'a, K: 'a, V: 'a> {
@@ -99,6 +112,56 @@ where
     }
 }
 
+pub enum Entry<'a, K, V>
+where
+    K: 'a,
+    V: 'a,
+{
+    Vacant(VacantEntry<'a, K, V>),
+    Occupied(OccupiedEntry<'a, K, V>),
+}
+
+impl<'a, K, V> Entry<'a, K, V>
+where
+    K: 'a + Clone,
+    V: 'a,
+{
+    pub fn or_insert(self, default: V) -> &'a mut V
+    where
+        K: Ord,
+    {
+        match self {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => entry.insert(default),
+        }
+    }
+}
+
+pub struct VacantEntry<'a, K, V>
+where
+    K: 'a,
+    V: 'a,
+{
+    entry: btree_map::VacantEntry<'a, K, V>,
+    order: &'a mut Vec<K>,
+}
+
+impl<'a, K, V> VacantEntry<'a, K, V>
+where
+    K: 'a,
+    V: 'a,
+{
+    pub fn insert(self, value: V) -> &'a mut V
+    where
+        K: Ord + Clone,
+    {
+        self.order.push(self.entry.key().clone());
+        self.entry.insert(value)
+    }
+}
+
+pub type OccupiedEntry<'a, K, V> = btree_map::OccupiedEntry<'a, K, V>;
+
 impl<K, V> Constrainable for InsertionOrderMap<K, V>
 where
     K: Constrainable,
@@ -123,5 +186,18 @@ mod tests {
             assert_eq!(*v, i);
             i += 1;
         }
+    }
+
+    #[test]
+    fn test_entry() {
+        let mut map = InsertionOrderMap::new();
+        map.entry(0).or_insert(1);
+        assert_eq!(map.get(&0), Some(&1));
+
+        let mut i = 0;
+        for _ in map.iter() {
+            i += 1;
+        }
+        assert_eq!(i, 1);
     }
 }
