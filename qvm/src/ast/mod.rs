@@ -3,7 +3,29 @@ use sqlparser::ast as sqlast;
 pub use sqlparser::tokenizer::Location;
 
 pub type Ident = String;
+
 pub type Path = Vec<Ident>;
+
+pub trait IntoPath {
+    fn to_path(&self) -> Path;
+}
+
+impl IntoPath for &Vec<sqlast::Ident> {
+    fn to_path(&self) -> Path {
+        self.iter()
+            .map(|p| match p.quote_style {
+                Some(_) => p.value.clone(), // Preserve the case if the string is quoted
+                None => p.value.to_lowercase(),
+            })
+            .collect()
+    }
+}
+
+impl IntoPath for &sqlast::ObjectName {
+    fn to_path(&self) -> Path {
+        (&self.0).to_path()
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct NameAndType {

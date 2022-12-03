@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
+use crate::ast::IntoPath;
 use crate::compile::compile::{coerce, lookup_path, resolve_global_atom, typecheck_path, Compiler};
 use crate::compile::error::{CompileError, Result};
 use crate::compile::inference::*;
@@ -75,7 +76,7 @@ pub fn compile_sqlreference(
     scope: Ref<SQLScope>,
     sqlpath: &Vec<sqlast::Ident>,
 ) -> Result<CTypedExpr> {
-    let path: Vec<_> = sqlpath.iter().map(|e| e.value.clone()).collect();
+    let path = sqlpath.to_path();
     match sqlpath.len() {
         0 => {
             return Err(CompileError::internal(
@@ -459,8 +460,8 @@ pub fn compile_select(
                     // TODO: This currently assumes that table references always come from outside
                     // the query, which is not actually the case.
                     //
-                    let path: Vec<_> = name.0.iter().map(|e| e.value.clone()).collect();
-                    let relation = compile_reference(compiler.clone(), schema.clone(), &path)?;
+                    let relation =
+                        compile_reference(compiler.clone(), schema.clone(), &name.to_path())?;
 
                     let list_type = mkcref(MType::List(MType::new_unknown(
                         format!("FROM {}", name.to_string()).as_str(),
@@ -1140,8 +1141,7 @@ pub fn compile_sqlexpr(
                 ));
             }
 
-            let path: Vec<_> = name.0.iter().map(|e| e.value.clone()).collect();
-            let func = compile_reference(compiler.clone(), schema.clone(), &path)?;
+            let func = compile_reference(compiler.clone(), schema.clone(), &name.to_path())?;
             let fn_type = match func.type_.must()?.read()?.clone() {
                 MType::Fn(f) => f,
                 _ => {
