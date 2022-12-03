@@ -731,6 +731,28 @@ pub fn compile_select(
         Ok(mkcref(MType::List(mkcref(MType::Record(fields)))))
     })?;
 
+    let selection = match &select.selection {
+        Some(selection) => {
+            let compiled =
+                compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), selection)?;
+            compiled
+                .type_
+                .unify(&resolve_global_atom(compiler.clone(), "bool")?)?;
+            Some(compiled)
+        }
+        None => None,
+    };
+
+    let mut compiled_group_by = Vec::new();
+    for gb in &select.group_by {
+        compiled_group_by.push(compile_sqlarg(
+            compiler.clone(),
+            schema.clone(),
+            scope.clone(),
+            gb,
+        )?);
+    }
+
     let select = select.clone();
     let expr: CRef<_> = compiler.clone().async_cref(async move {
         let (from_params, from) = cunwrap(from.await?)?;
@@ -765,14 +787,10 @@ pub fn compile_select(
         }
         params.extend(from_params.into_iter());
 
-        let selection = match &select.selection {
-            Some(selection) => {
-                let compiled =
-                    compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), selection)?;
-                compiled
-                    .type_
-                    .unify(&resolve_global_atom(compiler.clone(), "bool")?)?;
-                let sql = compiled.sql.await?.read()?.clone();
+        let selection = match &selection {
+            Some(compiled) => {
+                let sql = compiled.clone().sql.await?;
+                let sql = sql.read()?.clone();
                 insert_sqlparams(&mut params, &sql)?;
                 Some(sql.body.as_expr()?)
             }
@@ -780,8 +798,7 @@ pub fn compile_select(
         };
 
         let mut group_by = Vec::new();
-        for gb in &select.group_by {
-            let compiled = compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), gb)?;
+        for compiled in compiled_group_by.into_iter() {
             let sql = compiled.sql.await?.read()?.clone();
             insert_sqlparams(&mut params, &sql)?;
             group_by.push(sql.body.as_expr()?);
@@ -941,7 +958,7 @@ fn apply_sqlcast(
     })?)
 }
 
-// NOTE: This is intentionally written to support a length > 2, but  currently constrained to 2
+// NOTE: This is intentionally written to support a length > 2, but currently constrained to 2
 // elements because of how coerce() is implemented.
 fn apply_coerce_casts(
     compiler: Compiler,
