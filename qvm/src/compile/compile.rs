@@ -977,11 +977,11 @@ pub fn coerce<T: Constrainable + 'static>(
     op: sqlparser::ast::BinaryOperator,
     left: CRef<T>,
     right: CRef<T>,
-) -> Result<CRef<CWrap<[Option<CRef<T>>; 2]>>> {
+) -> Result<CRef<T>> {
     compiler.async_cref(async move {
         let left = left.await?;
         let right = right.await?;
 
-        Ok(cwrap(Constrainable::coerce(&op, &left, &right)?))
+        Constrainable::coerce(&op, &left, &right)
     })
 }

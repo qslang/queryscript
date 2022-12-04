@@ -23,20 +23,15 @@ pub trait Constrainable: Clone + fmt::Debug + Send + Sync {
     }
 
     fn coerce(
-        op: &sqlparser::ast::BinaryOperator,
+        _op: &sqlparser::ast::BinaryOperator,
         left: &Ref<Self>,
         right: &Ref<Self>,
-    ) -> Result<[Option<CRef<Self>>; 2]> {
-        Err(CompileError::internal(
-            format!(
-                "{} cannot be coerced:{:?} {:?} {:?}",
-                std::any::type_name::<Self>(),
-                left,
-                op,
-                right,
-            )
-            .as_str(),
-        ))
+    ) -> Result<CRef<Self>>
+    where
+        Self: 'static,
+    {
+        left.unify(right)?;
+        Ok(mkcref(left.read()?.clone()))
     }
 }
 

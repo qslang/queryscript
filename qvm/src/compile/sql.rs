@@ -963,31 +963,29 @@ fn apply_sqlcast(
 fn apply_coerce_casts(
     compiler: Compiler,
     mut args: [CTypedSQL; 2],
-    targets: CRef<CWrap<[Option<CRef<MType>>; 2]>>,
+    target: CRef<MType>,
 ) -> Result<[CTypedSQL; 2]> {
     for i in 0..args.len() {
-        let targets1 = targets.clone();
-        let targets2 = targets.clone();
+        let target2 = target.clone();
         let compiler2 = compiler.clone();
 
         let arg = args[i].clone();
 
         args[i] = CTypedSQL {
-            type_: compiler.clone().async_cref(async move {
-                let resolved_targets = CWrap::clone_inner(&targets1).await?;
-
-                Ok(match &resolved_targets[i] {
-                    Some(cast) => cast.clone(),
-                    None => arg.type_.clone(),
-                })
-            })?,
+            type_: target.clone(),
             sql: compiler.clone().async_cref(async move {
-                let resolved_targets = CWrap::clone_inner(&targets2).await?;
+                let my_type = arg.type_.await?;
+                let resolved_target = target2.await?;
 
-                Ok(match &resolved_targets[i] {
-                    Some(cast) => apply_sqlcast(compiler2, arg.sql.clone(), cast.await?)?,
-                    None => arg.sql,
-                })
+                Ok(
+                    if resolved_target.read()?.to_runtime_type()?
+                        != my_type.read()?.to_runtime_type()?
+                    {
+                        apply_sqlcast(compiler2, arg.sql.clone(), resolved_target)?
+                    } else {
+                        arg.sql
+                    },
+                )
             })?,
         };
     }

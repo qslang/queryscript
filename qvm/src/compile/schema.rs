@@ -286,7 +286,7 @@ impl Constrainable for MType {
         op: &sqlast::BinaryOperator,
         left: &Ref<Self>,
         right: &Ref<Self>,
-    ) -> Result<[Option<CRef<Self>>; 2]> {
+    ) -> Result<CRef<Self>> {
         let df_op = match super::datafusion::parser_binop_to_df_binop(op) {
             Ok(op) => op,
             Err(e) => return Err(CompileError::unimplemented(&(e.to_string()))),
@@ -309,18 +309,7 @@ impl Constrainable for MType {
         };
 
         let coerced_type: Type = (&coerced_df).try_into()?;
-        Ok([
-            if coerced_type == left_rt {
-                None
-            } else {
-                Some(mkcref(MType::from_runtime_type(&coerced_type)?))
-            },
-            if coerced_type == right_rt {
-                None
-            } else {
-                Some(mkcref(MType::from_runtime_type(&coerced_type)?))
-            },
-        ])
+        Ok(mkcref(MType::from_runtime_type(&coerced_type)?))
     }
 }
 
