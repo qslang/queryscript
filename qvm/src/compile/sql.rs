@@ -602,11 +602,50 @@ pub fn compile_from(
     Ok((scope, from))
 }
 
+pub fn compile_order_by(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    scope: &Ref<SQLScope>,
+    order_by: &Vec<sqlast::OrderByExpr>,
+) -> Result<CRef<CWrap<(Params<CRef<MType>>, Vec<sqlast::OrderByExpr>)>>> {
+    let mut compiled_order_by = Vec::new();
+    let mut compiled_opts = Vec::new();
+    for ob in order_by {
+        compiled_order_by.push(compile_sqlarg(
+            compiler.clone(),
+            schema.clone(),
+            scope.clone(),
+            &ob.expr,
+        )?);
+        compiled_opts.push((ob.asc.clone(), ob.nulls_first.clone()));
+    }
+
+    compiler.async_cref(async move {
+        let mut resolved_order_by = Vec::new();
+        let mut params = Params::new();
+        for (expr, (asc, nulls_first)) in
+            compiled_order_by.into_iter().zip(compiled_opts.into_iter())
+        {
+            let resolved_expr = expr.sql.await?;
+            let resolved_expr = resolved_expr.read()?;
+            params.extend(resolved_expr.params.clone());
+            resolved_order_by.push(sqlast::OrderByExpr {
+                expr: resolved_expr.body.as_expr()?,
+                asc,
+                nulls_first,
+            });
+        }
+
+        Ok(cwrap((params, resolved_order_by)))
+    })
+}
+
 pub fn compile_select(
     compiler: Compiler,
     schema: Ref<Schema>,
     select: &sqlast::Select,
 ) -> Result<(
+    Ref<SQLScope>,
     CRef<MType>,
     CRef<CWrap<(Params<CRef<MType>>, Box<sqlast::SetExpr>)>>,
 )> {
@@ -635,7 +674,7 @@ pub fn compile_select(
     }
 
     if select.sort_by.len() > 0 {
-        return Err(CompileError::unimplemented("ORDER BY"));
+        return Err(CompileError::unimplemented("SORT BY"));
     }
 
     if select.having.is_some() {
@@ -816,7 +855,7 @@ pub fn compile_select(
         )))
     })?;
 
-    Ok((type_, expr))
+    Ok((scope, type_, expr))
 }
 
 pub async fn finish_sqlexpr(
@@ -840,10 +879,6 @@ pub fn compile_sqlquery(
 ) -> Result<CTypedExpr> {
     if query.with.is_some() {
         return Err(CompileError::unimplemented("WITH"));
-    }
-
-    if query.order_by.len() > 0 {
-        return Err(CompileError::unimplemented("ORDER BY"));
     }
 
     let limit = match &query.limit {
@@ -884,7 +919,10 @@ pub fn compile_sqlquery(
 
     match query.body.as_ref() {
         sqlast::SetExpr::Select(s) => {
-            let (type_, select) = compile_select(compiler.clone(), schema.clone(), s)?;
+            let (scope, type_, select) = compile_select(compiler.clone(), schema.clone(), s)?;
+
+            let compiled_order_by = compile_order_by(&compiler, &schema, &scope, &query.order_by)?;
+
             Ok(CTypedExpr {
                 type_,
                 expr: compiler.async_cref(async move {
@@ -902,12 +940,15 @@ pub fn compile_sqlquery(
                         None => None,
                     };
 
+                    let (ob_params, order_by) = cunwrap(compiled_order_by.await?)?;
+                    params.extend(ob_params);
+
                     Ok(mkcref(Expr::SQL(Arc::new(SQL {
                         params,
                         body: SQLBody::Query(sqlast::Query {
                             with: None,
                             body,
-                            order_by: Vec::new(),
+                            order_by,
                             limit,
                             offset,
                             fetch: None,
