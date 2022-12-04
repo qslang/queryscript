@@ -962,11 +962,12 @@ fn coerce_all(
     compiler: &Compiler,
     op: &sqlparser::ast::BinaryOperator,
     args: Vec<CTypedSQL>,
-) -> Result<Vec<CTypedSQL>> {
+    unknown_debug_name: &str,
+) -> Result<(CRef<MType>, Vec<CTypedSQL>)> {
     let mut exprs = Vec::new();
     let mut iter = args.iter();
 
-    let mut target = CRef::new_unknown("DNE");
+    let mut target = CRef::new_unknown(unknown_debug_name);
     if let Some(first) = iter.next() {
         exprs.push(first.clone());
         target = first.type_.clone();
@@ -1000,7 +1001,7 @@ fn coerce_all(
         })
     }
 
-    Ok(ret)
+    Ok((target, ret))
 }
 
 pub fn unify_all<T, C, I>(mut iter: I, unknown_debug_name: &str) -> Result<CRef<T>>
@@ -1137,12 +1138,22 @@ pub fn compile_sqlexpr(
             use sqlast::BinaryOperator::*;
             let type_ = match op {
                 Plus | Minus | Multiply | Divide => {
-                    let casted = coerce_all(&compiler, &op, vec![cleft, cright])?;
+                    let (result_type, casted) = coerce_all(
+                        &compiler,
+                        &op,
+                        vec![cleft, cright],
+                        format!("{:?}", op).as_str(),
+                    )?;
                     (cleft, cright) = (casted[0].clone(), casted[1].clone());
-                    cleft.type_
+                    result_type
                 }
                 Eq | NotEq | Lt | LtEq | Gt | GtEq => {
-                    let casted = coerce_all(&compiler, &op, vec![cleft, cright])?;
+                    let (_, casted) = coerce_all(
+                        &compiler,
+                        &op,
+                        vec![cleft, cright],
+                        format!("{:?}", op).as_str(),
+                    )?;
                     (cleft, cright) = (casted[0].clone(), casted[1].clone());
                     resolve_global_atom(compiler.clone(), "bool")?
                 }
@@ -1196,17 +1207,25 @@ pub fn compile_sqlexpr(
                 c_cond.type_.unify(&condition_type)?;
             }
 
-            let c_results = results
+            let mut c_results = results
                 .iter()
                 .map(|c| c_sqlarg(&c))
                 .collect::<Result<Vec<_>>>()?;
-            let result_type = unify_all(c_results.iter(), "case statement results")?;
+
+            if let Some(e) = else_result {
+                let ret = c_sqlarg(e)?;
+                c_results.push(ret);
+            }
+
+            let (result_type, mut c_results) = coerce_all(
+                &compiler,
+                &sqlast::BinaryOperator::Eq,
+                c_results,
+                "case result",
+            )?;
+
             let c_else_result = match else_result {
-                Some(e) => {
-                    let ret = c_sqlarg(e)?;
-                    ret.type_.unify(&result_type)?;
-                    Some(ret)
-                }
+                Some(_) => Some(c_results.pop().unwrap()),
                 None => None,
             };
 
