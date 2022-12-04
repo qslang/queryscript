@@ -634,6 +634,10 @@ pub fn compile_select(
         return Err(CompileError::unimplemented("DISTRIBUTE BY"));
     }
 
+    if select.sort_by.len() > 0 {
+        return Err(CompileError::unimplemented("ORDER BY"));
+    }
+
     if select.having.is_some() {
         return Err(CompileError::unimplemented("HAVING"));
     }
@@ -749,16 +753,6 @@ pub fn compile_select(
         )?);
     }
 
-    let mut compiled_sort_by = Vec::new();
-    for gb in &select.sort_by {
-        compiled_sort_by.push(compile_sqlarg(
-            compiler.clone(),
-            schema.clone(),
-            scope.clone(),
-            gb,
-        )?);
-    }
-
     let select = select.clone();
     let expr: CRef<_> = compiler.clone().async_cref(async move {
         let (from_params, from) = cunwrap(from.await?)?;
@@ -810,19 +804,11 @@ pub fn compile_select(
             group_by.push(sql.body.as_expr()?);
         }
 
-        let mut sort_by = Vec::new();
-        for compiled in compiled_sort_by.into_iter() {
-            let sql = compiled.sql.await?.read()?.clone();
-            insert_sqlparams(&mut params, &sql)?;
-            sort_by.push(sql.body.as_expr()?);
-        }
-
         let mut ret = select.clone();
         ret.from = from.clone();
         ret.projection = projection;
         ret.selection = selection;
         ret.group_by = group_by;
-        ret.sort_by = sort_by;
 
         Ok(cwrap((
             params,
