@@ -958,20 +958,30 @@ fn apply_sqlcast(
     })?)
 }
 
-// NOTE: This is intentionally written to support a length > 2, but currently constrained to 2
-// elements because of how coerce() is implemented.
-fn apply_coerce_casts(
-    compiler: Compiler,
-    mut args: [CTypedSQL; 2],
-    target: CRef<MType>,
-) -> Result<[CTypedSQL; 2]> {
-    for i in 0..args.len() {
+fn coerce_all(
+    compiler: &Compiler,
+    op: &sqlparser::ast::BinaryOperator,
+    args: Vec<CTypedSQL>,
+) -> Result<Vec<CTypedSQL>> {
+    let mut exprs = Vec::new();
+    let mut iter = args.iter();
+
+    let mut target = CRef::new_unknown("DNE");
+    if let Some(first) = iter.next() {
+        exprs.push(first.clone());
+        target = first.type_.clone();
+        for next in iter {
+            exprs.push(next.clone());
+            target = coerce(compiler.clone(), op.clone(), target, next.type_.clone())?;
+        }
+    }
+
+    let mut ret = Vec::new();
+    for arg in exprs.into_iter() {
         let target2 = target.clone();
         let compiler2 = compiler.clone();
 
-        let arg = args[i].clone();
-
-        args[i] = CTypedSQL {
+        ret.push(CTypedSQL {
             type_: target.clone(),
             sql: compiler.clone().async_cref(async move {
                 let my_type = arg.type_.await?;
@@ -987,10 +997,10 @@ fn apply_coerce_casts(
                     },
                 )
             })?,
-        };
+        })
     }
 
-    Ok(args)
+    Ok(ret)
 }
 
 pub fn unify_all<T, C, I>(mut iter: I, unknown_debug_name: &str) -> Result<CRef<T>>
@@ -1127,23 +1137,13 @@ pub fn compile_sqlexpr(
             use sqlast::BinaryOperator::*;
             let type_ = match op {
                 Plus | Minus | Multiply | Divide => {
-                    let casts = coerce(
-                        compiler.clone(),
-                        op.clone(),
-                        cleft.type_.clone(),
-                        cright.type_.clone(),
-                    )?;
-                    [cleft, cright] = apply_coerce_casts(compiler.clone(), [cleft, cright], casts)?;
+                    let casted = coerce_all(&compiler, &op, vec![cleft, cright])?;
+                    (cleft, cright) = (casted[0].clone(), casted[1].clone());
                     cleft.type_
                 }
                 Eq | NotEq | Lt | LtEq | Gt | GtEq => {
-                    let casts = coerce(
-                        compiler.clone(),
-                        op.clone(),
-                        cleft.type_.clone(),
-                        cright.type_.clone(),
-                    )?;
-                    [cleft, cright] = apply_coerce_casts(compiler.clone(), [cleft, cright], casts)?;
+                    let casted = coerce_all(&compiler, &op, vec![cleft, cright])?;
+                    (cleft, cright) = (casted[0].clone(), casted[1].clone());
                     resolve_global_atom(compiler.clone(), "bool")?
                 }
                 _ => {
