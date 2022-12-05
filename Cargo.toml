@@ -3,5 +3,4 @@
 members = [
     "qvm",
     "qvm-cli",
-    "duckdb-test",
 ]
