@@ -770,89 +770,75 @@ pub fn compile_select(
         Ok(mkcref(MType::List(mkcref(MType::Record(fields)))))
     })?;
 
-    let selection = match &select.selection {
-        Some(selection) => {
-            let compiled =
-                compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), selection)?;
-            compiled
-                .type_
-                .unify(&resolve_global_atom(compiler.clone(), "bool")?)?;
-            Some(compiled)
-        }
-        None => None,
-    };
-
-    let mut compiled_group_by = Vec::new();
-    for gb in &select.group_by {
-        compiled_group_by.push(compile_sqlarg(
-            compiler.clone(),
-            schema.clone(),
-            scope.clone(),
-            gb,
-        )?);
-    }
-
     let select = select.clone();
-    let expr: CRef<_> = compiler.clone().async_cref(async move {
-        let (from_params, from) = cunwrap(from.await?)?;
+    let expr: CRef<_> = compiler.clone().async_cref({
+        let scope = scope.clone();
+        async move {
+            let (from_params, from) = cunwrap(from.await?)?;
 
-        let exprs = projections.await?;
-        let mut proj_exprs = Vec::new();
-        let exprs = (*exprs.read()?).clone();
-        for a in exprs {
-            let a = (*a.read()?).clone();
-            for b in a {
-                let n = b.name.clone();
-                proj_exprs.push(NameAndSQL {
-                    name: n.clone(),
-                    sql: Arc::new(b.sql.await?.read()?.clone()),
+            let exprs = projections.await?;
+            let mut proj_exprs = Vec::new();
+            let exprs = (*exprs.read()?).clone();
+            for a in exprs {
+                let a = (*a.read()?).clone();
+                for b in a {
+                    let n = b.name.clone();
+                    proj_exprs.push(NameAndSQL {
+                        name: n.clone(),
+                        sql: Arc::new(b.sql.await?.read()?.clone()),
+                    });
+                }
+            }
+
+            let select = select.clone();
+
+            let mut params = BTreeMap::new();
+            let mut projection = Vec::new();
+            for sqlexpr in &*proj_exprs {
+                insert_sqlparams(&mut params, sqlexpr.sql.as_ref())?;
+                projection.push(sqlast::SelectItem::ExprWithAlias {
+                    alias: sqlast::Ident {
+                        value: sqlexpr.name.clone(),
+                        quote_style: None,
+                    },
+                    expr: sqlexpr.sql.body.as_expr()?,
                 });
             }
-        }
+            params.extend(from_params.into_iter());
 
-        let select = select.clone();
+            let selection = match &select.selection {
+                Some(selection) => {
+                    let compiled =
+                        compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), selection)?;
+                    compiled
+                        .type_
+                        .unify(&resolve_global_atom(compiler.clone(), "bool")?)?;
+                    let sql = compiled.sql.await?.read()?.clone();
+                    insert_sqlparams(&mut params, &sql)?;
+                    Some(sql.body.as_expr()?)
+                }
+                None => None,
+            };
 
-        let mut params = BTreeMap::new();
-        let mut projection = Vec::new();
-        for sqlexpr in &*proj_exprs {
-            insert_sqlparams(&mut params, sqlexpr.sql.as_ref())?;
-            projection.push(sqlast::SelectItem::ExprWithAlias {
-                alias: sqlast::Ident {
-                    value: sqlexpr.name.clone(),
-                    quote_style: None,
-                },
-                expr: sqlexpr.sql.body.as_expr()?,
-            });
-        }
-        params.extend(from_params.into_iter());
-
-        let selection = match &selection {
-            Some(compiled) => {
-                let sql = compiled.clone().sql.await?;
-                let sql = sql.read()?.clone();
+            let mut group_by = Vec::new();
+            for gb in &select.group_by {
+                let compiled = compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), gb)?;
+                let sql = compiled.sql.await?.read()?.clone();
                 insert_sqlparams(&mut params, &sql)?;
-                Some(sql.body.as_expr()?)
+                group_by.push(sql.body.as_expr()?);
             }
-            None => None,
-        };
 
-        let mut group_by = Vec::new();
-        for compiled in compiled_group_by.into_iter() {
-            let sql = compiled.sql.await?.read()?.clone();
-            insert_sqlparams(&mut params, &sql)?;
-            group_by.push(sql.body.as_expr()?);
+            let mut ret = select.clone();
+            ret.from = from.clone();
+            ret.projection = projection;
+            ret.selection = selection;
+            ret.group_by = group_by;
+
+            Ok(cwrap((
+                params,
+                Box::new(sqlast::SetExpr::Select(Box::new(ret.clone()))),
+            )))
         }
-
-        let mut ret = select.clone();
-        ret.from = from.clone();
-        ret.projection = projection;
-        ret.selection = selection;
-        ret.group_by = group_by;
-
-        Ok(cwrap((
-            params,
-            Box::new(sqlast::SetExpr::Select(Box::new(ret.clone()))),
-        )))
     })?;
 
     Ok((scope, type_, expr))

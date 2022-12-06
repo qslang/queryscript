@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, LinkedList};
 use std::fs;
 use std::path::Path as FilePath;
 use std::sync::{Arc, Mutex};
@@ -14,7 +14,8 @@ use crate::{parser, parser::parse_schema};
 pub struct CompilerData {
     pub next_placeholder: Mutex<usize>,
     pub runtime: tokio::runtime::Runtime,
-    pub handles: Mutex<tokio::task::JoinSet<Result<()>>>,
+    pub idle: Ref<tokio::sync::watch::Receiver<()>>,
+    pub handles: Mutex<LinkedList<tokio::task::JoinHandle<Result<()>>>>,
 }
 
 pub struct CompileResult<V> {
@@ -82,6 +83,18 @@ macro_rules! c_try {
     };
 }
 
+macro_rules! c_try_internal {
+    ($result: expr, $expr: expr) => {
+        match $expr {
+            Ok(v) => v,
+            Err(e) => {
+                $result.add_error(None, CompileError::internal(format!("{}", e).as_str()));
+                return $result;
+            }
+        }
+    };
+}
+
 #[derive(Clone)]
 pub struct Compiler {
     data: Ref<CompilerData>,
@@ -96,20 +109,36 @@ impl Compiler {
     }
 
     pub fn new_with_builtins(schema: Ref<Schema>, allow_native: bool) -> Result<Compiler> {
+        // Create a watcher that will be signaled whenever the runtime attempts to park.  If
+        // anything is awaiting this channel, then the runtime will not actually park, and will
+        // instead yield control back to that coroutine.  This is useful because we don't know
+        // ahead of time which of our futures will actually resolve, and really just want to
+        // execute tasks until none are runnable.  See `drive` for more on this.
+        //
+        let (idle_tx, idle_rx) = tokio::sync::watch::channel(());
+        let on_park = move || {
+            idle_tx.send(()).ok();
+        };
+
         // This is only used during bootstrapping (where we know we don't need
         // the GLOBAL_SCHEMA to be initialized).
-        Ok(Compiler {
+        //
+        let compiler = Compiler {
             data: mkref(CompilerData {
                 next_placeholder: Mutex::new(1),
                 runtime: tokio::runtime::Builder::new_current_thread()
                     .thread_name("qvm-compiler")
                     .thread_stack_size(3 * 1024 * 1024)
+                    .on_thread_park(on_park)
                     .build()?,
-                handles: Mutex::new(tokio::task::JoinSet::new()),
+                idle: mkref(idle_rx),
+                handles: Mutex::new(LinkedList::new()),
             }),
             builtins: schema.clone(),
             allow_native,
-        })
+        };
+
+        Ok(compiler)
     }
 
     pub fn builtins(&self) -> Ref<Schema> {
@@ -134,7 +163,7 @@ impl Compiler {
         let data = c_try!(result, self.data.read());
         data.runtime.block_on(async move {
             result.replace(compile_schema_ast(self.clone(), schema.clone(), ast));
-            c_try!(result, self.drive().await);
+            result.absorb(self.drive().await);
             result
         })
     }
@@ -147,24 +176,50 @@ impl Compiler {
         let data = c_try!(result, self.data.read());
         data.runtime.block_on(async {
             result.replace(compile_schema_from_file(self.clone(), file_path));
-            c_try!(result, self.drive().await);
+            result.absorb(self.drive().await);
             result
         })
     }
 
-    async fn drive(&self) -> Result<()> {
-        let data = self.data.read()?;
-        loop {
-            let mut set = tokio::task::JoinSet::new();
-            std::mem::swap(&mut *data.handles.lock()?, &mut set);
-            if set.len() == 0 {
-                return Ok(());
-            }
+    async fn drive(&self) -> CompileResult<()> {
+        let mut result = CompileResult::new(());
 
-            while let Some(r) = set.join_next().await {
-                r??;
+        // This channel will be signaled by our `on_park` callback when the runtime attempts to
+        // park.  By blocking on it, we are ensured that control will be returned to this coroutine
+        // only when all other work has been exhausted, meaning we've completed all of the
+        // inference we possibly can.
+        //
+        // NOTE: Be careful not to hold the lock on `self.data` while we await this signal.  It's
+        // okay to hold the lock on the signal receiver itself, since only one instance of `drive`
+        // may be called concurrently.  To ensure this, use `try_write` instead of `write` and fail
+        // quickly if there is contention.
+        //
+        let idle = c_try!(result, self.data.read()).idle.clone();
+        let mut idle = c_try_internal!(result, idle.try_write());
+        c_try_internal!(result, idle.changed().await);
+
+        // Claim the set of handles we've accrued within the compiler to reset things.
+        //
+        let mut handles = LinkedList::new();
+        std::mem::swap(
+            &mut *c_try!(result, c_try!(result, self.data.read()).handles.lock()),
+            &mut handles,
+        );
+
+        // Each handle must either be checked for errors if completed, or aborted if not.
+        //
+        for handle in handles {
+            if handle.is_finished() {
+                match c_try!(result, handle.await) {
+                    Ok(_) => {}
+                    Err(e) => result.add_error(None, e.into()),
+                }
+            } else {
+                handle.abort();
             }
         }
+
+        return result;
     }
 
     pub fn next_placeholder(&self, kind: &str) -> Result<String> {
@@ -181,10 +236,12 @@ impl Compiler {
         let data = self.data.read()?;
         let slot = CRef::<T>::new_unknown("async_slot");
         let ret = slot.clone();
-        data.handles.lock()?.spawn(async move {
-            let r = f.await?;
-            slot.unify(&r)
-        });
+        data.handles
+            .lock()?
+            .push_back(data.runtime.spawn(async move {
+                let r = f.await?;
+                slot.unify(&r)
+            }));
 
         Ok(ret)
     }
