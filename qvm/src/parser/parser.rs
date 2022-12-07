@@ -1,5 +1,8 @@
 use crate::ast::*;
-use crate::parser::error::{unexpected_token, Result};
+use crate::parser::error::{
+    unexpected_token, ErrorLocation, Result, SQLParserSnafu, TokenizerSnafu,
+};
+use snafu::prelude::*;
 use sqlparser::{
     ast as sqlast,
     dialect::{keywords::Keyword, GenericDialect},
@@ -23,13 +26,15 @@ pub const AUTOCOMPLETE_TYPE: char = 't'; // A type name
 pub const AUTOCOMPLETE_SCHEMA: char = 's'; // A schema
 
 pub struct Parser<'a> {
+    file: String,
     sqlparser: parser::Parser<'a>,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(tokens: Vec<TokenWithLocation>, eof: Location) -> Parser<'a> {
+    pub fn new(file: &str, tokens: Vec<TokenWithLocation>, eof: Location) -> Parser<'a> {
         let dialect = &GenericDialect {};
         Parser {
+            file: file.to_string(),
             sqlparser: parser::Parser::new_with_locations(tokens, eof, dialect),
         }
     }
@@ -59,8 +64,33 @@ impl<'a> Parser<'a> {
         self.sqlparser.consume_token(expected)
     }
 
+    pub fn token_location(&self) -> ErrorLocation {
+        self.range_location(self.peek_start_location())
+    }
+
+    pub fn range_location(&self, start: Location) -> ErrorLocation {
+        let end = self.peek_end_location();
+
+        ErrorLocation::Range(self.file.clone(), start, end)
+    }
+
+    pub fn token_context(&self) -> SQLParserSnafu<ErrorLocation> {
+        SQLParserSnafu {
+            loc: self.token_location(),
+        }
+    }
+
+    pub fn range_context(&self, start: &Location) -> SQLParserSnafu<ErrorLocation> {
+        SQLParserSnafu {
+            loc: self.range_location(start.clone()),
+        }
+    }
+
     pub fn expect_token(&mut self, expected: &Token) -> Result<()> {
-        Ok(self.sqlparser.expect_token(expected)?)
+        Ok(self
+            .sqlparser
+            .expect_token(expected)
+            .context(self.token_context())?)
     }
 
     // This returns a slightly different error code that indicates that we were
@@ -96,7 +126,10 @@ impl<'a> Parser<'a> {
             Ok(())
         } else {
             let token = self.peek_token();
-            Ok(self.sqlparser.expected::<()>(expected, token)?)
+            Ok(self
+                .sqlparser
+                .expected::<()>(expected, token)
+                .context(self.token_context())?)
         }
     }
 
@@ -179,6 +212,7 @@ impl<'a> Parser<'a> {
             Token::Word(w) => Ok(w.value),
             Token::DoubleQuotedString(s) => Ok(s),
             token => unexpected_token!(
+                self.file.clone(),
                 TokenWithLocation { token, location },
                 "Expected: WORD | DOUBLE_QUOTED_STRING"
             ),
@@ -341,7 +375,11 @@ impl<'a> Parser<'a> {
                     Token::Comma => {}
                     Token::RParen => break args,
                     _ => {
-                        return unexpected_token!(self.peek_token(), "Expected: ',' | ')'");
+                        return unexpected_token!(
+                            self.file.clone(),
+                            self.peek_token(),
+                            "Expected: ',' | ')'"
+                        );
                     }
                 }
             }
@@ -359,7 +397,11 @@ impl<'a> Parser<'a> {
             } else if self.consume_keyword("sql") {
                 FnBody::SQL
             } else {
-                return unexpected_token!(self.peek_token(), "Expected: native | sql");
+                return unexpected_token!(
+                    self.file.clone(),
+                    self.peek_token(),
+                    "Expected: native | sql"
+                );
             }
         } else {
             self.expect_token(&Token::LBrace)?;
@@ -396,7 +438,11 @@ impl<'a> Parser<'a> {
                 self.parse_expr()?
             }
             _ => {
-                return unexpected_token!(self.peek_token(), "Expected definition");
+                return unexpected_token!(
+                    self.file.clone(),
+                    self.peek_token(),
+                    "Expected definition"
+                );
             }
         };
 
@@ -407,7 +453,10 @@ impl<'a> Parser<'a> {
 
     pub fn parse_query(&mut self) -> Result<StmtBody> {
         let start = self.peek_start_location();
-        let query = self.sqlparser.parse_query()?;
+        let query = self
+            .sqlparser
+            .parse_query()
+            .context(self.range_context(&start))?;
         self.expect_eos()?;
         let end = self.peek_end_location();
 
@@ -420,7 +469,10 @@ impl<'a> Parser<'a> {
 
     pub fn parse_expr_stmt(&mut self) -> Result<StmtBody> {
         let start = self.peek_start_location();
-        let expr = self.sqlparser.parse_expr()?;
+        let expr = self
+            .sqlparser
+            .parse_expr()
+            .context(self.range_context(&start))?;
         self.expect_eos()?;
         let end = self.peek_end_location();
 
@@ -489,7 +541,11 @@ impl<'a> Parser<'a> {
                     if needs_comma {
                         needs_comma = false;
                     } else {
-                        return unexpected_token!(self.peek_token(), "Two consecutive commas");
+                        return unexpected_token!(
+                            self.file.clone(),
+                            self.peek_token(),
+                            "Two consecutive commas"
+                        );
                     }
                     self.next_token();
                 }
@@ -497,7 +553,11 @@ impl<'a> Parser<'a> {
                     for _ in 0..3 {
                         self.autocomplete_tokens(&[Token::Period]);
                         if !matches!(self.peek_token().token, Token::Period) {
-                            return unexpected_token!(self.peek_token(), "Three periods");
+                            return unexpected_token!(
+                                self.file.clone(),
+                                self.peek_token(),
+                                "Three periods"
+                            );
                         }
                         self.next_token();
                     }
@@ -507,6 +567,7 @@ impl<'a> Parser<'a> {
                 _ => {
                     if needs_comma {
                         return unexpected_token!(
+                            self.file.clone(),
                             self.peek_token(),
                             "Expected a comma before the next type declaration"
                         );
@@ -531,7 +592,10 @@ impl<'a> Parser<'a> {
                 quote_style: _,
                 keyword: Keyword::SELECT | Keyword::WITH,
             }) => {
-                let query = self.sqlparser.parse_query()?;
+                let query = self
+                    .sqlparser
+                    .parse_query()
+                    .context(self.range_context(&start))?;
                 let end = self.peek_end_location();
                 Expr {
                     body: ExprBody::SQLQuery(query),
@@ -540,7 +604,10 @@ impl<'a> Parser<'a> {
                 }
             }
             _ => {
-                let expr = self.sqlparser.parse_expr()?;
+                let expr = self
+                    .sqlparser
+                    .parse_expr()
+                    .context(self.range_context(&start))?;
                 let end = self.peek_end_location();
                 Expr {
                     body: ExprBody::SQLExpr(expr),
@@ -552,23 +619,25 @@ impl<'a> Parser<'a> {
     }
 }
 
-pub fn tokenize(text: &str) -> Result<(Vec<TokenWithLocation>, Location)> {
+pub fn tokenize(file: &str, text: &str) -> Result<(Vec<TokenWithLocation>, Location)> {
     let dialect = &GenericDialect {};
     let mut tokenizer = Tokenizer::new(dialect, text);
 
-    Ok(tokenizer.tokenize_with_location()?)
+    Ok(tokenizer
+        .tokenize_with_location()
+        .context(TokenizerSnafu { file })?)
 }
 
-pub fn parse_schema(text: &str) -> Result<Schema> {
-    let (tokens, eof) = tokenize(text)?;
-    let mut parser = Parser::new(tokens, eof);
+pub fn parse_schema(file: &str, text: &str) -> Result<Schema> {
+    let (tokens, eof) = tokenize(file.clone(), text)?;
+    let mut parser = Parser::new(file, tokens, eof);
 
     parser.parse_schema()
 }
 
-pub fn parse_path(text: &str) -> Result<Path> {
-    let (tokens, eof) = tokenize(text)?;
-    let mut parser = Parser::new(tokens, eof);
+pub fn parse_path(file: &str, text: &str) -> Result<Path> {
+    let (tokens, eof) = tokenize(file.clone(), text)?;
+    let mut parser = Parser::new(file, tokens, eof);
 
     parser.parse_path(AUTOCOMPLETE_UNKNOWN)
 }

@@ -11,7 +11,7 @@ pub type Result<T> = std::result::Result<T, CompileError>;
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
 pub enum CompileError {
-    #[snafu(display("Parser error: {}", source), context(false))]
+    #[snafu(display("Syntax error: {}", source), context(false))]
     SyntaxError {
         #[snafu(backtrace)]
         source: ParserError,

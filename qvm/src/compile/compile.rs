@@ -151,8 +151,8 @@ impl Compiler {
 
     pub fn compile_string(&self, schema: Ref<Schema>, text: &str) -> CompileResult<()> {
         let mut result = CompileResult::new(());
-        let (tokens, eof) = c_try!(result, parser::tokenize(text));
-        let mut parser = parser::Parser::new(tokens, eof);
+        let (tokens, eof) = c_try!(result, parser::tokenize("<string>", text));
+        let mut parser = parser::Parser::new("<string>", tokens, eof);
         let schema_ast = c_try!(result, parser.parse_schema());
         result.absorb(self.compile_schema_ast(schema.clone(), &schema_ast));
         result
@@ -521,8 +521,11 @@ fn open_file(file_path: &FilePath) -> Result<(Option<String>, ast::Schema)> {
         Some(p) => p.to_str().map(|f| f.to_string()),
         None => None,
     };
-    let contents = fs::read_to_string(parsed_path)?;
-    Ok((folder, parse_schema(contents.as_str())?))
+    let contents = fs::read_to_string(&parsed_path)?;
+    Ok((
+        folder,
+        parse_schema(parsed_path.to_str().unwrap(), contents.as_str())?,
+    ))
 }
 
 pub fn compile_schema_from_file(

@@ -88,12 +88,13 @@ fn run_file(rt: &runtime::Runtime, file: &str, mode: Mode) -> Result<(), QVMErro
     }
 
     if matches!(mode, Mode::Parse) {
+        let file = path.to_str().unwrap();
         let contents = match fs::read_to_string(path) {
             Ok(p) => p,
             Err(e) => whatever!("{}", e),
         };
-        let (tokens, eof) = parser::tokenize(&contents)?;
-        let mut parser = parser::Parser::new(tokens, eof);
+        let (tokens, eof) = parser::tokenize(file, &contents)?;
+        let mut parser = parser::Parser::new(file, tokens, eof);
         let schema = parser.parse_schema()?;
         println!("{:#?}", schema);
         return Ok(());

@@ -87,7 +87,7 @@ fn parse_longest_path(texts: &Vec<String>) -> Vec<String> {
             let parsed = if item.is_empty() {
                 Vec::new()
             } else {
-                match parser::parse_path(item.as_str()) {
+                match parser::parse_path("<repl>", item.as_str()) {
                     Ok(path) => path,
                     Err(_) => Vec::new(),
                 }
@@ -184,14 +184,14 @@ impl Completer for ReadlineHelper {
         let full_pos = start_pos + pos;
         let full_loc = pos_to_loc(full.as_str(), full_pos);
 
-        let (tokens, eof) = match parser::tokenize(&full) {
+        let (tokens, eof) = match parser::tokenize("<repl>", &full) {
             Ok(r) => r,
             Err(e) => {
                 (&mut *self.stats.borrow_mut()).msg = format!("{}", e);
                 return Ok((0, Vec::new()));
             }
         };
-        let mut parser = parser::Parser::new(tokens, eof);
+        let mut parser = parser::Parser::new("<repl>", tokens, eof);
         parser.parse_schema().ok();
 
         let (tok, suggestions) = parser.get_autocomplete(full_loc);

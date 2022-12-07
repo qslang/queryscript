@@ -1,5 +1,13 @@
 use snafu::{Backtrace, Snafu};
 pub type Result<T> = std::result::Result<T, ParserError>;
+use crate::ast::Location;
+
+#[derive(Clone, Debug)]
+pub enum ErrorLocation {
+    File(String),
+    Single(String, Location),
+    Range(String, Location, Location),
+}
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
@@ -9,25 +17,29 @@ pub enum ParserError {
         msg: String,
         token: sqlparser::tokenizer::TokenWithLocation,
         backtrace: Option<Backtrace>,
+        file: String,
     },
 
-    #[snafu(display("Tokenizer error: {}", source), context(false))]
+    #[snafu(display("Tokenizer error: {}", source))]
     TokenizerError {
         source: sqlparser::tokenizer::TokenizerError,
         backtrace: Option<Backtrace>,
+        file: String,
     },
 
-    #[snafu(display("SQL parser error: {}", source), context(false))]
+    #[snafu(display("SQL parser error: {}", source))]
     SQLParserError {
         source: sqlparser::parser::ParserError,
         backtrace: Option<Backtrace>,
+        loc: ErrorLocation,
     },
 }
 
 #[allow(unused_macros)]
 macro_rules! unexpected_token {
-    ($token: expr, $base: expr $(, $args:expr)* $(,)?) => {
+    ($file: expr, $token: expr, $base: expr $(, $args:expr)* $(,)?) => {
         crate::parser::error::UnexpectedTokenSnafu {
+            file: $file,
             msg: format!($base $(, $args)*),
             token: $token.clone(),
         }.fail()

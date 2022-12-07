@@ -136,8 +136,9 @@ fn run_command(
     repl_schema: schema::SchemaRef,
     cmd: &str,
 ) -> Result<RunCommandResult, QVMError> {
-    let (tokens, eof) = parser::tokenize(&cmd)?;
-    let mut parser = parser::Parser::new(tokens, eof);
+    let file = "<repl>";
+    let (tokens, eof) = parser::tokenize(file, &cmd)?;
+    let mut parser = parser::Parser::new(file, tokens, eof);
 
     if parser.consume_token(&parser::Token::Placeholder("?".to_string())) {
         match parser.parse_schema() {
