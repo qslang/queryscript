@@ -4,7 +4,7 @@ use snafu::{Backtrace, ErrorCompat, Snafu};
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
 pub enum QVMError {
-    #[snafu(display("Parser error: {}", source), context(false))]
+    #[snafu(display("Syntax error: {}", source), context(false))]
     ParserError {
         #[snafu(backtrace)]
         source: crate::parser::error::ParserError,

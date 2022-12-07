@@ -29,7 +29,7 @@ pub enum CompileError {
         source: TypesystemError,
     },
 
-    #[snafu(display("Parser error: {}", source), context(false))]
+    #[snafu(display("Runtime error: {}", source), context(false))]
     RuntimeError {
         #[snafu(backtrace)]
         source: RuntimeError,
