@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, LinkedList};
 use std::fs;
 use std::path::Path as FilePath;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::ast;
 use crate::compile::builtin_types::GLOBAL_SCHEMA;
@@ -10,14 +10,6 @@ use crate::compile::inference::*;
 use crate::compile::schema::*;
 use crate::compile::sql::*;
 use crate::{parser, parser::parse_schema};
-
-pub struct CompilerData {
-    pub next_placeholder: Mutex<usize>,
-    pub runtime: tokio::runtime::Runtime,
-    pub idle: Ref<tokio::sync::watch::Receiver<()>>,
-    pub handles: Mutex<LinkedList<tokio::task::JoinHandle<Result<()>>>>,
-    pub files: Mutex<BTreeMap<String, String>>,
-}
 
 pub struct CompileResult<V> {
     pub result: V,
@@ -96,8 +88,16 @@ macro_rules! c_try_internal {
     };
 }
 
+pub struct CompilerData {
+    pub next_placeholder: usize,
+    pub idle: Ref<tokio::sync::watch::Receiver<()>>,
+    pub handles: LinkedList<tokio::task::JoinHandle<Result<()>>>,
+    pub files: BTreeMap<String, String>,
+}
+
 #[derive(Clone)]
 pub struct Compiler {
+    runtime: Ref<tokio::runtime::Runtime>,
     data: Ref<CompilerData>,
     builtins: Ref<Schema>,
     allow_native: bool,
@@ -125,16 +125,18 @@ impl Compiler {
         // the GLOBAL_SCHEMA to be initialized).
         //
         let compiler = Compiler {
-            data: mkref(CompilerData {
-                next_placeholder: Mutex::new(1),
-                runtime: tokio::runtime::Builder::new_current_thread()
+            runtime: mkref(
+                tokio::runtime::Builder::new_current_thread()
                     .thread_name("qvm-compiler")
                     .thread_stack_size(3 * 1024 * 1024)
                     .on_thread_park(on_park)
                     .build()?,
+            ),
+            data: mkref(CompilerData {
+                next_placeholder: 1,
                 idle: mkref(idle_rx),
-                handles: Mutex::new(LinkedList::new()),
-                files: Mutex::new(BTreeMap::new()),
+                handles: LinkedList::new(),
+                files: BTreeMap::new(),
             }),
             builtins: schema.clone(),
             allow_native,
@@ -162,8 +164,8 @@ impl Compiler {
 
     pub fn compile_schema_ast(&self, schema: Ref<Schema>, ast: &ast::Schema) -> CompileResult<()> {
         let mut result = CompileResult::new(());
-        let data = c_try!(result, self.data.read());
-        data.runtime.block_on(async move {
+        let runtime = c_try!(result, self.runtime.read());
+        runtime.block_on(async move {
             result.replace(compile_schema_ast(self.clone(), schema.clone(), ast));
             result.absorb(self.drive().await);
             result
@@ -175,8 +177,8 @@ impl Compiler {
         file_path: &FilePath,
     ) -> CompileResult<Option<Ref<Schema>>> {
         let mut result = CompileResult::new(None);
-        let data = c_try!(result, self.data.read());
-        data.runtime.block_on(async {
+        let runtime = c_try!(result, self.runtime.read());
+        runtime.block_on(async {
             result.replace(compile_schema_from_file(self.clone(), file_path));
             result.absorb(self.drive().await);
             result
@@ -203,10 +205,7 @@ impl Compiler {
         // Claim the set of handles we've accrued within the compiler to reset things.
         //
         let mut handles = LinkedList::new();
-        std::mem::swap(
-            &mut *c_try!(result, c_try!(result, self.data.read()).handles.lock()),
-            &mut handles,
-        );
+        std::mem::swap(&mut c_try!(result, self.data.write()).handles, &mut handles);
 
         // Each handle must either be checked for errors if completed, or aborted if not.
         //
@@ -225,22 +224,21 @@ impl Compiler {
     }
 
     pub fn next_placeholder(&self, kind: &str) -> Result<String> {
-        let data = self.data.read()?;
-        let mut placeholder = data.next_placeholder.lock()?;
-        (*placeholder) += 1;
-        Ok(format!("{}{}", kind, *placeholder))
+        let mut data = self.data.write()?;
+        let placeholder = data.next_placeholder;
+        data.next_placeholder += 1;
+        Ok(format!("{}{}", kind, placeholder))
     }
 
     pub fn async_cref<T: Constrainable + 'static>(
         &self,
         f: impl std::future::Future<Output = Result<CRef<T>>> + Send + 'static,
     ) -> Result<CRef<T>> {
-        let data = self.data.read()?;
+        let mut data = self.data.write()?;
         let slot = CRef::<T>::new_unknown("async_slot");
         let ret = slot.clone();
         data.handles
-            .lock()?
-            .push_back(data.runtime.spawn(async move {
+            .push_back(self.runtime.read()?.spawn(async move {
                 let r = f.await?;
                 slot.unify(&r)
             }));
@@ -264,7 +262,7 @@ impl Compiler {
             Some(p) => p.to_str().map(|f| f.to_string()),
             None => None,
         };
-        let contents = match self.data.read()?.files.lock()?.entry(file.clone()) {
+        let contents = match self.data.write()?.files.entry(file.clone()) {
             std::collections::btree_map::Entry::Vacant(entry) => {
                 let contents = fs::read_to_string(&parsed_path)?;
                 // TODO: Avoid this clone somehow
@@ -291,7 +289,6 @@ impl Compiler {
             .data
             .read()?
             .files
-            .lock()?
             .get(&path.to_string())
             .map(|f| f.clone()))
     }
