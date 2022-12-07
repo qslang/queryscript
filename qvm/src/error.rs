@@ -1,4 +1,5 @@
-use snafu::{Backtrace, Snafu};
+use crate::parser::error::{ErrorLocation, FormattedError, PrettyError};
+use snafu::{Backtrace, ErrorCompat, Snafu};
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
@@ -9,16 +10,18 @@ pub enum QVMError {
         source: crate::parser::error::ParserError,
     },
 
-    #[snafu(display("Compiler error: {}", source), context(false))]
+    #[snafu(display("Compiler error: {}", source))]
     CompileError {
         #[snafu(backtrace)]
         source: crate::compile::error::CompileError,
+        file: String,
     },
 
-    #[snafu(display("Runtime error: {}", source), context(false))]
+    #[snafu(display("Runtime error: {}", source))]
     RuntimeError {
         #[snafu(backtrace)]
         source: crate::runtime::error::RuntimeError,
+        file: String,
     },
 
     #[snafu(whatever, display("{message}"))]
@@ -30,9 +33,35 @@ pub enum QVMError {
     },
 }
 
+impl QVMError {
+    pub fn format_backtrace(&self) -> FormattedError {
+        let mut ret = self.format_without_backtrace();
+        if let Some(bt) = ErrorCompat::backtrace(&self) {
+            ret.text += format!("\n{:?}", bt).as_str();
+        }
+        ret
+    }
+
+    pub fn format_without_backtrace(&self) -> FormattedError {
+        let location = self.location();
+        let text = self.to_string();
+        FormattedError { location, text }
+    }
+}
+
+impl PrettyError for QVMError {
+    fn location(&self) -> ErrorLocation {
+        match self {
+            QVMError::ParserError { source } => source.location(),
+            QVMError::CompileError { file, .. } => ErrorLocation::File(file.clone()),
+            QVMError::RuntimeError { file, .. } => ErrorLocation::File(file.clone()),
+            _ => ErrorLocation::File("<qvm>".to_string()),
+        }
+    }
+}
+
 impl<Guard> From<std::sync::PoisonError<Guard>> for QVMError {
     fn from(e: std::sync::PoisonError<Guard>) -> QVMError {
-        let e1: crate::compile::error::CompileError = e.into();
-        e1.into()
+        snafu::FromString::without_source(e.to_string())
     }
 }

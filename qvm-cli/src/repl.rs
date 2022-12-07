@@ -1,11 +1,12 @@
 use rustyline::{error::ReadlineError, Editor};
-use snafu::{whatever, ErrorCompat};
+use snafu::prelude::*;
 
 use qvm::compile;
 use qvm::compile::schema;
+use qvm::error::*;
 use qvm::parser;
+use qvm::parser::error::PrettyError;
 use qvm::runtime;
-use qvm::QVMError;
 
 use crate::readline_helper::ReadlineHelper;
 use std::cell::RefCell;
@@ -95,18 +96,15 @@ pub fn run(rt: &runtime::Runtime) {
                         // Allow the loop to run again (and parse more)
                     }
                     Err(e) => {
-                        eprintln!("Error: {}", e);
-                        if let Some(bt) = ErrorCompat::backtrace(&e) {
-                            eprintln!("{:?}", bt);
-                        }
+                        eprintln!("{}", e.pretty_with_code(curr_buffer.borrow().as_str()));
                         rl.add_history_entry(curr_buffer.borrow().as_str());
                         curr_buffer.borrow_mut().clear();
                     }
                 }
             }
             Err(ReadlineError::Interrupted) => {
-                println!("Interrupted...");
-                break;
+                curr_buffer.borrow_mut().clear();
+                continue;
             }
             Err(ReadlineError::Eof) => {
                 println!("Goodbye!");
@@ -156,7 +154,10 @@ fn run_command(
 
             compiler
                 .compile_schema_ast(repl_schema.clone(), &ast)
-                .as_result()?;
+                .as_result()
+                .context(CompileSnafu {
+                    file: file.to_string(),
+                })?;
 
             let compiled = {
                 let locked_schema = repl_schema.read()?;
@@ -169,14 +170,20 @@ fn run_command(
 
             if let Some(compiled) = compiled {
                 let ctx = (&repl_schema).into();
-                let expr = compiled.to_runtime_type()?;
-                let value = rt.block_on(async move { runtime::eval(&ctx, &expr).await })?;
+                let expr = compiled.to_runtime_type().context(RuntimeSnafu {
+                    file: file.to_string(),
+                })?;
+                let value = rt
+                    .block_on(async move { runtime::eval(&ctx, &expr).await })
+                    .context(RuntimeSnafu {
+                        file: file.to_string(),
+                    })?;
                 println!("{}", value);
             }
             Ok(RunCommandResult::Done)
         }
         Err(_) if parser.is_eof() => Ok(RunCommandResult::More),
-        Err(e) => whatever!("{}", e),
+        Err(e) => Err(e.into()),
     }
 }
 

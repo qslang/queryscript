@@ -1,13 +1,13 @@
 use clap::Parser;
-use snafu::whatever;
-use snafu::ErrorCompat;
+use snafu::{prelude::*, whatever};
 use std::fs;
 use std::path::Path;
 
 use qvm::compile;
+use qvm::error::*;
 use qvm::parser;
+use qvm::parser::error::PrettyError;
 use qvm::runtime;
-use qvm::QVMError;
 
 mod readline_helper;
 mod repl;
@@ -35,16 +35,22 @@ enum Mode {
 }
 
 fn main() {
+    match main_result() {
+        Ok(()) => {}
+        Err(e) => {
+            eprintln!("{}", e);
+        }
+    }
+}
+
+fn main_result() -> Result<(), QVMError> {
     let cli = Cli::parse();
     if cli.verbose {
         std::env::set_var("RUST_BACKTRACE", "1");
     }
 
-    let rt = runtime::build().expect("Failed to build runtime");
-
     if cli.compile && cli.parse {
-        eprintln!("Cannot run with --compile and --parse");
-        return;
+        whatever!("Cannot run with --compile and --parse");
     }
 
     let mode = if cli.compile {
@@ -56,32 +62,56 @@ fn main() {
     };
 
     match cli.file {
-        Some(file) => match run_file(&rt, &file, mode) {
-            Err(err) => {
-                eprintln!("{}", err);
-                if cli.verbose {
-                    if let Some(bt) = ErrorCompat::backtrace(&err) {
-                        eprintln!("{:?}", bt);
-                    }
+        Some(file) => {
+            let rt = runtime::build().context(RuntimeSnafu {
+                file: file.to_string(),
+            })?;
+
+            let compiler = compile::Compiler::new().context(CompileSnafu {
+                file: file.to_string(),
+            })?;
+            match run_file(compiler.clone(), &rt, &file, mode) {
+                Err(err) => {
+                    let err = if cli.verbose {
+                        err.format_backtrace()
+                    } else {
+                        err.format_without_backtrace()
+                    };
+                    let err = match compiler
+                        .file_contents(file.as_str())
+                        .context(CompileSnafu { file: file.clone() })?
+                    {
+                        Some(contents) => err.pretty_with_code(contents.as_str()),
+                        None => err.pretty(),
+                    };
+                    whatever!("{}", err)
                 }
+                Ok(()) => Ok(()),
             }
-            Ok(()) => {}
-        },
+        }
         None => {
             if cli.compile {
-                eprintln!("Cannot run with compile-only mode (--compile) in the repl");
-                return;
+                whatever!("Cannot run with compile-only mode (--compile) in the repl");
             }
             if cli.parse {
-                eprintln!("Cannot run with parse-only mode (--parse) in the repl");
-                return;
+                whatever!("Cannot run with parse-only mode (--parse) in the repl");
             }
+            let rt = runtime::build().context(RuntimeSnafu {
+                file: "<repl>".to_string(),
+            })?;
+
             crate::repl::run(&rt);
+            Ok(())
         }
     }
 }
 
-fn run_file(rt: &runtime::Runtime, file: &str, mode: Mode) -> Result<(), QVMError> {
+fn run_file(
+    compiler: compile::Compiler,
+    rt: &runtime::Runtime,
+    file: &str,
+    mode: Mode,
+) -> Result<(), QVMError> {
     let path = Path::new(&file);
     if !path.exists() {
         whatever!("Path {:?} does not exist", path);
@@ -100,10 +130,12 @@ fn run_file(rt: &runtime::Runtime, file: &str, mode: Mode) -> Result<(), QVMErro
         return Ok(());
     }
 
-    let compiler = compile::Compiler::new()?;
     let schema = compiler
         .compile_schema_from_file(&Path::new(&file))
-        .as_result()?
+        .as_result()
+        .context(CompileSnafu {
+            file: file.to_string(),
+        })?
         .unwrap();
 
     if matches!(mode, Mode::Compile) {
@@ -114,8 +146,14 @@ fn run_file(rt: &runtime::Runtime, file: &str, mode: Mode) -> Result<(), QVMErro
     let ctx = (&schema).into();
     let locked_schema = schema.read()?;
     for expr in locked_schema.exprs.iter() {
-        let expr = expr.to_runtime_type()?;
-        let value = rt.block_on(async { runtime::eval(&ctx, &expr).await })?;
+        let expr = expr.to_runtime_type().context(RuntimeSnafu {
+            file: file.to_string(),
+        })?;
+        let value = rt
+            .block_on(async { runtime::eval(&ctx, &expr).await })
+            .context(RuntimeSnafu {
+                file: file.to_string(),
+            })?;
         println!("{}", value);
     }
 

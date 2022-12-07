@@ -1,6 +1,6 @@
 pub mod ast;
 pub mod compile;
-mod error;
+pub mod error;
 pub mod parser;
 pub mod runtime;
 pub mod tests;

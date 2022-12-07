@@ -2255,6 +2255,7 @@ dependencies = [
  "arrow-buffer",
  "async-trait",
  "chrono",
+ "colored",
  "datafusion",
  "difference",
  "dyn-clone",

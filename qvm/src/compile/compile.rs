@@ -16,6 +16,7 @@ pub struct CompilerData {
     pub runtime: tokio::runtime::Runtime,
     pub idle: Ref<tokio::sync::watch::Receiver<()>>,
     pub handles: Mutex<LinkedList<tokio::task::JoinHandle<Result<()>>>>,
+    pub files: Mutex<BTreeMap<String, String>>,
 }
 
 pub struct CompileResult<V> {
@@ -133,6 +134,7 @@ impl Compiler {
                     .build()?,
                 idle: mkref(idle_rx),
                 handles: Mutex::new(LinkedList::new()),
+                files: Mutex::new(BTreeMap::new()),
             }),
             builtins: schema.clone(),
             allow_native,
@@ -244,6 +246,54 @@ impl Compiler {
             }));
 
         Ok(ret)
+    }
+
+    pub fn open_file(&self, file_path: &FilePath) -> Result<(Option<String>, ast::Schema)> {
+        let parsed_path = FilePath::new(file_path).canonicalize()?;
+        if !parsed_path.exists() {
+            return Err(CompileError::no_such_entry(
+                parsed_path
+                    .components()
+                    .map(|x| format!("{:?}", x))
+                    .collect(),
+            ));
+        }
+        let file = parsed_path.to_str().unwrap().to_string();
+        let parent_path = parsed_path.parent();
+        let folder = match parent_path {
+            Some(p) => p.to_str().map(|f| f.to_string()),
+            None => None,
+        };
+        let contents = match self.data.read()?.files.lock()?.entry(file.clone()) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                let contents = fs::read_to_string(&parsed_path)?;
+                // TODO: Avoid this clone somehow
+                //
+                entry.insert(contents.clone());
+                contents
+            }
+            std::collections::btree_map::Entry::Occupied(entry) => {
+                // TODO: Avoid this clone somehow
+                //
+                entry.get().clone()
+            }
+        };
+        Ok((
+            folder,
+            parse_schema(parsed_path.to_str().unwrap(), contents.as_str())?,
+        ))
+    }
+
+    pub fn file_contents(&self, path: &str) -> Result<Option<String>> {
+        // TODO: Avoid this clone somehow
+        //
+        Ok(self
+            .data
+            .read()?
+            .files
+            .lock()?
+            .get(&path.to_string())
+            .map(|f| f.clone()))
     }
 }
 
@@ -506,34 +556,12 @@ pub fn rebind_decl(_schema: SchemaInstance, decl: &Decl) -> Result<SchemaEntry> 
     }
 }
 
-fn open_file(file_path: &FilePath) -> Result<(Option<String>, ast::Schema)> {
-    let parsed_path = FilePath::new(file_path).canonicalize()?;
-    if !parsed_path.exists() {
-        return Err(CompileError::no_such_entry(
-            parsed_path
-                .components()
-                .map(|x| format!("{:?}", x))
-                .collect(),
-        ));
-    }
-    let parent_path = parsed_path.parent();
-    let folder = match parent_path {
-        Some(p) => p.to_str().map(|f| f.to_string()),
-        None => None,
-    };
-    let contents = fs::read_to_string(&parsed_path)?;
-    Ok((
-        folder,
-        parse_schema(parsed_path.to_str().unwrap(), contents.as_str())?,
-    ))
-}
-
 pub fn compile_schema_from_file(
     compiler: Compiler,
     file_path: &FilePath,
 ) -> CompileResult<Option<Ref<Schema>>> {
     let mut result = CompileResult::new(None);
-    let (folder, ast) = match open_file(file_path) {
+    let (folder, ast) = match compiler.open_file(file_path) {
         Ok((folder, contents)) => (folder, contents),
         Err(e) => {
             result.add_error(None, e);
