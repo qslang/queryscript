@@ -55,7 +55,7 @@ impl PrettyError for QVMError {
             QVMError::ParserError { source } => source.location(),
             QVMError::CompileError { file, .. } => ErrorLocation::File(file.clone()),
             QVMError::RuntimeError { file, .. } => ErrorLocation::File(file.clone()),
-            _ => ErrorLocation::File("<qvm>".to_string()),
+            _ => ErrorLocation::Unknown,
         }
     }
 }

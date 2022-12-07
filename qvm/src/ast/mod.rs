@@ -1,6 +1,71 @@
+use colored::*;
 use sqlparser::ast as sqlast;
 
 pub use sqlparser::tokenizer::Location;
+
+#[derive(Clone, Debug)]
+pub enum SourceLocation {
+    Unknown,
+    File(String),
+    Single(String, Location),
+    Range(String, Location, Location),
+}
+
+impl SourceLocation {
+    pub fn annotate(&self, code: &str) -> String {
+        let lines = code.lines().collect::<Vec<_>>();
+        let (start_col, end_col, lines) = match self {
+            SourceLocation::Unknown | SourceLocation::File(_) => (0, 0, &lines[0..0]),
+            SourceLocation::Single(_, l) => (
+                l.column,
+                l.column,
+                &lines[(l.line as usize) - 1..l.line as usize],
+            ),
+            SourceLocation::Range(_, s, e) => (
+                s.column,
+                e.column,
+                &lines[s.line as usize - 1..e.line as usize],
+            ),
+        };
+        let num_lines = lines.len();
+        let lines = lines
+            .iter()
+            .enumerate()
+            .flat_map(|(i, l)| {
+                let start = if i == 0 { start_col } else { 0 };
+                let end = if i == num_lines - 1 {
+                    end_col
+                } else {
+                    (l.len() - 1) as u64
+                };
+                let annotation = (0..start + 1).map(|_| " ").collect::<String>()
+                    + (start..end + 1).map(|_| "^").collect::<String>().as_str();
+                vec![
+                    "  ".to_string() + l.to_string().as_str(),
+                    annotation.bright_red().to_string(),
+                ]
+            })
+            .collect::<Vec<_>>();
+        lines.join("\n")
+    }
+
+    pub fn pretty(&self) -> String {
+        match self {
+            SourceLocation::Unknown => "<qvm>".white().bold().to_string(),
+            SourceLocation::File(f) => f.clone().white().bold().to_string(),
+            SourceLocation::Single(f, l) => format!("{}:{}:{}", f, l.line, l.column)
+                .white()
+                .bold()
+                .to_string(),
+            SourceLocation::Range(f, s, e) => {
+                format!("{}:{}:{}-{}:{}", f, s.line, s.column, e.line, e.column)
+                    .white()
+                    .bold()
+                    .to_string()
+            }
+        }
+    }
+}
 
 pub type Ident = String;
 
