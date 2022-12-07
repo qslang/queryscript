@@ -1,3 +1,4 @@
+pub use crate::parser::error::ErrorLocation;
 use object_store;
 use snafu::{Backtrace, GenerateImplicitData, Snafu};
 use std::num::ParseFloatError;

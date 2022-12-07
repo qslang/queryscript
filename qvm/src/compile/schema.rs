@@ -1,4 +1,5 @@
 pub use datafusion::arrow::datatypes::DataType as ArrowDataType;
+use snafu::prelude::*;
 use sqlparser::ast as sqlast;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -7,7 +8,7 @@ use std::sync::{Arc, RwLock};
 use crate::ast;
 use crate::ast::SourceLocation;
 use crate::compile::{
-    error::{CompileError, Result},
+    error::*,
     inference::{mkcref, Constrainable, Constrained},
 };
 use crate::runtime;
@@ -317,6 +318,7 @@ impl Constrainable for MType {
             },
             MType::Name(name) => {
                 return Err(CompileError::internal(
+                    name.loc.clone(),
                     format!("Encountered free type variable: {}", name.value).as_str(),
                 ))
             }
@@ -332,26 +334,44 @@ impl Constrainable for MType {
     ) -> Result<CRef<Self>> {
         let df_op = match super::datafusion::parser_binop_to_df_binop(op) {
             Ok(op) => op,
-            Err(e) => return Err(CompileError::unimplemented(&(e.to_string()))),
+            Err(e) => {
+                return Err(CompileError::unimplemented(
+                    left.read()?.location(),
+                    &(e.to_string()),
+                ))
+            }
         };
 
         let left_type = left.read()?;
         let right_type = right.read()?;
 
-        let left_rt = left_type.to_runtime_type()?;
-        let right_rt = right_type.to_runtime_type()?;
+        let left_loc = left_type.location();
+        let right_loc = right_type.location();
 
-        let left_df: ArrowDataType = (&left_rt).try_into()?;
-        let right_df: ArrowDataType = (&right_rt).try_into()?;
+        let left_rt = left_type.to_runtime_type().context(RuntimeSnafu {
+            loc: left_loc.clone(),
+        })?;
+        let right_rt = right_type.to_runtime_type().context(RuntimeSnafu {
+            loc: right_loc.clone(),
+        })?;
+
+        let left_df: ArrowDataType = (&left_rt).try_into().context(TypesystemSnafu {
+            loc: left_loc.clone(),
+        })?;
+        let right_df: ArrowDataType = (&right_rt).try_into().context(TypesystemSnafu {
+            loc: right_loc.clone(),
+        })?;
 
         let coerced_df = match datafusion::logical_expr::type_coercion::binary::coerce_types(
             &left_df, &df_op, &right_df,
         ) {
             Ok(t) => t,
-            Err(e) => return Err(CompileError::internal(&(e.to_string()))),
+            Err(e) => return Err(CompileError::internal(left_loc.clone(), &(e.to_string()))),
         };
 
-        let coerced_type: Type = (&coerced_df).try_into()?;
+        let coerced_type: Type = (&coerced_df).try_into().context(TypesystemSnafu {
+            loc: left_loc.clone(),
+        })?;
         Ok(mkcref(MType::from_runtime_type(&coerced_type)?))
     }
 }

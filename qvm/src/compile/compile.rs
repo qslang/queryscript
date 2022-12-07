@@ -77,18 +77,6 @@ macro_rules! c_try {
     };
 }
 
-macro_rules! c_try_internal {
-    ($result: expr, $expr: expr) => {
-        match $expr {
-            Ok(v) => v,
-            Err(e) => {
-                $result.add_error(None, CompileError::internal(format!("{}", e).as_str()));
-                return $result;
-            }
-        }
-    };
-}
-
 pub struct CompilerData {
     pub next_placeholder: usize,
     pub idle: Ref<tokio::sync::watch::Receiver<()>>,
@@ -200,8 +188,8 @@ impl Compiler {
         // quickly if there is contention.
         //
         let idle = c_try!(result, self.data.read()).idle.clone();
-        let mut idle = c_try_internal!(result, idle.try_write());
-        c_try_internal!(result, idle.changed().await);
+        let mut idle = c_try!(result, idle.try_write());
+        c_try!(result, idle.changed().await);
 
         // Claim the set of handles we've accrued within the compiler to reset things.
         //
@@ -448,7 +436,7 @@ pub fn resolve_type(
                         });
                     }
                     ast::StructEntry::Include { .. } => {
-                        return Err(CompileError::unimplemented("Struct inclusions"));
+                        return Err(CompileError::unimplemented(loc, "Struct inclusions"));
                     }
                 }
             }
@@ -460,7 +448,7 @@ pub fn resolve_type(
             inner: resolve_type(compiler, schema, inner.as_ref())?,
         }))),
         ast::TypeBody::Exclude { .. } => {
-            return Err(CompileError::unimplemented("Struct exclusions"));
+            return Err(CompileError::unimplemented(loc, "Struct exclusions"));
         }
     }
 }
@@ -636,13 +624,18 @@ pub fn declare_schema_entry(
     schema: &Ref<Schema>,
     stmt: &ast::Stmt,
 ) -> Result<()> {
+    let loc = SourceLocation::Range(
+        schema.read()?.file.clone(),
+        stmt.start.clone(),
+        stmt.end.clone(),
+    );
     let entries: Vec<(Ident, bool, SchemaEntry)> = match &stmt.body {
         ast::StmtBody::Noop => Vec::new(),
         ast::StmtBody::Expr(_) => Vec::new(),
         ast::StmtBody::Import { path, list, .. } => {
             let imported = lookup_schema(compiler.clone(), schema.clone(), &path)?;
             if imported.read()?.args.is_some() {
-                return Err(CompileError::unimplemented("Importing with arguments"));
+                return Err(CompileError::unimplemented(loc, "Importing with arguments"));
             }
 
             // XXX Importing schemas with extern values is currently broken, because we don't
@@ -745,8 +738,9 @@ pub fn declare_schema_entry(
                 }
                 ast::ImportList::Items(items) => {
                     for item in items {
+                        let loc = path_location(item);
                         if item.len() != 1 {
-                            return Err(CompileError::unimplemented("path imports"));
+                            return Err(CompileError::unimplemented(loc, "path imports"));
                         }
 
                         let (_, decl, r) = lookup_path(
@@ -821,13 +815,14 @@ pub fn declare_schema_entry(
     Ok(())
 }
 
-pub fn unify_type_decl(schema: Ref<Schema>, name: &str, type_: CRef<MType>) -> Result<()> {
+pub fn unify_type_decl(schema: Ref<Schema>, name: &Ident, type_: CRef<MType>) -> Result<()> {
     let s = schema.read()?;
-    let decl = s.decls.get(name).ok_or_else(|| {
+    let decl = s.decls.get(&name.value).ok_or_else(|| {
         CompileError::internal(
+            name.loc.clone(),
             format!(
                 "Could not find type declaration {} during reprocessing",
-                name
+                name.value
             )
             .as_str(),
         )
@@ -836,9 +831,10 @@ pub fn unify_type_decl(schema: Ref<Schema>, name: &str, type_: CRef<MType>) -> R
         SchemaEntry::Type(t) => t.unify(&type_)?,
         _ => {
             return Err(CompileError::internal(
+                name.loc.clone(),
                 format!(
                     "Expected {} to be a type declaration during reprocessing",
-                    name
+                    name.value
                 )
                 .as_str(),
             ))
@@ -848,13 +844,14 @@ pub fn unify_type_decl(schema: Ref<Schema>, name: &str, type_: CRef<MType>) -> R
     Ok(())
 }
 
-pub fn unify_expr_decl(schema: Ref<Schema>, name: &str, value: &STypedExpr) -> Result<()> {
+pub fn unify_expr_decl(schema: Ref<Schema>, name: &Ident, value: &STypedExpr) -> Result<()> {
     let s = schema.read()?;
-    let decl = s.decls.get(name).ok_or_else(|| {
+    let decl = s.decls.get(&name.value).ok_or_else(|| {
         CompileError::internal(
+            name.loc.clone(),
             format!(
                 "Could not find type declaration {} during reprocessing",
-                name
+                name.value
             )
             .as_str(),
         )
@@ -863,9 +860,10 @@ pub fn unify_expr_decl(schema: Ref<Schema>, name: &str, value: &STypedExpr) -> R
         SchemaEntry::Expr(e) => e.unify(&value)?,
         _ => {
             return Err(CompileError::internal(
+                name.loc.clone(),
                 format!(
                     "Expected {} to be a type declaration during reprocessing",
-                    name
+                    name.value
                 )
                 .as_str(),
             ))
@@ -909,7 +907,7 @@ pub fn compile_schema_entry(
         ast::StmtBody::Import { .. } => {}
         ast::StmtBody::TypeDef(nt) => {
             let type_ = resolve_type(compiler.clone(), schema.clone(), &nt.def)?;
-            unify_type_decl(schema.clone(), nt.name.value.as_str(), type_)?;
+            unify_type_decl(schema.clone(), &nt.name, type_)?;
         }
         ast::StmtBody::FnDef {
             name,
@@ -962,7 +960,10 @@ pub fn compile_schema_entry(
             let (compiled, is_sql) = match body {
                 ast::FnBody::Native => {
                     if !compiler.allow_native() {
-                        return Err(CompileError::internal("Cannot compile native functions"));
+                        return Err(CompileError::internal(
+                            loc,
+                            "Cannot compile native functions",
+                        ));
                     }
 
                     (
@@ -1001,7 +1002,7 @@ pub fn compile_schema_entry(
 
             unify_expr_decl(
                 schema.clone(),
-                name.value.as_str(),
+                name,
                 &STypedExpr {
                     type_: fn_type,
                     expr: compiled.expr.then(move |expr: Ref<Expr<CRef<MType>>>| {
@@ -1031,7 +1032,7 @@ pub fn compile_schema_entry(
             lhs_type.unify(&compiled.type_)?;
             unify_expr_decl(
                 schema.clone(),
-                name.value.as_str(),
+                name,
                 &STypedExpr {
                     type_: SType::new_mono(lhs_type),
                     expr: compiled.expr,
@@ -1041,7 +1042,7 @@ pub fn compile_schema_entry(
         ast::StmtBody::Extern { name, type_ } => {
             unify_expr_decl(
                 schema.clone(),
-                name.value.as_str(),
+                name,
                 &STypedExpr {
                     type_: SType::new_mono(resolve_type(compiler.clone(), schema.clone(), type_)?),
                     expr: mkcref(Expr::Unknown),
@@ -1064,7 +1065,12 @@ pub fn gather_schema_externs(schema: Ref<Schema>) -> Result<()> {
                         e.type_.then(|t: Ref<SType>| Ok(t.read()?.instantiate()?))?,
                     );
                 }
-                _ => return Err(CompileError::unimplemented("type externs")),
+                _ => {
+                    return Err(CompileError::unimplemented(
+                        SourceLocation::Unknown,
+                        "type externs",
+                    ))
+                }
             }
         }
     }

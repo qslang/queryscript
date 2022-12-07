@@ -1,6 +1,7 @@
 use crate::ast;
 use crate::compile::schema::{Decl, MType};
-use crate::parser::error::ParserError;
+pub use crate::parser::error::ErrorLocation;
+use crate::parser::error::{ParserError, PrettyError};
 use crate::runtime::error::RuntimeError;
 use crate::types::error::TypesystemError;
 use snafu::{Backtrace, Snafu};
@@ -21,36 +22,41 @@ pub enum CompileError {
     InternalError {
         what: String,
         backtrace: Option<Backtrace>,
+        loc: ErrorLocation,
     },
 
-    #[snafu(display("Typesystem error: {}", source), context(false))]
+    #[snafu(display("Internal error: {}", what))]
+    ExternalError {
+        what: String,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(display("Typesystem error: {}", source))]
     TypesystemError {
         #[snafu(backtrace)]
         source: TypesystemError,
+        loc: ErrorLocation,
     },
 
-    #[snafu(display("Runtime error: {}", source), context(false))]
+    #[snafu(display("Runtime error: {}", source))]
     RuntimeError {
         #[snafu(backtrace)]
         source: RuntimeError,
+        loc: ErrorLocation,
     },
 
-    #[snafu(context(false))]
+    #[snafu()]
     FsError {
         source: io::Error,
         backtrace: Option<Backtrace>,
-    },
-
-    #[snafu(context(false))]
-    JoinError {
-        source: tokio::task::JoinError,
-        backtrace: Option<Backtrace>,
+        loc: ErrorLocation,
     },
 
     #[snafu(display("Unimplemented: {}", what))]
     Unimplemented {
         what: String,
         backtrace: Option<Backtrace>,
+        loc: ErrorLocation,
     },
 
     #[snafu(display("Missing argument: {:?}", path))]
@@ -96,6 +102,7 @@ pub enum CompileError {
         lhs: MType,
         rhs: MType,
         backtrace: Option<Backtrace>,
+        loc: ErrorLocation,
     },
 
     #[snafu(display("Error importing {:?}: {}", path, what))]
@@ -107,8 +114,8 @@ pub enum CompileError {
 }
 
 impl CompileError {
-    pub fn unimplemented(what: &str) -> CompileError {
-        return UnimplementedSnafu { what }.build();
+    pub fn unimplemented(loc: ErrorLocation, what: &str) -> CompileError {
+        return UnimplementedSnafu { loc, what }.build();
     }
 
     pub fn missing_arg(path: ast::Path) -> CompileError {
@@ -140,8 +147,9 @@ impl CompileError {
         .build();
     }
 
-    pub fn coercion(lhs: &MType, rhs: &MType) -> CompileError {
+    pub fn coercion(loc: ErrorLocation, lhs: &MType, rhs: &MType) -> CompileError {
         return CoercionSnafu {
+            loc,
             lhs: lhs.clone(),
             rhs: rhs.clone(),
         }
@@ -156,16 +164,98 @@ impl CompileError {
         .build();
     }
 
-    pub fn internal(what: &str) -> CompileError {
+    pub fn internal(loc: ErrorLocation, what: &str) -> CompileError {
         return InternalSnafu {
+            loc,
+            what: what.to_string(),
+        }
+        .build();
+    }
+
+    pub fn external(what: &str) -> CompileError {
+        return ExternalSnafu {
             what: what.to_string(),
         }
         .build();
     }
 }
 
+pub fn path_location(path: &Vec<ast::Ident>) -> ErrorLocation {
+    if path.len() == 0 {
+        return ErrorLocation::Unknown;
+    }
+
+    let (start_file, start) = match &path[0].loc {
+        ErrorLocation::Range(file, start, _) => (file, start),
+        t => return t.clone(),
+    };
+
+    let (end_file, end) = match &path[0].loc {
+        ErrorLocation::Range(file, _, end) => (file, end),
+        t => return t.clone(),
+    };
+
+    if start_file != end_file {
+        return ErrorLocation::Unknown;
+    }
+
+    ErrorLocation::Range(start_file.clone(), start.clone(), end.clone())
+}
+
+impl PrettyError for CompileError {
+    fn location(&self) -> ErrorLocation {
+        match self {
+            CompileError::SyntaxError { source } => source.location(),
+            CompileError::InternalError { loc, .. } => loc.clone(),
+            CompileError::ExternalError { .. } => ErrorLocation::File("<qvm>".to_string()),
+            CompileError::TypesystemError { loc, .. } => loc.clone(),
+            CompileError::RuntimeError { loc, .. } => loc.clone(),
+            CompileError::FsError { loc, .. } => loc.clone(),
+            CompileError::Unimplemented { loc, .. } => loc.clone(),
+            CompileError::MissingArg { path, .. } => path_location(path),
+            CompileError::DuplicateEntry { path, .. } => path_location(path),
+            CompileError::NoSuchEntry { path, .. } => path_location(path),
+            CompileError::WrongKind { path, .. } => path_location(path),
+            CompileError::WrongType { lhs, .. } => lhs.location(),
+            CompileError::CoercionError { loc, .. } => loc.clone(),
+            CompileError::ImportError { path, .. } => path_location(path),
+        }
+    }
+}
+
 impl<Guard> From<std::sync::PoisonError<Guard>> for CompileError {
     fn from(e: std::sync::PoisonError<Guard>) -> CompileError {
-        CompileError::internal(format!("{}", e).as_str())
+        CompileError::external(format!("{}", e).as_str())
+    }
+}
+
+impl From<tokio::task::JoinError> for CompileError {
+    fn from(e: tokio::task::JoinError) -> CompileError {
+        CompileError::external(format!("{}", e).as_str())
+    }
+}
+
+impl
+    From<std::sync::TryLockError<std::sync::RwLockWriteGuard<'_, tokio::sync::watch::Receiver<()>>>>
+    for CompileError
+{
+    fn from(
+        e: std::sync::TryLockError<
+            std::sync::RwLockWriteGuard<'_, tokio::sync::watch::Receiver<()>>,
+        >,
+    ) -> CompileError {
+        CompileError::external(format!("{}", e).as_str())
+    }
+}
+
+impl From<tokio::sync::watch::error::RecvError> for CompileError {
+    fn from(e: tokio::sync::watch::error::RecvError) -> CompileError {
+        CompileError::external(format!("{}", e).as_str())
+    }
+}
+
+impl From<std::io::Error> for CompileError {
+    fn from(e: std::io::Error) -> CompileError {
+        CompileError::external(format!("{}", e).as_str())
     }
 }

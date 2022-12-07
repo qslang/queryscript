@@ -1,4 +1,5 @@
 use rustyline::{completion::*, highlight::*, hint::*, validate::*, Context, Helper, Result};
+use snafu::prelude::*;
 
 use qvm::ast;
 use qvm::ast::ToStrings;
@@ -156,7 +157,14 @@ fn get_record_fields(
     path: &Vec<ast::Ident>,
 ) -> compile::Result<Vec<String>> {
     let expr = compile::compile_reference(compiler.clone(), schema.clone(), path)?;
-    let type_ = expr.type_.must()?.read()?.clone();
+    let type_ = expr
+        .type_
+        .must()
+        .context(compile::error::RuntimeSnafu {
+            loc: compile::error::ErrorLocation::Unknown,
+        })?
+        .read()?
+        .clone();
 
     match type_ {
         schema::MType::Record(schema::MRecordType { fields, .. }) => {

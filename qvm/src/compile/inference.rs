@@ -1,6 +1,7 @@
 use crate::compile::error::*;
 use crate::compile::schema::{mkref, Ref};
 use crate::runtime;
+use snafu::prelude::*;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -12,6 +13,7 @@ use std::task::{Context, Poll};
 pub trait Constrainable: Clone + fmt::Debug + Send + Sync {
     fn unify(&self, other: &Self) -> Result<()> {
         Err(CompileError::internal(
+            ErrorLocation::Unknown,
             format!(
                 "{} cannot be unified:\n{:#?}\n{:#?}",
                 std::any::type_name::<Self>(),
@@ -193,7 +195,10 @@ impl<T: 'static + Constrainable> CRef<T> {
         match &*self.find()?.read()? {
             Constrained::Unknown { .. } => Ok(false),
             Constrained::Known(_) => Ok(true),
-            _ => Err(CompileError::internal("Canon value should never be a ref")),
+            _ => Err(CompileError::internal(
+                ErrorLocation::Unknown,
+                "Canon value should never be a ref",
+            )),
         }
     }
 
@@ -230,7 +235,19 @@ impl<T: 'static + Constrainable> CRef<T> {
         if !us.is_known()? || !them.is_known()? {
             us.union(&them)?;
         } else {
-            us.must()?.read()?.unify(&*them.must()?.read()?)?;
+            us.must()
+                .context(RuntimeSnafu {
+                    loc: ErrorLocation::Unknown,
+                })?
+                .read()?
+                .unify(
+                    &*them
+                        .must()
+                        .context(RuntimeSnafu {
+                            loc: ErrorLocation::Unknown,
+                        })?
+                        .read()?,
+                )?;
         }
 
         Ok(())
@@ -246,7 +263,12 @@ impl<T: 'static + Constrainable> CRef<T> {
             Constrained::Unknown { constraints, .. } => {
                 constraints.push(constraint);
             }
-            _ => return Err(CompileError::internal("Canon value should never be a ref")),
+            _ => {
+                return Err(CompileError::internal(
+                    ErrorLocation::Unknown,
+                    "Canon value should never be a ref",
+                ))
+            }
         }
 
         Ok(())
