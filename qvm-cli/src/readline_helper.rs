@@ -159,8 +159,8 @@ fn get_record_fields(
     let type_ = expr.type_.must()?.read()?.clone();
 
     match type_ {
-        schema::MType::Record(fields) => {
-            return Ok(fields.iter().map(|f| f.name.clone()).collect());
+        schema::MType::Record(schema::MRecordType { fields, .. }) => {
+            return Ok(fields.iter().map(|f| f.name.value.clone()).collect());
         }
         _ => {}
     }

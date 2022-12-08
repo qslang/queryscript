@@ -4,7 +4,7 @@ use std::path::Path as FilePath;
 use std::sync::Arc;
 
 use crate::ast;
-use crate::ast::ToStrings;
+use crate::ast::{SourceLocation, ToStrings};
 use crate::compile::builtin_types::GLOBAL_SCHEMA;
 use crate::compile::error::*;
 use crate::compile::inference::*;
@@ -247,7 +247,7 @@ impl Compiler {
         Ok(ret)
     }
 
-    pub fn open_file(&self, file_path: &FilePath) -> Result<(Option<String>, ast::Schema)> {
+    pub fn open_file(&self, file_path: &FilePath) -> Result<(String, Option<String>, ast::Schema)> {
         let parsed_path = FilePath::new(file_path).canonicalize()?;
         let file = parsed_path.to_str().unwrap().to_string();
         let parent_path = parsed_path.parent();
@@ -270,6 +270,7 @@ impl Compiler {
             }
         };
         Ok((
+            file,
             folder,
             parse_schema(parsed_path.to_str().unwrap(), contents.as_str())?,
         ))
@@ -405,6 +406,11 @@ pub fn resolve_type(
     schema: Ref<Schema>,
     ast: &ast::Type,
 ) -> Result<CRef<MType>> {
+    let loc = SourceLocation::Range(
+        schema.read()?.file.clone(),
+        ast.start.clone(),
+        ast.end.clone(),
+    );
     match &ast.body {
         ast::TypeBody::Reference(path) => {
             let (_, decl, r) = lookup_path(
@@ -436,7 +442,7 @@ pub fn resolve_type(
                         }
                         seen.insert(nt.name.value.clone());
                         fields.push(MField {
-                            name: nt.name.value.clone(),
+                            name: nt.name.clone(),
                             type_: resolve_type(compiler.clone(), schema.clone(), &nt.def)?,
                             nullable: true, /* TODO: implement non-null types */
                         });
@@ -447,13 +453,12 @@ pub fn resolve_type(
                 }
             }
 
-            Ok(mkcref(MType::Record(fields)))
+            Ok(mkcref(MType::Record(MRecordType { loc, fields })))
         }
-        ast::TypeBody::List(inner) => Ok(mkcref(MType::List(resolve_type(
-            compiler,
-            schema,
-            inner.as_ref(),
-        )?))),
+        ast::TypeBody::List(inner) => Ok(mkcref(MType::List(MListType {
+            loc,
+            inner: resolve_type(compiler, schema, inner.as_ref())?,
+        }))),
         ast::TypeBody::Exclude { .. } => {
             return Err(CompileError::unimplemented("Struct exclusions"));
         }
@@ -474,7 +479,7 @@ pub fn resolve_global_atom(compiler: Compiler, name: &str) -> Result<CRef<MType>
 
 pub fn find_field<'a>(fields: &'a Vec<MField>, name: &str) -> Option<&'a MField> {
     for f in fields.iter() {
-        if f.name == name {
+        if f.name.value == name {
             return Some(f);
         }
     }
@@ -502,25 +507,31 @@ pub fn typecheck_path(type_: CRef<MType>, path: &[Ident]) -> Result<CRef<MType>>
     let remainder = path[1..].to_vec();
 
     type_.then(move |type_: Ref<MType>| match &*type_.read()? {
-        MType::Record(fields) => {
+        MType::Record(MRecordType { loc, fields }) => {
             if let Some(field) = find_field(&fields, name.value.as_str()) {
                 typecheck_path(field.type_.clone(), remainder.as_slice())
             } else {
                 return Err(CompileError::wrong_type(
-                    &MType::Record(vec![MField::new_nullable(
-                        name.value.clone(),
-                        MType::new_unknown("field"),
-                    )]),
+                    &MType::Record(MRecordType {
+                        loc: loc.clone(),
+                        fields: vec![MField::new_nullable(
+                            name.clone(),
+                            MType::new_unknown("field"),
+                        )],
+                    }),
                     &*type_.read()?,
                 ));
             }
         }
-        _ => {
+        t => {
             return Err(CompileError::wrong_type(
-                &MType::Record(vec![MField::new_nullable(
-                    name.value.clone(),
-                    MType::new_unknown("field"),
-                )]),
+                &MType::Record(MRecordType {
+                    loc: t.location(),
+                    fields: vec![MField::new_nullable(
+                        name.clone(),
+                        MType::new_unknown("field"),
+                    )],
+                }),
                 &*type_.read()?,
             ))
         }
@@ -554,24 +565,25 @@ pub fn compile_schema_from_file(
     file_path: &FilePath,
 ) -> CompileResult<Option<Ref<Schema>>> {
     let mut result = CompileResult::new(None);
-    let (folder, ast) = match compiler.open_file(file_path) {
-        Ok((folder, contents)) => (folder, contents),
+    let (file, folder, ast) = match compiler.open_file(file_path) {
+        Ok((file, folder, contents)) => (file, folder, contents),
         Err(e) => {
             result.add_error(None, e);
             return result;
         }
     };
 
-    result.replace(compile_schema(compiler.clone(), folder, &ast).map(|s| Some(s)));
+    result.replace(compile_schema(compiler.clone(), file, folder, &ast).map(|s| Some(s)));
     result
 }
 
 pub fn compile_schema(
     compiler: Compiler,
+    file: String,
     folder: Option<String>,
     ast: &ast::Schema,
 ) -> CompileResult<Ref<Schema>> {
-    let mut result = CompileResult::new(Schema::new(folder));
+    let mut result = CompileResult::new(Schema::new(file, folder));
     result.absorb(compile_schema_ast(
         compiler.clone(),
         result.result.clone(),
@@ -883,6 +895,11 @@ pub fn compile_schema_entry(
     schema: &Ref<Schema>,
     stmt: &ast::Stmt,
 ) -> Result<()> {
+    let loc = SourceLocation::Range(
+        schema.read()?.file.clone(),
+        stmt.start.clone(),
+        stmt.end.clone(),
+    );
     match &stmt.body {
         ast::StmtBody::Noop => {}
         ast::StmtBody::Expr(expr) => {
@@ -901,7 +918,8 @@ pub fn compile_schema_entry(
             ret,
             body,
         } => {
-            let inner_schema = Schema::new(schema.read()?.folder.clone());
+            let inner_schema =
+                Schema::new(schema.read()?.file.clone(), schema.read()?.folder.clone());
             inner_schema.write()?.parent_scope = Some(schema.clone());
 
             for generic in generics {
@@ -911,7 +929,7 @@ pub fn compile_schema_entry(
                         public: true,
                         extern_: true,
                         name: generic.clone(),
-                        value: SchemaEntry::Type(mkcref(MType::Name(generic.value.clone()))),
+                        value: SchemaEntry::Type(mkcref(MType::Name(generic.clone()))),
                     },
                 );
             }
@@ -938,7 +956,7 @@ pub fn compile_schema_entry(
                     .write()?
                     .externs
                     .insert(arg.name.value.clone(), type_.clone());
-                compiled_args.push(MField::new_nullable(arg.name.value.clone(), type_.clone()));
+                compiled_args.push(MField::new_nullable(arg.name.clone(), type_.clone()));
             }
 
             let (compiled, is_sql) = match body {
@@ -974,6 +992,7 @@ pub fn compile_schema_entry(
 
             let fn_type = SType::new_poly(
                 mkcref(MType::Fn(MFnType {
+                    loc: loc.clone(),
                     args: compiled_args,
                     ret: compiled.type_.clone(),
                 })),

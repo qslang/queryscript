@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use std::collections::BTreeMap;
 
-use crate::ast::Ident;
+use crate::ast::{Ident, SourceLocation};
 use crate::compile::compile::Compiler;
 use crate::compile::inference::mkcref;
 use crate::compile::schema::{Decl, MType, Ref, Schema, SchemaEntry};
@@ -66,12 +66,15 @@ lazy_static! {
                 public: true,
                 extern_: false,
                 name: Ident::without_location(name.to_string()),
-                value: SchemaEntry::Type(mkcref(MType::Atom(type_.clone()))),
+                value: SchemaEntry::Type(mkcref(MType::Atom(
+                    SourceLocation::File("<builtin>".to_string()),
+                    type_.clone()
+                ))),
             },
         ))
         .collect();
     pub static ref GLOBAL_SCHEMA: Ref<Schema> = {
-        let ret = Schema::new(None);
+        let ret = Schema::new("<builtin>".to_string(), None);
         ret.write().unwrap().decls = BTreeMap::from_iter(BUILTIN_TYPE_DECLS.clone().into_iter());
 
         let builtin_compiler = Compiler::new_with_builtins(ret.clone(), true).unwrap();

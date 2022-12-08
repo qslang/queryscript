@@ -18,7 +18,7 @@ pub fn run(rt: &runtime::Runtime) {
         .display()
         .to_string();
     let repl_compiler = compile::Compiler::new().unwrap();
-    let repl_schema = schema::Schema::new(Some(cwd));
+    let repl_schema = schema::Schema::new("<repl>".to_string(), Some(cwd));
     let curr_buffer = Rc::new(RefCell::new(String::new()));
     let helper = ReadlineHelper::new(
         repl_compiler.clone(),

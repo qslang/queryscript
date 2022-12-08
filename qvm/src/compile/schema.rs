@@ -5,6 +5,7 @@ use std::fmt;
 use std::sync::{Arc, RwLock};
 
 use crate::ast;
+use crate::ast::SourceLocation;
 use crate::compile::{
     error::{CompileError, Result},
     inference::{mkcref, Constrainable, Constrained},
@@ -17,20 +18,33 @@ pub use crate::compile::inference::CRef;
 pub type Ident = ast::Ident;
 
 #[derive(Debug, Clone)]
-pub struct MFnType {
-    pub args: Vec<MField>,
-    pub ret: CRef<MType>,
-}
-
-#[derive(Debug, Clone)]
 pub struct MField {
-    pub name: String,
+    pub name: Ident,
     pub type_: CRef<MType>,
     pub nullable: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct MListType {
+    pub loc: SourceLocation,
+    pub inner: CRef<MType>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MRecordType {
+    pub loc: SourceLocation,
+    pub fields: Vec<MField>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MFnType {
+    pub loc: SourceLocation,
+    pub args: Vec<MField>,
+    pub ret: CRef<MType>,
+}
+
 impl MField {
-    pub fn new_nullable(name: String, type_: CRef<MType>) -> MField {
+    pub fn new_nullable(name: Ident, type_: CRef<MType>) -> MField {
         MField {
             name,
             type_,
@@ -41,11 +55,11 @@ impl MField {
 
 #[derive(Clone)]
 pub enum MType {
-    Atom(AtomicType),
-    Record(Vec<MField>),
-    List(CRef<MType>),
+    Atom(SourceLocation, AtomicType),
+    Record(MRecordType),
+    List(MListType),
     Fn(MFnType),
-    Name(String),
+    Name(Ident),
 }
 
 impl MType {
@@ -55,28 +69,28 @@ impl MType {
 
     pub fn to_runtime_type(&self) -> runtime::error::Result<Type> {
         match self {
-            MType::Atom(a) => Ok(Type::Atom(a.clone())),
-            MType::Record(fields) => Ok(Type::Record(
+            MType::Atom(_, a) => Ok(Type::Atom(a.clone())),
+            MType::Record(MRecordType { fields, .. }) => Ok(Type::Record(
                 fields
                     .iter()
                     .map(|f| {
                         Ok(Field {
-                            name: f.name.clone(),
+                            name: f.name.value.clone(),
                             type_: f.type_.must()?.read()?.to_runtime_type()?,
                             nullable: f.nullable,
                         })
                     })
                     .collect::<runtime::error::Result<Vec<_>>>()?,
             )),
-            MType::List(inner) => Ok(Type::List(Box::new(
+            MType::List(MListType { inner, .. }) => Ok(Type::List(Box::new(
                 inner.must()?.read()?.to_runtime_type()?,
             ))),
-            MType::Fn(MFnType { args, ret }) => Ok(Type::Fn(FnType {
+            MType::Fn(MFnType { args, ret, .. }) => Ok(Type::Fn(FnType {
                 args: args
                     .iter()
                     .map(|a| {
                         Ok(Field {
-                            name: a.name.clone(),
+                            name: a.name.value.clone(),
                             type_: a.type_.must()?.read()?.to_runtime_type()?,
                             nullable: a.nullable,
                         })
@@ -84,7 +98,7 @@ impl MType {
                     .collect::<runtime::error::Result<Vec<_>>>()?,
                 ret: Box::new(ret.must()?.read()?.to_runtime_type()?),
             })),
-            MType::Name(_) => {
+            MType::Name { .. } => {
                 runtime::error::fail!("Unresolved type name cannot exist at runtime: {:?}", self)
             }
         }
@@ -92,26 +106,31 @@ impl MType {
 
     pub fn from_runtime_type(type_: &Type) -> Result<MType> {
         match type_ {
-            Type::Atom(a) => Ok(MType::Atom(a.clone())),
-            Type::Record(fields) => Ok(MType::Record(
-                fields
+            Type::Atom(a) => Ok(MType::Atom(SourceLocation::Unknown, a.clone())),
+            Type::Record(fields) => Ok(MType::Record(MRecordType {
+                loc: SourceLocation::Unknown,
+                fields: fields
                     .iter()
                     .map(|f| {
                         Ok(MField {
-                            name: f.name.clone(),
+                            name: Ident::without_location(f.name.clone()),
                             type_: mkcref(MType::from_runtime_type(&f.type_)?),
                             nullable: f.nullable,
                         })
                     })
                     .collect::<Result<Vec<_>>>()?,
-            )),
-            Type::List(inner) => Ok(MType::List(mkcref(MType::from_runtime_type(&inner)?))),
+            })),
+            Type::List(inner) => Ok(MType::List(MListType {
+                loc: SourceLocation::Unknown,
+                inner: mkcref(MType::from_runtime_type(&inner)?),
+            })),
             Type::Fn(FnType { args, ret }) => Ok(MType::Fn(MFnType {
+                loc: SourceLocation::Unknown,
                 args: args
                     .iter()
                     .map(|a| {
                         Ok(MField {
-                            name: a.name.clone(),
+                            name: Ident::without_location(a.name.clone()),
                             type_: mkcref(MType::from_runtime_type(&a.type_)?),
                             nullable: a.nullable,
                         })
@@ -124,9 +143,10 @@ impl MType {
 
     pub fn substitute(&self, variables: &BTreeMap<String, CRef<MType>>) -> Result<CRef<MType>> {
         let type_ = match self {
-            MType::Atom(a) => mkcref(MType::Atom(a.clone())),
-            MType::Record(fields) => mkcref(MType::Record(
-                fields
+            MType::Atom(loc, a) => mkcref(MType::Atom(loc.clone(), a.clone())),
+            MType::Record(MRecordType { loc, fields }) => mkcref(MType::Record(MRecordType {
+                loc: loc.clone(),
+                fields: fields
                     .iter()
                     .map(|f| {
                         Ok(MField {
@@ -136,9 +156,13 @@ impl MType {
                         })
                     })
                     .collect::<Result<_>>()?,
-            )),
-            MType::List(i) => mkcref(MType::List(i.substitute(variables)?)),
-            MType::Fn(MFnType { args, ret }) => mkcref(MType::Fn(MFnType {
+            })),
+            MType::List(MListType { loc, inner }) => mkcref(MType::List(MListType {
+                loc: loc.clone(),
+                inner: inner.substitute(variables)?,
+            })),
+            MType::Fn(MFnType { loc, args, ret }) => mkcref(MType::Fn(MFnType {
+                loc: loc.clone(),
                 args: args
                     .iter()
                     .map(|a| {
@@ -152,14 +176,22 @@ impl MType {
                 ret: ret.substitute(variables)?,
             })),
             MType::Name(n) => variables
-                .get(n)
-                .ok_or_else(|| {
-                    CompileError::no_such_entry(vec![Ident::without_location(n.clone())])
-                })?
+                .get(&n.value)
+                .ok_or_else(|| CompileError::no_such_entry(vec![n.clone()]))?
                 .clone(),
         };
 
         Ok(type_)
+    }
+
+    pub fn location(&self) -> SourceLocation {
+        match self {
+            MType::Atom(loc, _) => loc.clone(),
+            MType::Record(t) => t.loc.clone(),
+            MType::List(t) => t.loc.clone(),
+            MType::Fn(t) => t.loc.clone(),
+            MType::Name(t) => t.loc.clone(),
+        }
     }
 }
 
@@ -194,7 +226,7 @@ impl CTypedExpr {
 
 #[derive(Clone, Debug)]
 pub struct CTypedNameAndExpr {
-    pub name: String,
+    pub name: Ident,
     pub type_: CRef<MType>,
     pub expr: CRef<Expr<CRef<MType>>>,
 }
@@ -208,7 +240,7 @@ impl<'a> fmt::Debug for DebugMFields<'a> {
             if i > 0 {
                 f.write_str(", ")?;
             }
-            f.write_str(self.0[i].name.as_str())?;
+            f.write_str(self.0[i].name.value.as_str())?;
             f.write_str(" ")?;
             self.0[i].type_.fmt(f)?;
             if !self.0[i].nullable {
@@ -223,20 +255,20 @@ impl<'a> fmt::Debug for DebugMFields<'a> {
 impl fmt::Debug for MType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MType::Atom(atom) => atom.fmt(f)?,
-            MType::Record(fields) => DebugMFields(fields).fmt(f)?,
-            MType::List(inner) => {
+            MType::Atom(_, atom) => atom.fmt(f)?,
+            MType::Record(MRecordType { fields, .. }) => DebugMFields(fields).fmt(f)?,
+            MType::List(MListType { inner, .. }) => {
                 f.write_str("[")?;
                 inner.fmt(f)?;
                 f.write_str("]")?;
             }
-            MType::Fn(func) => {
+            MType::Fn(MFnType { args, ret, .. }) => {
                 f.write_str("λ ")?;
-                DebugMFields(&func.args).fmt(f)?;
+                DebugMFields(&args).fmt(f)?;
                 f.write_str(" -> ")?;
-                func.ret.fmt(f)?;
+                ret.fmt(f)?;
             }
-            MType::Name(n) => n.fmt(f)?,
+            MType::Name(n) => n.value.fmt(f)?,
         }
         Ok(())
     }
@@ -245,38 +277,47 @@ impl fmt::Debug for MType {
 impl Constrainable for MType {
     fn unify(&self, other: &MType) -> Result<()> {
         match self {
-            MType::Atom(la) => match other {
-                MType::Atom(ra) => {
+            MType::Atom(_, la) => match other {
+                MType::Atom(_, ra) => {
                     if la != ra {
                         return Err(CompileError::wrong_type(self, other));
                     }
                 }
                 _ => return Err(CompileError::wrong_type(self, other)),
             },
-            MType::Record(lfields) => match other {
-                MType::Record(rfields) => lfields.unify(rfields)?,
+            MType::Record(rtype) => match other {
+                MType::Record(ltype) => ltype.unify(rtype)?,
                 _ => return Err(CompileError::wrong_type(self, other)),
             },
-            MType::List(linner) => match other {
-                MType::List(rinner) => linner.unify(rinner)?,
+            MType::List(MListType { inner: linner, .. }) => match other {
+                MType::List(MListType { inner: rinner, .. }) => linner.unify(rinner)?,
                 _ => return Err(CompileError::wrong_type(self, other)),
             },
             MType::Fn(MFnType {
                 args: largs,
                 ret: lret,
+                loc: lloc,
             }) => match other {
                 MType::Fn(MFnType {
                     args: rargs,
                     ret: rret,
+                    loc: rloc,
                 }) => {
-                    largs.unify(rargs)?;
+                    MRecordType {
+                        loc: lloc.clone(),
+                        fields: largs.clone(),
+                    }
+                    .unify(&MRecordType {
+                        loc: rloc.clone(),
+                        fields: rargs.clone(),
+                    })?;
                     lret.unify(rret)?;
                 }
                 _ => return Err(CompileError::wrong_type(self, other)),
             },
             MType::Name(name) => {
                 return Err(CompileError::internal(
-                    format!("Encountered free type variable: {}", name).as_str(),
+                    format!("Encountered free type variable: {}", name.value).as_str(),
                 ))
             }
         }
@@ -315,25 +356,25 @@ impl Constrainable for MType {
     }
 }
 
-impl Constrainable for Vec<MField> {
-    fn unify(&self, other: &Vec<MField>) -> Result<()> {
+impl Constrainable for MRecordType {
+    fn unify(&self, other: &MRecordType) -> Result<()> {
         let err = || {
             CompileError::wrong_type(&MType::Record(self.clone()), &MType::Record(other.clone()))
         };
-        if self.len() != other.len() {
+        if self.fields.len() != other.fields.len() {
             return Err(err());
         }
 
-        for i in 0..self.len() {
-            if self[i].name != other[i].name {
+        for i in 0..self.fields.len() {
+            if self.fields[i].name.value != other.fields[i].name.value {
                 return Err(err());
             }
 
-            if self[i].nullable != other[i].nullable {
+            if self.fields[i].nullable != other.fields[i].nullable {
                 return Err(err());
             }
 
-            self[i].type_.unify(&other[i].type_)?;
+            self.fields[i].type_.unify(&other.fields[i].type_)?;
         }
 
         Ok(())
@@ -694,7 +735,7 @@ pub struct TypedNameAndExpr<TypeRef>
 where
     TypeRef: Clone + fmt::Debug + Send + Sync,
 {
-    pub name: String,
+    pub name: Ident,
     pub type_: TypeRef,
     pub expr: Arc<Expr<TypeRef>>,
 }
@@ -703,7 +744,7 @@ pub type SchemaRef = Ref<Schema>;
 
 #[derive(Clone, Debug)]
 pub struct TypedName<TypeRef> {
-    pub name: String,
+    pub name: Ident,
     pub type_: TypeRef,
 }
 
@@ -717,6 +758,7 @@ pub struct ImportedSchema {
 // currently used to check if two types are equal.
 #[derive(Clone, Debug)]
 pub struct Schema {
+    pub file: String,
     pub folder: Option<String>,
     pub parent_scope: Option<Ref<Schema>>,
     pub externs: BTreeMap<String, CRef<MType>>,
@@ -726,8 +768,9 @@ pub struct Schema {
 }
 
 impl Schema {
-    pub fn new(folder: Option<String>) -> Ref<Schema> {
+    pub fn new(file: String, folder: Option<String>) -> Ref<Schema> {
         mkref(Schema {
+            file,
             folder,
             parent_scope: None,
             externs: BTreeMap::new(),

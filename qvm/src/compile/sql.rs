@@ -5,7 +5,7 @@ use std::collections::{btree_map, BTreeMap};
 use std::fmt;
 use std::sync::Arc;
 
-use crate::ast::ToPath;
+use crate::ast::{SourceLocation, ToPath};
 use crate::compile::compile::{coerce, lookup_path, resolve_global_atom, typecheck_path, Compiler};
 use crate::compile::error::{CompileError, Result};
 use crate::compile::inference::*;
@@ -23,14 +23,14 @@ pub struct TypedSQL {
 
 #[derive(Clone, Debug)]
 pub struct CTypedNameAndSQL {
-    pub name: String,
+    pub name: Ident,
     pub type_: CRef<MType>,
     pub sql: CRef<SQL<CRef<MType>>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct NameAndSQL {
-    pub name: String,
+    pub name: Ident,
     pub sql: Arc<SQL<CRef<MType>>>,
 }
 
@@ -65,7 +65,7 @@ pub fn get_rowtype(compiler: Compiler, relation: CRef<MType>) -> Result<CRef<MTy
         let reltype = r.await?;
         let locked = reltype.read()?;
         match &*locked {
-            MType::List(inner) => Ok(inner.clone()),
+            MType::List(MListType { inner, .. }) => Ok(inner.clone()),
             _ => Ok(relation.clone()),
         }
     })?)
@@ -108,7 +108,7 @@ pub fn compile_sqlreference(
                                         body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(
                                             vec![
                                                 sqlast::Ident {
-                                                    value: fm.relation.clone(),
+                                                    value: fm.relation.value.clone(),
                                                     quote_style: None,
                                                 },
                                                 sqlast::Ident {
@@ -318,8 +318,8 @@ pub fn insert_sqlparams(dest: &mut CParams, src: &SQL<CRef<MType>>) -> Result<()
 
 #[derive(Clone, Debug)]
 pub struct FieldMatch {
-    pub relation: String,
-    pub field: String,
+    pub relation: Ident,
+    pub field: Ident,
     pub type_: Option<CRef<MType>>,
 }
 impl Constrainable for FieldMatch {}
@@ -352,12 +352,12 @@ impl SQLScope {
             self.relations
                 .iter()
                 .map(|(n, te)| {
-                    let n = n.clone();
+                    let n = Ident::without_location(n.clone());
                     get_rowtype(compiler.clone(), te.type_.clone())?.then(
                         move |rowtype: Ref<MType>| {
                             let rowtype = rowtype.read()?.clone();
                             match &rowtype {
-                                MType::Record(fields) => Ok(mkcref(
+                                MType::Record(MRecordType { fields, .. }) => Ok(mkcref(
                                     fields
                                         .iter()
                                         .map(|field| FieldMatch {
@@ -382,10 +382,10 @@ impl SQLScope {
             let mut ret = InsertionOrderMap::<String, FieldMatch>::new();
             for a in &*relations.read()? {
                 for b in &*a.read()? {
-                    if let Some(existing) = ret.get_mut(&b.field) {
+                    if let Some(existing) = ret.get_mut(&b.field.value) {
                         existing.type_ = None;
                     } else {
-                        ret.insert(b.field.clone(), b.clone());
+                        ret.insert(b.field.value.clone(), b.clone());
                     }
                 }
             }
@@ -403,6 +403,7 @@ pub fn compile_relation(
     relation: &sqlast::TableFactor,
     from_params: &mut Params<CRef<MType>>,
 ) -> Result<sqlast::TableFactor> {
+    let loc = SourceLocation::File(schema.read()?.file.clone());
     Ok(match relation {
         sqlast::TableFactor::Table {
             name,
@@ -423,9 +424,10 @@ pub fn compile_relation(
             //
             let relation = compile_reference(compiler.clone(), schema.clone(), &name.to_path())?;
 
-            let list_type = mkcref(MType::List(MType::new_unknown(
-                format!("FROM {}", name.to_string()).as_str(),
-            )));
+            let list_type = mkcref(MType::List(MListType {
+                loc: loc.clone(),
+                inner: MType::new_unknown(format!("FROM {}", name.to_string()).as_str()),
+            }));
             list_type.unify(&relation.type_)?;
 
             let name = match alias {
@@ -656,6 +658,8 @@ pub fn compile_select(
     CRef<MType>,
     CRef<CWrap<(Params<CRef<MType>>, Box<sqlast::SetExpr>)>>,
 )> {
+    let loc = SourceLocation::File(schema.read()?.file.clone());
+
     if select.distinct {
         return Err(CompileError::unimplemented("DISTINCT"));
     }
@@ -704,7 +708,7 @@ pub fn compile_select(
                     let compiled =
                         compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), expr)?;
                     mkcref(vec![CTypedNameAndSQL {
-                        name,
+                        name: Ident::without_location(name),
                         type_: compiled.type_,
                         sql: compiled.sql,
                     }])
@@ -714,7 +718,7 @@ pub fn compile_select(
                     let compiled =
                         compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), expr)?;
                     mkcref(vec![CTypedNameAndSQL {
-                        name,
+                        name: Ident::without_location(name),
                         type_: compiled.type_,
                         sql: compiled.sql,
                     }])
@@ -727,9 +731,9 @@ pub fn compile_select(
                             let type_ = match &m.type_ {
                                 Some(t) => t.clone(),
                                 None => {
-                                    return Err(CompileError::duplicate_entry(vec![
-                                        Ident::without_location(m.field.clone()),
-                                    ]))
+                                    return Err(CompileError::duplicate_entry(vec![m
+                                        .field
+                                        .clone()]))
                                 }
                             };
                             ret.push(CTypedNameAndSQL {
@@ -739,11 +743,11 @@ pub fn compile_select(
                                     params: BTreeMap::new(),
                                     body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(vec![
                                         sqlast::Ident {
-                                            value: m.relation.clone(),
+                                            value: m.relation.value.clone(),
                                             quote_style: None,
                                         },
                                         sqlast::Ident {
-                                            value: m.field.clone(),
+                                            value: m.field.value.clone(),
                                             quote_style: None,
                                         },
                                     ])),
@@ -762,19 +766,28 @@ pub fn compile_select(
 
     let projections = combine_crefs(exprs)?;
 
-    let type_: CRef<MType> = projections.then(|exprs: Ref<Vec<Ref<Vec<CTypedNameAndSQL>>>>| {
-        let mut fields = Vec::new();
-        for a in &*exprs.read()? {
-            for b in &*a.read()? {
-                fields.push(MField {
-                    name: b.name.clone(),
-                    type_: b.type_.clone(),
-                    nullable: true,
-                });
+    let type_: CRef<MType> = projections.then({
+        let loc = loc.clone();
+        move |exprs: Ref<Vec<Ref<Vec<CTypedNameAndSQL>>>>| {
+            let mut fields = Vec::new();
+            for a in &*exprs.read()? {
+                for b in &*a.read()? {
+                    fields.push(MField {
+                        name: b.name.clone(),
+                        type_: b.type_.clone(),
+                        nullable: true,
+                    });
+                }
             }
-        }
 
-        Ok(mkcref(MType::List(mkcref(MType::Record(fields)))))
+            Ok(mkcref(MType::List(MListType {
+                loc: loc.clone(),
+                inner: mkcref(MType::Record(MRecordType {
+                    loc: loc.clone(),
+                    fields,
+                })),
+            })))
+        }
     })?;
 
     let select = select.clone();
@@ -805,7 +818,7 @@ pub fn compile_select(
                 insert_sqlparams(&mut params, sqlexpr.sql.as_ref())?;
                 projection.push(sqlast::SelectItem::ExprWithAlias {
                     alias: sqlast::Ident {
-                        value: sqlexpr.name.clone(),
+                        value: sqlexpr.name.value.clone(),
                         quote_style: None,
                     },
                     expr: sqlexpr.sql.body.as_expr()?,
@@ -1076,13 +1089,14 @@ pub fn compile_sqlexpr(
     scope: Ref<SQLScope>,
     expr: &sqlast::Expr,
 ) -> Result<CTypedExpr> {
+    let loc = SourceLocation::File(schema.read()?.file.clone());
     let c_sqlarg =
         |e: &sqlast::Expr| compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), e);
 
     let ret = match expr {
         sqlast::Expr::Value(v) => match v {
             sqlast::Value::Number(n, _) => CTypedExpr {
-                type_: mkcref(MType::Atom(parse_numeric_type(n)?)),
+                type_: mkcref(MType::Atom(loc.clone(), parse_numeric_type(n)?)),
                 expr: mkcref(Expr::SQL(Arc::new(SQL {
                     params: BTreeMap::new(),
                     body: SQLBody::Expr(expr.clone()),
@@ -1125,7 +1139,7 @@ pub fn compile_sqlexpr(
                 }
                 first.type_.clone()
             } else {
-                mkcref(MType::Atom(AtomicType::Null))
+                mkcref(MType::Atom(loc.clone(), AtomicType::Null))
             };
 
             CTypedExpr {
@@ -1338,6 +1352,7 @@ pub fn compile_sqlexpr(
                 _ => {
                     return Err(CompileError::wrong_type(
                         &MType::Fn(MFnType {
+                            loc,
                             args: Vec::new(),
                             ret: MType::new_unknown("ret"),
                         }),
@@ -1349,7 +1364,9 @@ pub fn compile_sqlexpr(
             let mut pos: usize = 0;
             for arg in args {
                 let (name, expr) = match arg {
-                    sqlast::FunctionArg::Named { name, arg } => (name.value.clone(), arg),
+                    sqlast::FunctionArg::Named { name, arg } => {
+                        (Ident::without_location(name.value.clone()), arg)
+                    }
                     sqlast::FunctionArg::Unnamed(arg) => {
                         if pos >= fn_type.args.len() {
                             return Err(CompileError::no_such_entry(vec![
@@ -1381,16 +1398,14 @@ pub fn compile_sqlexpr(
                     }
                 };
 
-                if compiled_args.get(&name).is_some() {
-                    return Err(CompileError::duplicate_entry(vec![
-                        Ident::without_location(name.clone()),
-                    ]));
+                if compiled_args.get(&name.value).is_some() {
+                    return Err(CompileError::duplicate_entry(vec![name]));
                 }
 
                 let compiled_arg =
                     compile_sqlexpr(compiler.clone(), schema.clone(), scope.clone(), &expr)?;
                 compiled_args.insert(
-                    name.clone(),
+                    name.value.clone(),
                     CTypedNameAndExpr {
                         name: name.clone(),
                         type_: compiled_arg.type_,
@@ -1401,7 +1416,7 @@ pub fn compile_sqlexpr(
 
             let mut arg_exprs = Vec::new();
             for arg in &fn_type.args {
-                if let Some(compiled_arg) = compiled_args.get_mut(&arg.name) {
+                if let Some(compiled_arg) = compiled_args.get_mut(&arg.name.value) {
                     arg.type_.unify(&compiled_arg.type_)?;
                     arg_exprs.push(compiled_arg.clone());
                 } else if arg.nullable {
@@ -1414,9 +1429,7 @@ pub fn compile_sqlexpr(
                         expr: NULL.expr.clone(),
                     });
                 } else {
-                    return Err(CompileError::missing_arg(vec![Ident::without_location(
-                        arg.name.clone(),
-                    )]));
+                    return Err(CompileError::missing_arg(vec![arg.name.clone()]));
                 }
             }
 
@@ -1471,7 +1484,7 @@ pub fn compile_sqlexpr(
                         let arg = arg.read()?;
                         args.push(sqlast::FunctionArg::Named {
                             name: sqlast::Ident {
-                                value: arg.name.clone(),
+                                value: arg.name.value.clone(),
                                 quote_style: None,
                             },
                             arg: sqlast::FunctionArgExpr::Expr(arg.sql.body.as_expr()?),
