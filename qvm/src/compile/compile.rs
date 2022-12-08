@@ -4,6 +4,7 @@ use std::path::Path as FilePath;
 use std::sync::Arc;
 
 use crate::ast;
+use crate::ast::ToStrings;
 use crate::compile::builtin_types::GLOBAL_SCHEMA;
 use crate::compile::error::*;
 use crate::compile::inference::*;
@@ -248,14 +249,6 @@ impl Compiler {
 
     pub fn open_file(&self, file_path: &FilePath) -> Result<(Option<String>, ast::Schema)> {
         let parsed_path = FilePath::new(file_path).canonicalize()?;
-        if !parsed_path.exists() {
-            return Err(CompileError::no_such_entry(
-                parsed_path
-                    .components()
-                    .map(|x| format!("{:?}", x))
-                    .collect(),
-            ));
-        }
         let file = parsed_path.to_str().unwrap().to_string();
         let parent_path = parsed_path.parent();
         let folder = match parent_path {
@@ -299,14 +292,14 @@ pub fn lookup_schema(
     schema: Ref<Schema>,
     path: &ast::Path,
 ) -> Result<Ref<ImportedSchema>> {
-    if let Some(s) = schema.read()?.imports.get(path) {
+    if let Some(s) = schema.read()?.imports.get(&path.to_strings()) {
         return Ok(s.clone());
     }
 
     let (k, v) = if let Some(root) = &schema.read()?.folder {
         let mut file_path_buf = FilePath::new(root).to_path_buf();
         for p in path {
-            file_path_buf.push(FilePath::new(p));
+            file_path_buf.push(FilePath::new(&p.value));
         }
         // XXX support .tql
         for extension in SCHEMA_EXTENSIONS.iter() {
@@ -334,7 +327,10 @@ pub fn lookup_schema(
         schema: v.clone(),
     });
 
-    schema.write()?.imports.insert(k, imported.clone());
+    schema
+        .write()?
+        .imports
+        .insert(k.to_strings(), imported.clone());
 
     return Ok(imported);
 }
@@ -352,7 +348,7 @@ pub fn lookup_path(
 
     let mut schema = schema;
     for (i, ident) in path.iter().enumerate() {
-        let new = match schema.read()?.decls.get(ident) {
+        let new = match schema.read()?.decls.get(&ident.value) {
             Some(decl) => {
                 if i > 0 && !decl.public {
                     return Err(CompileError::wrong_kind(path.clone(), "public", decl));
@@ -435,12 +431,12 @@ pub fn resolve_type(
             for e in entries {
                 match e {
                     ast::StructEntry::NameAndType(nt) => {
-                        if seen.contains(&nt.name) {
+                        if seen.contains(&nt.name.value) {
                             return Err(CompileError::duplicate_entry(vec![nt.name.clone()]));
                         }
-                        seen.insert(nt.name.clone());
+                        seen.insert(nt.name.value.clone());
                         fields.push(MField {
-                            name: nt.name.clone(),
+                            name: nt.name.value.clone(),
                             type_: resolve_type(compiler.clone(), schema.clone(), &nt.def)?,
                             nullable: true, /* TODO: implement non-null types */
                         });
@@ -469,7 +465,7 @@ pub fn resolve_global_atom(compiler: Compiler, name: &str) -> Result<CRef<MType>
         compiler.clone(),
         compiler.builtins(),
         &ast::Type {
-            body: ast::TypeBody::Reference(vec![name.to_string()]),
+            body: ast::TypeBody::Reference(vec![Ident::without_location(name.to_string())]),
             start: ast::Location { line: 0, column: 0 },
             end: ast::Location { line: 0, column: 0 },
         },
@@ -497,7 +493,7 @@ impl SType {
     }
 }
 
-pub fn typecheck_path(type_: CRef<MType>, path: &[String]) -> Result<CRef<MType>> {
+pub fn typecheck_path(type_: CRef<MType>, path: &[Ident]) -> Result<CRef<MType>> {
     if path.len() == 0 {
         return Ok(type_);
     }
@@ -507,12 +503,12 @@ pub fn typecheck_path(type_: CRef<MType>, path: &[String]) -> Result<CRef<MType>
 
     type_.then(move |type_: Ref<MType>| match &*type_.read()? {
         MType::Record(fields) => {
-            if let Some(field) = find_field(&fields, name.as_str()) {
+            if let Some(field) = find_field(&fields, name.value.as_str()) {
                 typecheck_path(field.type_.clone(), remainder.as_slice())
             } else {
                 return Err(CompileError::wrong_type(
                     &MType::Record(vec![MField::new_nullable(
-                        name.clone(),
+                        name.value.clone(),
                         MType::new_unknown("field"),
                     )]),
                     &*type_.read()?,
@@ -522,7 +518,7 @@ pub fn typecheck_path(type_: CRef<MType>, path: &[String]) -> Result<CRef<MType>
         _ => {
             return Err(CompileError::wrong_type(
                 &MType::Record(vec![MField::new_nullable(
-                    name.clone(),
+                    name.value.clone(),
                     MType::new_unknown("field"),
                 )]),
                 &*type_.read()?,
@@ -628,7 +624,7 @@ pub fn declare_schema_entry(
     schema: &Ref<Schema>,
     stmt: &ast::Stmt,
 ) -> Result<()> {
-    let entries: Vec<(String, bool, SchemaEntry)> = match &stmt.body {
+    let entries: Vec<(Ident, bool, SchemaEntry)> = match &stmt.body {
         ast::StmtBody::Noop => Vec::new(),
         ast::StmtBody::Expr(_) => Vec::new(),
         ast::StmtBody::Import { path, list, .. } => {
@@ -716,7 +712,7 @@ pub fn declare_schema_entry(
                     ));
                 }
                 ast::ImportList::Star => {
-                    for (k, v) in imported
+                    for (_, v) in imported
                         .read()?
                         .schema
                         .read()?
@@ -729,7 +725,7 @@ pub fn declare_schema_entry(
                             id: None,
                         };
                         imports.push((
-                            k.clone(),
+                            v.name.clone(),
                             false, /* extern_ */
                             rebind_decl(imported_schema, &v)?,
                         ));
@@ -772,36 +768,36 @@ pub fn declare_schema_entry(
         ast::StmtBody::TypeDef(nt) => vec![(
             nt.name.clone(),
             false, /* extern_ */
-            SchemaEntry::Type(MType::new_unknown(nt.name.as_str())),
+            SchemaEntry::Type(MType::new_unknown(nt.name.value.as_str())),
         )],
         ast::StmtBody::FnDef { name, .. } => {
             vec![(
                 name.clone(),
                 false, /* extern_ */
-                SchemaEntry::Expr(STypedExpr::new_unknown(name.as_str())),
+                SchemaEntry::Expr(STypedExpr::new_unknown(name.value.as_str())),
             )]
         }
         ast::StmtBody::Let { name, .. } => {
             vec![(
                 name.clone(),
                 false, /* extern_ */
-                SchemaEntry::Expr(STypedExpr::new_unknown(name.as_str())),
+                SchemaEntry::Expr(STypedExpr::new_unknown(name.value.as_str())),
             )]
         }
         ast::StmtBody::Extern { name, .. } => vec![(
             name.clone(),
             true, /* extern_ */
-            SchemaEntry::Expr(STypedExpr::new_unknown(name.as_str())),
+            SchemaEntry::Expr(STypedExpr::new_unknown(name.value.as_str())),
         )],
     };
 
     for (name, extern_, value) in &entries {
-        if schema.read()?.decls.contains_key(name) {
+        if schema.read()?.decls.contains_key(&name.value) {
             return Err(CompileError::duplicate_entry(vec![name.clone()]));
         }
 
         schema.write()?.decls.insert(
-            name.clone(),
+            name.value.clone(),
             Decl {
                 public: stmt.export,
                 extern_: *extern_,
@@ -896,7 +892,7 @@ pub fn compile_schema_entry(
         ast::StmtBody::Import { .. } => {}
         ast::StmtBody::TypeDef(nt) => {
             let type_ = resolve_type(compiler.clone(), schema.clone(), &nt.def)?;
-            unify_type_decl(schema.clone(), nt.name.as_str(), type_)?;
+            unify_type_decl(schema.clone(), nt.name.value.as_str(), type_)?;
         }
         ast::StmtBody::FnDef {
             name,
@@ -910,39 +906,39 @@ pub fn compile_schema_entry(
 
             for generic in generics {
                 inner_schema.write()?.decls.insert(
-                    generic.clone(),
+                    generic.value.clone(),
                     Decl {
                         public: true,
                         extern_: true,
                         name: generic.clone(),
-                        value: SchemaEntry::Type(mkcref(MType::Name(generic.clone()))),
+                        value: SchemaEntry::Type(mkcref(MType::Name(generic.value.clone()))),
                     },
                 );
             }
 
             let mut compiled_args = Vec::new();
             for arg in args {
-                if inner_schema.read()?.decls.get(&arg.name).is_some() {
+                if inner_schema.read()?.decls.get(&arg.name.value).is_some() {
                     return Err(CompileError::duplicate_entry(vec![name.clone()]));
                 }
                 let type_ = resolve_type(compiler.clone(), inner_schema.clone(), &arg.type_)?;
                 inner_schema.write()?.decls.insert(
-                    arg.name.clone(),
+                    arg.name.value.clone(),
                     Decl {
                         public: true,
                         extern_: true,
                         name: arg.name.clone(),
                         value: SchemaEntry::Expr(STypedExpr {
                             type_: SType::new_mono(type_.clone()),
-                            expr: mkcref(Expr::ContextRef(arg.name.clone())),
+                            expr: mkcref(Expr::ContextRef(arg.name.value.clone())),
                         }),
                     },
                 );
                 inner_schema
                     .write()?
                     .externs
-                    .insert(arg.name.clone(), type_.clone());
-                compiled_args.push(MField::new_nullable(arg.name.clone(), type_.clone()));
+                    .insert(arg.name.value.clone(), type_.clone());
+                compiled_args.push(MField::new_nullable(arg.name.value.clone(), type_.clone()));
             }
 
             let (compiled, is_sql) = match body {
@@ -953,15 +949,15 @@ pub fn compile_schema_entry(
 
                     (
                         CTypedExpr {
-                            type_: MType::new_unknown(&format!("__native('{}')", name)),
-                            expr: mkcref(Expr::NativeFn(name.to_string())),
+                            type_: MType::new_unknown(&format!("__native('{}')", name.value)),
+                            expr: mkcref(Expr::NativeFn(name.value.to_string())),
                         },
                         false,
                     )
                 }
                 ast::FnBody::SQL => (
                     CTypedExpr {
-                        type_: MType::new_unknown(&format!("__sql('{}')", name)),
+                        type_: MType::new_unknown(&format!("__sql('{}')", name.value)),
                         expr: mkcref(Expr::Unknown),
                     },
                     true,
@@ -981,12 +977,12 @@ pub fn compile_schema_entry(
                     args: compiled_args,
                     ret: compiled.type_.clone(),
                 })),
-                BTreeSet::from_iter(generics.clone().into_iter()),
+                BTreeSet::from_iter(generics.to_strings().into_iter()),
             );
 
             unify_expr_decl(
                 schema.clone(),
-                name.as_str(),
+                name.value.as_str(),
                 &STypedExpr {
                     type_: fn_type,
                     expr: compiled.expr.then(move |expr: Ref<Expr<CRef<MType>>>| {
@@ -1010,13 +1006,13 @@ pub fn compile_schema_entry(
             let lhs_type = if let Some(t) = type_ {
                 resolve_type(compiler.clone(), schema.clone(), &t)?
             } else {
-                MType::new_unknown(format!("typeof {}", name).as_str())
+                MType::new_unknown(format!("typeof {}", name.value).as_str())
             };
             let compiled = compile_expr(compiler.clone(), schema.clone(), &body)?;
             lhs_type.unify(&compiled.type_)?;
             unify_expr_decl(
                 schema.clone(),
-                name.as_str(),
+                name.value.as_str(),
                 &STypedExpr {
                     type_: SType::new_mono(lhs_type),
                     expr: compiled.expr,
@@ -1026,7 +1022,7 @@ pub fn compile_schema_entry(
         ast::StmtBody::Extern { name, type_ } => {
             unify_expr_decl(
                 schema.clone(),
-                name.as_str(),
+                name.value.as_str(),
                 &STypedExpr {
                     type_: SType::new_mono(resolve_type(compiler.clone(), schema.clone(), type_)?),
                     expr: mkcref(Expr::Unknown),

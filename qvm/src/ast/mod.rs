@@ -67,26 +67,55 @@ impl SourceLocation {
     }
 }
 
-pub type Ident = String;
+#[derive(Clone, Debug)]
+pub struct Ident {
+    pub loc: SourceLocation,
+    pub value: String,
+}
+
+impl Ident {
+    pub fn with_location(loc: SourceLocation, value: String) -> Ident {
+        Ident { loc, value }
+    }
+
+    pub fn without_location(value: String) -> Ident {
+        Ident {
+            loc: SourceLocation::Unknown,
+            value,
+        }
+    }
+}
 
 pub type Path = Vec<Ident>;
 
-pub trait IntoPath {
+pub trait ToStrings {
+    fn to_strings(&self) -> Vec<String>;
+}
+
+impl ToStrings for Path {
+    fn to_strings(&self) -> Vec<String> {
+        self.iter().map(|i| i.value.clone()).collect()
+    }
+}
+
+pub trait ToPath {
     fn to_path(&self) -> Path;
 }
 
-impl IntoPath for &Vec<sqlast::Ident> {
+impl ToPath for &Vec<sqlast::Ident> {
     fn to_path(&self) -> Path {
         self.iter()
-            .map(|p| match p.quote_style {
-                Some(_) => p.value.clone(), // Preserve the case if the string is quoted
-                None => p.value.to_lowercase(),
+            .map(|p| {
+                Ident::without_location(match p.quote_style {
+                    Some(_) => p.value.clone(), // Preserve the case if the string is quoted
+                    None => p.value.to_lowercase(),
+                })
             })
             .collect()
     }
 }
 
-impl IntoPath for &sqlast::ObjectName {
+impl ToPath for &sqlast::ObjectName {
     fn to_path(&self) -> Path {
         (&self.0).to_path()
     }

@@ -1,6 +1,7 @@
 use lazy_static::lazy_static;
 use std::collections::BTreeMap;
 
+use crate::ast::Ident;
 use crate::compile::compile::Compiler;
 use crate::compile::inference::mkcref;
 use crate::compile::schema::{Decl, MType, Ref, Schema, SchemaEntry};
@@ -64,7 +65,7 @@ lazy_static! {
             Decl {
                 public: true,
                 extern_: false,
-                name: name.to_string(),
+                name: Ident::without_location(name.to_string()),
                 value: SchemaEntry::Type(mkcref(MType::Atom(type_.clone()))),
             },
         ))

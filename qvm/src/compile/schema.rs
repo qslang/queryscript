@@ -153,7 +153,9 @@ impl MType {
             })),
             MType::Name(n) => variables
                 .get(n)
-                .ok_or_else(|| CompileError::no_such_entry(vec![n.clone()]))?
+                .ok_or_else(|| {
+                    CompileError::no_such_entry(vec![Ident::without_location(n.clone())])
+                })?
                 .clone(),
         };
 
@@ -427,7 +429,7 @@ impl SchemaInstance {
 
 pub type Value = crate::types::Value;
 
-pub type Params<TypeRef> = BTreeMap<ast::Ident, TypedExpr<TypeRef>>;
+pub type Params<TypeRef> = BTreeMap<String, TypedExpr<TypeRef>>;
 
 #[derive(Clone)]
 pub enum SQLBody {
@@ -683,7 +685,7 @@ pub fn mkref<T>(t: T) -> Ref<T> {
 pub struct Decl {
     pub public: bool,
     pub extern_: bool,
-    pub name: String,
+    pub name: Ident,
     pub value: SchemaEntry,
 }
 
@@ -719,7 +721,7 @@ pub struct Schema {
     pub parent_scope: Option<Ref<Schema>>,
     pub externs: BTreeMap<String, CRef<MType>>,
     pub decls: BTreeMap<String, Decl>,
-    pub imports: BTreeMap<ast::Path, Ref<ImportedSchema>>,
+    pub imports: BTreeMap<Vec<String>, Ref<ImportedSchema>>,
     pub exprs: Vec<CTypedExpr>,
 }
 

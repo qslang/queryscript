@@ -5,7 +5,7 @@ use std::collections::{btree_map, BTreeMap};
 use std::fmt;
 use std::sync::Arc;
 
-use crate::ast::IntoPath;
+use crate::ast::ToPath;
 use crate::compile::compile::{coerce, lookup_path, resolve_global_atom, typecheck_path, Compiler};
 use crate::compile::error::{CompileError, Result};
 use crate::compile::inference::*;
@@ -120,7 +120,9 @@ pub fn compile_sqlreference(
                                     }))),
                                 }))
                             } else {
-                                Err(CompileError::duplicate_entry(vec![name.clone()]))
+                                Err(CompileError::duplicate_entry(vec![
+                                    Ident::without_location(name.clone()),
+                                ]))
                             }
                         } else {
                             // If it doesn't match any names of fields in SQL relations,
@@ -148,7 +150,10 @@ pub fn compile_sqlreference(
             //
             if let Some(relation) = scope.read()?.relations.get(&relation_name) {
                 let rowtype = get_rowtype(compiler.clone(), relation.type_.clone())?;
-                let type_ = typecheck_path(rowtype, vec![field_name].as_slice())?;
+                let type_ = typecheck_path(
+                    rowtype,
+                    vec![Ident::without_location(field_name)].as_slice(),
+                )?;
                 let expr = mkcref(Expr::SQL(Arc::new(SQL {
                     params: BTreeMap::new(),
                     body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
@@ -172,7 +177,7 @@ pub fn compile_sqlreference(
 pub fn compile_reference(
     compiler: Compiler,
     schema: Ref<Schema>,
-    path: &Vec<String>,
+    path: &Vec<Ident>,
 ) -> Result<TypedExpr<CRef<MType>>> {
     let (_, decl, remainder) = lookup_path(
         compiler.clone(),
@@ -212,7 +217,7 @@ pub fn compile_reference(
             };
             let mut full_name = vec![placeholder_name.clone()];
             full_name.extend(remainder.clone().into_iter().map(|n| sqlast::Ident {
-                value: n,
+                value: n.value,
                 quote_style: None,
             }));
 
@@ -436,7 +441,9 @@ pub fn compile_relation(
             };
             match scope.write()?.relations.entry(name.clone()) {
                 btree_map::Entry::Occupied(_) => {
-                    return Err(CompileError::duplicate_entry(vec![name]))
+                    return Err(CompileError::duplicate_entry(vec![
+                        Ident::without_location(name),
+                    ]))
                 }
                 btree_map::Entry::Vacant(e) => {
                     let relation = e.insert(relation).clone();
@@ -720,9 +727,9 @@ pub fn compile_select(
                             let type_ = match &m.type_ {
                                 Some(t) => t.clone(),
                                 None => {
-                                    return Err(CompileError::duplicate_entry(vec![m
-                                        .field
-                                        .clone()]))
+                                    return Err(CompileError::duplicate_entry(vec![
+                                        Ident::without_location(m.field.clone()),
+                                    ]))
                                 }
                             };
                             ret.push(CTypedNameAndSQL {
@@ -1345,10 +1352,9 @@ pub fn compile_sqlexpr(
                     sqlast::FunctionArg::Named { name, arg } => (name.value.clone(), arg),
                     sqlast::FunctionArg::Unnamed(arg) => {
                         if pos >= fn_type.args.len() {
-                            return Err(CompileError::no_such_entry(vec![format!(
-                                "argument {}",
-                                pos
-                            )]));
+                            return Err(CompileError::no_such_entry(vec![
+                                Ident::without_location(format!("argument {}", pos)),
+                            ]));
                         }
                         pos += 1;
                         (fn_type.args[pos - 1].name.clone(), arg)
@@ -1361,7 +1367,7 @@ pub fn compile_sqlexpr(
                     | sqlast::FunctionArgExpr::QualifiedWildcard(_) => {
                         // Wildcards (qualified or not) are only supported for certain functions
                         // (count as far as we know, and potentially others).
-                        match func_name.as_slice().first().map(|s| s.as_str()) {
+                        match func_name.as_slice().first().map(|s| s.value.as_str()) {
                             Some("count") => Cow::Owned(sqlast::Expr::Value(
                                 sqlast::Value::Number("1".to_string(), false),
                             )),
@@ -1376,7 +1382,9 @@ pub fn compile_sqlexpr(
                 };
 
                 if compiled_args.get(&name).is_some() {
-                    return Err(CompileError::duplicate_entry(vec![name.clone()]));
+                    return Err(CompileError::duplicate_entry(vec![
+                        Ident::without_location(name.clone()),
+                    ]));
                 }
 
                 let compiled_arg =
@@ -1406,7 +1414,9 @@ pub fn compile_sqlexpr(
                         expr: NULL.expr.clone(),
                     });
                 } else {
-                    return Err(CompileError::missing_arg(vec![arg.name.clone()]));
+                    return Err(CompileError::missing_arg(vec![Ident::without_location(
+                        arg.name.clone(),
+                    )]));
                 }
             }
 

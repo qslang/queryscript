@@ -1,5 +1,7 @@
 use rustyline::{completion::*, highlight::*, hint::*, validate::*, Context, Helper, Result};
 
+use qvm::ast;
+use qvm::ast::ToStrings;
 use qvm::compile;
 use qvm::compile::schema;
 use qvm::parser;
@@ -80,10 +82,10 @@ fn loc_to_pos(text: &str, loc: parser::Location) -> usize {
         - 1
 }
 
-fn parse_longest_path(texts: &Vec<String>) -> Vec<String> {
+fn parse_longest_path(texts: &Vec<String>) -> Vec<ast::Ident> {
     texts
         .iter()
-        .fold::<Vec<String>, _>(Vec::new(), |acc, item| {
+        .fold::<Vec<ast::Ident>, _>(Vec::new(), |acc, item| {
             let parsed = if item.is_empty() {
                 Vec::new()
             } else {
@@ -103,7 +105,7 @@ fn parse_longest_path(texts: &Vec<String>) -> Vec<String> {
 fn get_imported_decls<F: FnMut(&schema::SchemaEntry) -> bool>(
     compiler: compile::Compiler,
     schema: schema::Ref<schema::Schema>,
-    path: &Vec<String>,
+    path: &Vec<ast::Ident>,
     mut f: F,
 ) -> compile::Result<Vec<String>> {
     let (schema, _, remainder) = compile::lookup_path(compiler, schema.clone(), path, true, true)?;
@@ -120,11 +122,11 @@ fn get_imported_decls<F: FnMut(&schema::SchemaEntry) -> bool>(
 
 fn get_schema_paths(
     schema: schema::Ref<schema::Schema>,
-    path: &Vec<String>,
+    path: &Vec<ast::Ident>,
 ) -> compile::Result<Vec<String>> {
     if let Some(folder) = schema.read()?.folder.clone() {
         let mut folder = Path::new(&folder).to_path_buf();
-        folder.extend(path.iter());
+        folder.extend(path.to_strings().iter());
         let files = read_dir(folder)?;
         let mut ret = Vec::new();
         for f in files {
@@ -151,7 +153,7 @@ fn get_schema_paths(
 fn get_record_fields(
     compiler: compile::Compiler,
     schema: schema::Ref<schema::Schema>,
-    path: &Vec<String>,
+    path: &Vec<ast::Ident>,
 ) -> compile::Result<Vec<String>> {
     let expr = compile::compile_reference(compiler.clone(), schema.clone(), path)?;
     let type_ = expr.type_.must()?.read()?.clone();
