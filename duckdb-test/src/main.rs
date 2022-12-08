@@ -19,9 +19,13 @@ use std::time::Instant;
 
 mod duckdbcpp;
 
-// This follows suggestion [B] outlined in
-// https://blog.knoldus.com/safe-way-to-access-private-fields-in-rust/
-// to access the fields inside of Connection.
+// These structs are copied from the duckdb-rs library. If we change the pinned
+// version of duckdb-rs (0.6.0), we should manually update these definitions,
+// otherwise the transmute call below will result in undefined behavior.
+//
+// In addition to these declarations, we've also copied some declarations from
+// duckdb.cpp (in duckdb-extra.cc) and the whole duckdb.hpp file (committed directly),
+// that we should update too.
 #[allow(unused)]
 mod duckdb_repr {
     use arrow::datatypes::SchemaRef;
@@ -204,6 +208,9 @@ fn main() -> Result<()> {
     eprintln!("arrow stuff {:?}", now.elapsed());
 
     unsafe {
+        // This follows suggestion [B] outlined in
+        // https://blog.knoldus.com/safe-way-to-access-private-fields-in-rust/
+        // to access the fields inside of Connection.
         let conn: &duckdb_repr::Connection = std::mem::transmute(&conn);
 
         let db_wrapper = conn.db.borrow();

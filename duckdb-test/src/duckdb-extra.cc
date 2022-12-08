@@ -35,6 +35,14 @@ Value *duckdb_create_pointer(uint32_t *value)
     return (Value *)new duckdb::Value(val);
 }
 
+// These declarations are copied from duckdb.cpp (the file included within duckdb-rs,
+// pinned to version 0.6.0). They are re-declared here so that we can reference them
+// in the redeclaration of the arrow_scan function as arrow_scan_qvm.
+//
+// If we update duckdb-rs, we should manually update these declarations to make sure they
+// align with duckdb.cpp, otherwise we may see undefined behavior. Of note, ArrowTableFunction
+// is a struct comprised only of static functions (no state) and we've only copied the relevant
+// subset of its declarations.
 namespace duckdb
 {
     //===--------------------------------------------------------------------===//
