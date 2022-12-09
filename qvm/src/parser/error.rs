@@ -1,8 +1,8 @@
 use snafu::{Backtrace, Snafu};
 use std::fmt;
 pub type Result<T> = std::result::Result<T, ParserError>;
-use crate::ast::Location;
 pub use crate::ast::SourceLocation as ErrorLocation;
+use crate::ast::{Location, Pretty};
 use colored::*;
 
 pub trait PrettyError: ToString {

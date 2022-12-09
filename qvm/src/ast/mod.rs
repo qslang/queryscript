@@ -3,6 +3,10 @@ use sqlparser::ast as sqlast;
 
 pub use sqlparser::tokenizer::Location;
 
+pub trait Pretty {
+    fn pretty(&self) -> String;
+}
+
 #[derive(Clone, Debug)]
 pub enum SourceLocation {
     Unknown,
@@ -54,8 +58,10 @@ impl SourceLocation {
 
         Some(lines.join("\n"))
     }
+}
 
-    pub fn pretty(&self) -> String {
+impl Pretty for SourceLocation {
+    fn pretty(&self) -> String {
         match self {
             SourceLocation::Unknown => "<qvm>".white().bold().to_string(),
             SourceLocation::File(f) => f.clone().white().bold().to_string(),
@@ -90,9 +96,26 @@ impl Ident {
             value,
         }
     }
+
+    pub fn to_sqlident(&self) -> sqlast::Ident {
+        sqlast::Ident {
+            value: self.value.clone(),
+            quote_style: Some('\"'),
+        }
+    }
 }
 
 pub type Path = Vec<Ident>;
+
+impl Pretty for Path {
+    fn pretty(&self) -> String {
+        sqlast::ObjectName(self.iter().map(|i| i.to_sqlident()).collect())
+            .to_string()
+            .white()
+            .bold()
+            .to_string()
+    }
+}
 
 pub trait ToStrings {
     fn to_strings(&self) -> Vec<String>;

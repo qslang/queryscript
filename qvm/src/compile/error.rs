@@ -1,9 +1,11 @@
 use crate::ast;
+use crate::ast::Pretty;
 use crate::compile::schema::{Decl, MType};
 pub use crate::parser::error::ErrorLocation;
 use crate::parser::error::{ParserError, PrettyError};
 use crate::runtime::error::RuntimeError;
 use crate::types::error::TypesystemError;
+use colored::*;
 use snafu::{Backtrace, Snafu};
 use std::io;
 
@@ -59,29 +61,29 @@ pub enum CompileError {
         loc: ErrorLocation,
     },
 
-    #[snafu(display("Missing argument: {:?}", path))]
+    #[snafu(display("Missing argument: {}", path.pretty()))]
     MissingArg {
         path: ast::Path,
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("Duplicate entry: {:?}", path))]
+    #[snafu(display("Duplicate entry: {}", path.pretty()))]
     DuplicateEntry {
         path: ast::Path,
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("No such entry: {:?}", path))]
+    #[snafu(display("No such entry: {}", path.pretty()))]
     NoSuchEntry {
         path: ast::Path,
         backtrace: Option<Backtrace>,
     },
 
     #[snafu(display(
-        "Wrong kind: declaration at {:?} is {:?} not {}",
-        path,
+        "Wrong kind: declaration at {} is {:?} not {}",
+        path.pretty(),
         actual,
-        expected
+        expected.white().bold(),
     ))]
     WrongKind {
         path: ast::Path,
@@ -105,7 +107,7 @@ pub enum CompileError {
         loc: ErrorLocation,
     },
 
-    #[snafu(display("Error importing {:?}: {}", path, what))]
+    #[snafu(display("Error importing {}: {}", path.pretty(), what))]
     ImportError {
         path: ast::Path,
         what: String,
