@@ -1,3 +1,5 @@
+use crate::ast::Pretty;
+use colored::*;
 pub use datafusion::arrow::datatypes::DataType as ArrowDataType;
 use snafu::prelude::*;
 use sqlparser::ast as sqlast;
@@ -193,6 +195,12 @@ impl MType {
             MType::Fn(t) => t.loc.clone(),
             MType::Name(t) => t.loc.clone(),
         }
+    }
+}
+
+impl Pretty for MType {
+    fn pretty(&self) -> String {
+        format!("{:?}", self).white().bold().to_string()
     }
 }
 
@@ -736,6 +744,16 @@ pub enum SchemaEntry {
     Schema(ast::Path),
     Type(CRef<MType>),
     Expr(STypedExpr),
+}
+
+impl SchemaEntry {
+    pub fn kind(&self) -> String {
+        match self {
+            SchemaEntry::Schema(_) => "schema".to_string(),
+            SchemaEntry::Type(_) => "type".to_string(),
+            SchemaEntry::Expr(_) => "value".to_string(),
+        }
+    }
 }
 
 pub fn mkref<T>(t: T) -> Ref<T> {

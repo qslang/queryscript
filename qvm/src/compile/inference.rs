@@ -123,7 +123,11 @@ impl<T: Constrainable> fmt::Debug for Constrained<T> {
         match self {
             Constrained::Known(t) => t.read().unwrap().fmt(f),
             Constrained::Unknown { debug_names, .. } => {
-                f.write_str(format!("Unknown({:?})", debug_names).as_str())
+                if debug_names.len() > 0 {
+                    f.write_str(format!("?{}?", debug_names[0]).as_str())
+                } else {
+                    f.write_str("?")
+                }
             }
             Constrained::Ref(r) => r.fmt(f),
         }

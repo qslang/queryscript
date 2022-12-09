@@ -80,10 +80,10 @@ pub enum CompileError {
     },
 
     #[snafu(display(
-        "Wrong kind: declaration at {} is {:?} not {}",
-        path.pretty(),
-        actual,
+        "Wrong kind: expected {} declaration at {}, found {}",
         expected.white().bold(),
+        path.pretty(),
+        actual.value.kind().white().bold(),
     ))]
     WrongKind {
         path: ast::Path,
@@ -92,14 +92,14 @@ pub enum CompileError {
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("Type mismatch: found {:?} not {:?}", rhs, lhs))]
+    #[snafu(display("Type mismatch: found {} not {}", rhs.pretty(), lhs.pretty()))]
     WrongType {
         lhs: MType,
         rhs: MType,
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("Types cannot be coerced: {:?} and {:?}", lhs, rhs))]
+    #[snafu(display("Types cannot be coerced: {} and {}", lhs.pretty(), rhs.pretty()))]
     CoercionError {
         lhs: MType,
         rhs: MType,
