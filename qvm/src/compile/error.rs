@@ -186,20 +186,32 @@ pub fn path_location(path: &Vec<ast::Ident>) -> ErrorLocation {
     }
 
     let (start_file, start) = match &path[0].loc {
-        ErrorLocation::Range(file, start, _) => (file, start),
-        t => return t.clone(),
+        ErrorLocation::Range(file, start, _) => (file, Some(start)),
+        ErrorLocation::Single(file, _) => (file, None),
+        ErrorLocation::File(file) => (file, None),
+        ErrorLocation::Unknown => return ErrorLocation::Unknown,
     };
 
-    let (end_file, end) = match &path[0].loc {
-        ErrorLocation::Range(file, _, end) => (file, end),
-        t => return t.clone(),
+    let (end_file, end) = match &path[path.len() - 1].loc {
+        ErrorLocation::Range(file, _, end) => (file, Some(end)),
+        ErrorLocation::Single(file, _) => (file, None),
+        ErrorLocation::File(file) => (file, None),
+        ErrorLocation::Unknown => return ErrorLocation::Unknown,
     };
 
     if start_file != end_file {
         return ErrorLocation::Unknown;
     }
 
-    ErrorLocation::Range(start_file.clone(), start.clone(), end.clone())
+    if start.is_none() || end.is_none() {
+        return ErrorLocation::File(start_file.clone());
+    }
+
+    ErrorLocation::Range(
+        start_file.clone(),
+        start.unwrap().clone(),
+        end.unwrap().clone(),
+    )
 }
 
 impl PrettyError for CompileError {
