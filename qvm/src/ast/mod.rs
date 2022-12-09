@@ -99,25 +99,33 @@ impl ToStrings for Path {
 }
 
 pub trait ToPath {
-    fn to_path(&self) -> Path;
+    fn to_path(&self, loc: &SourceLocation) -> Path;
 }
 
 impl ToPath for &Vec<sqlast::Ident> {
-    fn to_path(&self) -> Path {
+    fn to_path(&self, loc: &SourceLocation) -> Path {
         self.iter()
             .map(|p| {
-                Ident::without_location(match p.quote_style {
-                    Some(_) => p.value.clone(), // Preserve the case if the string is quoted
-                    None => p.value.to_lowercase(),
-                })
+                // XXX: This is wrong, since we're putting the same location onto each element of
+                // the path.  Given that we don't actually know whether the location passed in here
+                // is correct anyway, this is the safest way to ensure that the overall location is
+                // preserved.
+                //
+                Ident::with_location(
+                    loc.clone(),
+                    match p.quote_style {
+                        Some(_) => p.value.clone(), // Preserve the case if the string is quoted
+                        None => p.value.to_lowercase(),
+                    },
+                )
             })
             .collect()
     }
 }
 
 impl ToPath for &sqlast::ObjectName {
-    fn to_path(&self) -> Path {
-        (&self.0).to_path()
+    fn to_path(&self, loc: &SourceLocation) -> Path {
+        (&self.0).to_path(loc)
     }
 }
 

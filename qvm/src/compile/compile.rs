@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::ast;
 use crate::ast::{SourceLocation, ToStrings};
-use crate::compile::builtin_types::GLOBAL_SCHEMA;
+use crate::compile::builtin_types::{BUILTIN_LOC, GLOBAL_SCHEMA};
 use crate::compile::error::*;
 use crate::compile::inference::*;
 use crate::compile::schema::*;
@@ -458,7 +458,10 @@ pub fn resolve_global_atom(compiler: Compiler, name: &str) -> Result<CRef<MType>
         compiler.clone(),
         compiler.builtins(),
         &ast::Type {
-            body: ast::TypeBody::Reference(vec![Ident::without_location(name.to_string())]),
+            body: ast::TypeBody::Reference(vec![Ident::with_location(
+                BUILTIN_LOC.clone(),
+                name.to_string(),
+            )]),
             start: ast::Location { line: 0, column: 0 },
             end: ast::Location { line: 0, column: 0 },
         },
@@ -531,11 +534,24 @@ pub fn compile_expr(
     schema: Ref<Schema>,
     expr: &ast::Expr,
 ) -> Result<CTypedExpr> {
+    let loc = SourceLocation::Range(
+        schema.read()?.file.clone(),
+        expr.start.clone(),
+        expr.end.clone(),
+    );
     match &expr.body {
-        ast::ExprBody::SQLQuery(q) => Ok(compile_sqlquery(compiler.clone(), schema.clone(), q)?),
+        ast::ExprBody::SQLQuery(q) => {
+            Ok(compile_sqlquery(compiler.clone(), schema.clone(), &loc, q)?)
+        }
         ast::ExprBody::SQLExpr(e) => {
             let scope = mkref(SQLScope::new(None));
-            Ok(compile_sqlexpr(compiler.clone(), schema.clone(), scope, e)?)
+            Ok(compile_sqlexpr(
+                compiler.clone(),
+                schema.clone(),
+                scope,
+                &loc,
+                e,
+            )?)
         }
     }
 }

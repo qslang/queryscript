@@ -58,6 +58,7 @@ fn sum<R>(value R) -> R = sql;
 ";
 
 lazy_static! {
+    pub static ref BUILTIN_LOC: SourceLocation = SourceLocation::File("<builtin>".to_string());
     static ref BUILTIN_TYPE_DECLS: Vec<(String, Decl)> = BUILTIN_TYPES
         .iter()
         .map(|(name, type_)| (
@@ -65,11 +66,8 @@ lazy_static! {
             Decl {
                 public: true,
                 extern_: false,
-                name: Ident::without_location(name.to_string()),
-                value: SchemaEntry::Type(mkcref(MType::Atom(
-                    SourceLocation::File("<builtin>".to_string()),
-                    type_.clone()
-                ))),
+                name: Ident::with_location(BUILTIN_LOC.clone(), name.to_string()),
+                value: SchemaEntry::Type(mkcref(MType::Atom(BUILTIN_LOC.clone(), type_.clone()))),
             },
         ))
         .collect();
