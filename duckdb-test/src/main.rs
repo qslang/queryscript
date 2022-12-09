@@ -1,4 +1,3 @@
-use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
 use duckdb::{params, Connection, Result};
 
 // In your project, we need to keep the arrow version same as the version used in duckdb.
@@ -13,8 +12,7 @@ use duckdb::arrow::record_batch::RecordBatch;
 use duckdb::arrow::util::pretty::print_batches;
 
 use duckdb::ffi;
-use std::ffi::{c_char, c_void, CStr, CString};
-use std::ptr;
+use std::ffi::{c_char, c_void, CString};
 use std::time::Instant;
 
 mod duckdbcpp;
@@ -79,7 +77,7 @@ pub extern "C" fn get_schema(data: *mut u32, schema_ptr: *mut u32) {
     eprintln!("IN GET_SCHEMA");
     let rbs = unsafe { &mut *(data as *mut Vec<RecordBatch>) };
     let first = rbs[0].schema();
-    let schema_c = unsafe { arrow::ffi::FFI_ArrowSchema::try_from(first.as_ref()) };
+    let schema_c = arrow::ffi::FFI_ArrowSchema::try_from(first.as_ref());
     let schema_c = match schema_c {
         Ok(s) => s,
         Err(e) => {
@@ -96,14 +94,16 @@ pub extern "C" fn get_schema(data: *mut u32, schema_ptr: *mut u32) {
 #[no_mangle]
 pub unsafe extern "C" fn replacement_scan_callback(
     info: ffi::duckdb_replacement_scan_info,
-    table_name: *const c_char,
+    _table_name: *const c_char,
     data: *mut c_void,
 ) {
+    /*
     let c_str: &CStr = unsafe { CStr::from_ptr(table_name) };
     let str_slice: &str = match c_str.to_str() {
         Ok(s) => s,
         Err(_e) => return,
     };
+    */
 
     let rbs = unsafe { &mut *(data as *mut Vec<RecordBatch>) };
     eprintln!("PRINTING FROM CALLBACK");

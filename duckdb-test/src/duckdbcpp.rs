@@ -1,8 +1,7 @@
-use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
+use arrow::ffi::FFI_ArrowSchema;
 use arrow::record_batch::RecordBatchReader;
 use cxx::{CxxString, CxxVector};
 use duckdb::arrow::record_batch::RecordBatch;
-use duckdb::arrow::util::pretty::print_batches;
 
 #[cxx::bridge]
 pub mod bridge {

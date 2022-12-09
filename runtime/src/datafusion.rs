@@ -1,16 +1,8 @@
-use datafusion::arrow::datatypes::{
-    DataType as DFDataType, Schema as DFSchema, SchemaRef as DFSchemaRef,
-};
-use datafusion::common::{DataFusionError, Result as DFResult, ScalarValue};
+use datafusion::arrow::datatypes::Schema as DFSchema;
+use datafusion::common::{DataFusionError, Result as DFResult};
 use datafusion::datasource::memory::MemTable;
-use datafusion::execution::context::{SessionConfig, SessionContext};
-use datafusion::execution::runtime_env::RuntimeEnv;
-use datafusion::logical_expr::{LogicalPlan, TableSource};
-use datafusion::physical_expr::var_provider::{VarProvider, VarType};
-use datafusion::physical_plan::collect;
-use datafusion::sql::planner::SqlToRel;
-use sqlparser::ast as sqlast;
-use std::{any::Any, collections::HashMap, sync::Arc};
+use datafusion::execution::context::SessionContext;
+use std::sync::Arc;
 
 use crate::types::Value;
 impl crate::SQLParam {

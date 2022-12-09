@@ -1,5 +1,3 @@
-#pragma once
-
 #include <iostream>
 #include "duckdb-test/include/duckdb-extra.hpp"
 #include "duckdb-test/src/duckdbcpp.rs.h"
