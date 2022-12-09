@@ -12,10 +12,10 @@ pub enum SourceLocation {
 }
 
 impl SourceLocation {
-    pub fn annotate(&self, code: &str) -> String {
+    pub fn annotate(&self, code: &str) -> Option<String> {
         let lines = code.lines().collect::<Vec<_>>();
         let (start_col, end_col, lines) = match self {
-            SourceLocation::Unknown | SourceLocation::File(_) => (0, 0, &lines[0..0]),
+            SourceLocation::Unknown | SourceLocation::File(_) => return None,
             SourceLocation::Single(_, l) => (
                 l.column,
                 l.column,
@@ -27,7 +27,12 @@ impl SourceLocation {
                 &lines[s.line as usize - 1..e.line as usize],
             ),
         };
+
         let num_lines = lines.len();
+        if num_lines == 0 {
+            return None;
+        }
+
         let lines = lines
             .iter()
             .enumerate()
@@ -46,7 +51,8 @@ impl SourceLocation {
                 ]
             })
             .collect::<Vec<_>>();
-        lines.join("\n")
+
+        Some(lines.join("\n"))
     }
 
     pub fn pretty(&self) -> String {

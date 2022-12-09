@@ -19,7 +19,12 @@ pub trait PrettyError: ToString {
     }
 
     fn pretty_with_code(&self, code: &str) -> String {
-        format!("{}\n\n{}", self.pretty(), self.location().annotate(code))
+        let pretty = self.pretty();
+        if let Some(annotated) = self.location().annotate(code) {
+            format!("{}\n\n{}", pretty, annotated)
+        } else {
+            pretty
+        }
     }
 }
 
