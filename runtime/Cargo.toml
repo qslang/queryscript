@@ -1,0 +1,33 @@
+[package]
+name = "runtime"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = "0.1"
+dyn-clone = "1.0.9"
+half = "2.1"
+object_store = "0.5.0"
+tabled = "0.10"
+snafu = { version = "0.7.3" }
+sqlparser = { path = "../sqlparser-rs" }
+
+# TODO: We should put each database dependency runtime behind a feature flag
+# DuckDB.
+duckdb = { version = "0.6.0", features = ["bundled"] }
+cxx = "1.0"
+# These are duckdb dependencies that we access directly
+arrow = { version = "*", default-features = false, features = [
+    "prettyprint",
+    "ffi",
+] }
+hashlink = { version = "*" }
+
+# Datafusion
+datafusion = { path = "../arrow-datafusion/datafusion/core" } # XXX Can we remove?
+arrow-buffer = "26.0.0"                                       # This has to be tracked with datafusion
+
+[build-dependencies]
+cxx-build = "1.0"

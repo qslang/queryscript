@@ -1,8 +1,8 @@
-pub use crate::parser::error::ErrorLocation;
 use object_store;
 use snafu::{Backtrace, GenerateImplicitData, Snafu};
 use std::num::ParseFloatError;
 use std::sync::Arc;
+
 pub type Result<T> = std::result::Result<T, RuntimeError>;
 
 #[derive(Debug, Snafu)]
@@ -76,7 +76,7 @@ impl From<datafusion::common::DataFusionError> for RuntimeError {
     }
 }
 
-#[allow(unused_macros)]
+#[macro_export]
 macro_rules! fail {
     ($base: expr $(, $args:expr)* $(,)?) => {
         crate::runtime::error::StringSnafu {
@@ -85,10 +85,9 @@ macro_rules! fail {
     };
 }
 
-#[allow(unused_imports)]
-pub(crate) use fail;
+pub use fail;
 
-#[allow(unused_macros)]
+#[macro_export]
 macro_rules! rt_unimplemented {
     ($base: expr $(, $args:expr)* $(,)?) => {
         crate::runtime::error::UnimplementedSnafu {
@@ -97,5 +96,4 @@ macro_rules! rt_unimplemented {
     };
 }
 
-#[allow(unused_imports)]
-pub(crate) use rt_unimplemented;
+pub use rt_unimplemented;

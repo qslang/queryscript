@@ -4,6 +4,7 @@ pub mod error;
 pub mod parser;
 pub mod runtime;
 pub mod tests;
-pub mod types;
+
+pub use ::runtime::types;
 
 pub use error::QVMError;

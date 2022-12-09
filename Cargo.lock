@@ -2506,12 +2506,11 @@ dependencies = [
  "datafusion",
  "difference",
  "dyn-clone",
- "half 2.1.0",
  "lazy_static",
  "object_store",
+ "runtime",
  "snafu",
  "sqlparser",
- "tabled",
  "tokio",
 ]
 
@@ -2728,6 +2727,26 @@ dependencies = [
  "quote",
  "rustc_version",
  "syn",
+]
+
+[[package]]
+name = "runtime"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "arrow-buffer",
+ "async-trait",
+ "cxx",
+ "cxx-build",
+ "datafusion",
+ "duckdb",
+ "dyn-clone",
+ "half 2.1.0",
+ "hashlink",
+ "object_store",
+ "snafu",
+ "sqlparser",
+ "tabled",
 ]
 
 [[package]]

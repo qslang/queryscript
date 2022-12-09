@@ -94,9 +94,9 @@ pub trait FnValue: fmt::Debug + DynClone + Send + Sync {
     // runtime trait if we separate the runtime crate.
     fn execute(
         &self,
-        ctx: &crate::runtime::context::Context,
+        ctx: &crate::context::Context,
         args: Vec<Value>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::runtime::error::Result<Value>>>>;
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::error::Result<Value>>>>;
     fn fn_type(&self) -> FnType;
     fn as_any(&self) -> &dyn Any;
 }

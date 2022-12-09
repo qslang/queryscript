@@ -1,4 +1,3 @@
-use crate::compile::schema;
 use crate::types::Value;
 use std::collections::BTreeMap;
 
@@ -8,14 +7,4 @@ use std::collections::BTreeMap;
 pub struct Context {
     pub folder: Option<String>,
     pub values: BTreeMap<String, Value>,
-}
-
-impl From<&schema::SchemaRef> for Context {
-    fn from(schema: &schema::SchemaRef) -> Self {
-        let schema = schema.read().unwrap();
-        Context {
-            folder: schema.folder.clone(),
-            values: BTreeMap::new(),
-        }
-    }
 }

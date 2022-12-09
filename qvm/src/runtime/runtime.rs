@@ -1,10 +1,10 @@
-use super::context::Context;
 use super::sql::SQLParam;
 use crate::compile::schema;
 use crate::runtime::error::*;
 use crate::types;
 use crate::types::{Arc, Value};
-use std::collections::HashMap;
+use ::runtime::context::Context;
+use std::collections::{BTreeMap, HashMap};
 
 type TypeRef = schema::Ref<types::Type>;
 
@@ -30,6 +30,14 @@ pub async fn eval_params<'a>(
     }
 
     Ok(param_values)
+}
+
+pub fn build_context(schema: &schema::SchemaRef) -> Context {
+    let schema = schema.read().unwrap();
+    Context {
+        folder: schema.folder.clone(),
+        values: BTreeMap::new(),
+    }
 }
 
 pub fn eval<'a>(

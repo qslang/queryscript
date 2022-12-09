@@ -6,9 +6,6 @@ use sqlparser::ast::{
 };
 
 use super::error::{ts_fail, ts_unimplemented, Result};
-use crate::ast;
-
-pub type Ident = ast::Ident;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Type {

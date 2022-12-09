@@ -143,7 +143,7 @@ fn run_file(
         return Ok(());
     }
 
-    let ctx = (&schema).into();
+    let ctx = qvm::runtime::build_context(&schema);
     let locked_schema = schema.read()?;
     for expr in locked_schema.exprs.iter() {
         let expr = expr.to_runtime_type().context(RuntimeSnafu {

@@ -83,7 +83,7 @@ mod tests {
                     continue;
                 }
             };
-            let async_ctx = (&schema).into();
+            let async_ctx = crate::runtime::build_context(&schema);
             let async_expr = expr.clone();
 
             let value =
