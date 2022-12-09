@@ -36,7 +36,14 @@ impl<V> CompileResult<V> {
     }
 
     pub fn add_error(&mut self, idx: Option<usize>, error: CompileError) {
-        self.errors.push((idx, error))
+        match error {
+            CompileError::Multiple { sources } => {
+                for source in sources {
+                    self.add_error(idx, source);
+                }
+            }
+            _ => self.errors.push((idx, error)),
+        }
     }
 
     pub fn absorb<U>(&mut self, other: CompileResult<U>) -> U {
@@ -60,7 +67,9 @@ impl<V> CompileResult<V> {
     pub fn as_result(mut self) -> Result<V> {
         match self.errors.len() {
             0 => Ok(self.result),
-            _ => Err(self.errors.drain(0..1).next().unwrap().1),
+            _ => Err(CompileError::Multiple {
+                sources: self.errors.drain(..).map(|e| e.1).collect(),
+            }),
         }
     }
 }
@@ -264,15 +273,15 @@ impl Compiler {
         ))
     }
 
-    pub fn file_contents(&self, path: &str) -> Result<Option<String>> {
+    pub fn set_file_contents(&self, file: String, contents: String) -> Result<()> {
+        self.data.write()?.files.insert(file, contents);
+        Ok(())
+    }
+
+    pub fn file_contents(&self) -> Result<BTreeMap<String, String>> {
         // TODO: Avoid this clone somehow
         //
-        Ok(self
-            .data
-            .read()?
-            .files
-            .get(&path.to_string())
-            .map(|f| f.clone()))
+        Ok(self.data.read()?.files.clone())
     }
 }
 

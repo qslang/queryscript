@@ -58,6 +58,15 @@ impl SourceLocation {
 
         Some(lines.join("\n"))
     }
+
+    pub fn file(&self) -> Option<String> {
+        match self {
+            SourceLocation::Unknown => None,
+            SourceLocation::File(file) => Some(file.clone()),
+            SourceLocation::Single(file, _) => Some(file.clone()),
+            SourceLocation::Range(file, _, _) => Some(file.clone()),
+        }
+    }
 }
 
 impl Pretty for SourceLocation {

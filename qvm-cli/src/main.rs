@@ -70,16 +70,17 @@ fn main_result() -> Result<(), QVMError> {
             let compiler = compile::Compiler::new()?;
             match run_file(compiler.clone(), &rt, &file, mode) {
                 Err(err) => {
-                    let err = if cli.verbose {
+                    let errs = if cli.verbose {
                         err.format_backtrace()
                     } else {
                         err.format_without_backtrace()
                     };
-                    let err = match compiler.file_contents(file.as_str())? {
-                        Some(contents) => err.pretty_with_code(contents.as_str()),
-                        None => err.pretty(),
-                    };
-                    whatever!("{}", err)
+                    let contents = compiler.file_contents()?;
+                    let err_strs = errs
+                        .iter()
+                        .map(|e| e.pretty_with_code(&contents))
+                        .collect::<Vec<_>>();
+                    whatever!("{}", err_strs.join("\n"))
                 }
                 Ok(()) => Ok(()),
             }

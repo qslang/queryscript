@@ -113,6 +113,13 @@ pub enum CompileError {
         what: String,
         backtrace: Option<Backtrace>,
     },
+
+    #[snafu(display("{}", sources.first().unwrap()))]
+    Multiple {
+        // This is assumed to be non-empty
+        //
+        sources: Vec<CompileError>,
+    },
 }
 
 impl CompileError {
@@ -233,6 +240,7 @@ impl PrettyError for CompileError {
             CompileError::WrongType { lhs, .. } => lhs.location(),
             CompileError::CoercionError { loc, .. } => loc.clone(),
             CompileError::ImportError { path, .. } => path_location(path),
+            CompileError::Multiple { sources } => sources.first().unwrap().location(),
         }
     }
 }

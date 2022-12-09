@@ -1,4 +1,5 @@
 use snafu::{Backtrace, Snafu};
+use std::collections::BTreeMap;
 use std::fmt;
 pub type Result<T> = std::result::Result<T, ParserError>;
 pub use crate::ast::SourceLocation as ErrorLocation;
@@ -18,13 +19,18 @@ pub trait PrettyError: ToString {
         )
     }
 
-    fn pretty_with_code(&self, code: &str) -> String {
+    fn pretty_with_code(&self, code: &BTreeMap<String, String>) -> String {
         let pretty = self.pretty();
-        if let Some(annotated) = self.location().annotate(code) {
-            format!("{}\n\n{}", pretty, annotated)
-        } else {
-            pretty
+        let location = self.location();
+        let file = location.file();
+        if let Some(file) = file {
+            if let Some(contents) = code.get(&file) {
+                if let Some(annotated) = self.location().annotate(contents) {
+                    return format!("{}\n\n{}", pretty, annotated);
+                }
+            }
         }
+        return pretty;
     }
 }
 

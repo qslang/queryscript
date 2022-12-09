@@ -10,7 +10,7 @@ pub enum QVMError {
         source: crate::parser::error::ParserError,
     },
 
-    #[snafu(display("Compiler error: {}", source), context(false))]
+    #[snafu(display("Compiler error: {}", source))]
     CompileError {
         #[snafu(backtrace)]
         source: crate::compile::error::CompileError,
@@ -30,21 +30,50 @@ pub enum QVMError {
         source: Option<Box<dyn std::error::Error>>,
         backtrace: Option<Backtrace>,
     },
+
+    #[snafu(display("{}", sources.first().unwrap()))]
+    Multiple {
+        // This is assumed to be non-empty
+        //
+        sources: Vec<QVMError>,
+    },
 }
 
 impl QVMError {
-    pub fn format_backtrace(&self) -> FormattedError {
-        let mut ret = self.format_without_backtrace();
-        if let Some(bt) = ErrorCompat::backtrace(&self) {
-            ret.text += format!("\n{:?}", bt).as_str();
+    pub fn format_backtrace(&self) -> Vec<FormattedError> {
+        match self {
+            QVMError::Multiple { sources } => {
+                let mut ret = Vec::new();
+                for source in sources {
+                    ret.extend(source.format_backtrace());
+                }
+                ret
+            }
+            _ => {
+                let mut ret = self.format_without_backtrace()[0].clone();
+                if let Some(bt) = ErrorCompat::backtrace(&self) {
+                    ret.text += format!("\n{:?}", bt).as_str();
+                }
+                vec![ret]
+            }
         }
-        ret
     }
 
-    pub fn format_without_backtrace(&self) -> FormattedError {
-        let location = self.location();
-        let text = self.to_string();
-        FormattedError { location, text }
+    pub fn format_without_backtrace(&self) -> Vec<FormattedError> {
+        match self {
+            QVMError::Multiple { sources } => {
+                let mut ret = Vec::new();
+                for source in sources {
+                    ret.extend(source.format_without_backtrace());
+                }
+                ret
+            }
+            _ => {
+                let location = self.location();
+                let text = self.to_string();
+                vec![FormattedError { location, text }]
+            }
+        }
     }
 }
 
@@ -62,5 +91,17 @@ impl PrettyError for QVMError {
 impl<Guard> From<std::sync::PoisonError<Guard>> for QVMError {
     fn from(e: std::sync::PoisonError<Guard>) -> QVMError {
         snafu::FromString::without_source(e.to_string())
+    }
+}
+
+impl From<crate::compile::error::CompileError> for QVMError {
+    fn from(e: crate::compile::error::CompileError) -> QVMError {
+        match e {
+            crate::compile::error::CompileError::Multiple { sources } => {
+                let sources = sources.into_iter().map(|e| e.into()).collect();
+                QVMError::Multiple { sources }
+            }
+            _ => QVMError::CompileError { source: e },
+        }
     }
 }

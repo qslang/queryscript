@@ -18,7 +18,8 @@ pub fn run(rt: &runtime::Runtime) {
         .display()
         .to_string();
     let repl_compiler = compile::Compiler::new().unwrap();
-    let repl_schema = schema::Schema::new("<repl>".to_string(), Some(cwd));
+    let file = "<repl>".to_string();
+    let repl_schema = schema::Schema::new(file.clone(), Some(cwd));
     let curr_buffer = Rc::new(RefCell::new(String::new()));
     let helper = ReadlineHelper::new(
         repl_compiler.clone(),
@@ -96,7 +97,13 @@ pub fn run(rt: &runtime::Runtime) {
                         // Allow the loop to run again (and parse more)
                     }
                     Err(e) => {
-                        eprintln!("{}", e.pretty_with_code(curr_buffer.borrow().as_str()));
+                        // XXX: This is an awful lot of copying to be doing
+                        //
+                        repl_compiler
+                            .set_file_contents(file.clone(), curr_buffer.borrow().clone())
+                            .unwrap();
+                        let code = repl_compiler.file_contents().unwrap();
+                        eprintln!("{}", e.pretty_with_code(&code));
                         rl.add_history_entry(curr_buffer.borrow().as_str());
                         curr_buffer.borrow_mut().clear();
                     }
