@@ -784,36 +784,41 @@ pub fn compile_select(
                     let available = scope
                         .read()?
                         .get_available_references(compiler.clone(), loc)?;
-                    available.then(|available: Ref<InsertionOrderMap<String, FieldMatch>>| {
-                        let mut ret = Vec::new();
-                        for (_, m) in available.read()?.iter() {
-                            let type_ = match &m.type_ {
-                                Some(t) => t.clone(),
-                                None => {
-                                    return Err(CompileError::duplicate_entry(vec![m
-                                        .field
-                                        .clone()]))
-                                }
-                            };
-                            ret.push(CTypedNameAndSQL {
-                                name: m.field.clone(),
-                                type_,
-                                sql: mkcref(SQL {
-                                    params: BTreeMap::new(),
-                                    body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(vec![
-                                        sqlast::Ident {
-                                            value: m.relation.value.clone(),
-                                            quote_style: None,
-                                        },
-                                        sqlast::Ident {
-                                            value: m.field.value.clone(),
-                                            quote_style: None,
-                                        },
-                                    ])),
-                                }),
-                            });
+                    available.then({
+                        let loc = loc.clone();
+                        move |available: Ref<InsertionOrderMap<String, FieldMatch>>| {
+                            let mut ret = Vec::new();
+                            for (_, m) in available.read()?.iter() {
+                                let type_ = match &m.type_ {
+                                    Some(t) => t.clone(),
+                                    None => {
+                                        return Err(CompileError::duplicate_entry(vec![m
+                                            .field
+                                            .replace_location(loc.clone())]))
+                                    }
+                                };
+                                ret.push(CTypedNameAndSQL {
+                                    name: m.field.clone(),
+                                    type_,
+                                    sql: mkcref(SQL {
+                                        params: BTreeMap::new(),
+                                        body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(
+                                            vec![
+                                                sqlast::Ident {
+                                                    value: m.relation.value.clone(),
+                                                    quote_style: None,
+                                                },
+                                                sqlast::Ident {
+                                                    value: m.field.value.clone(),
+                                                    quote_style: None,
+                                                },
+                                            ],
+                                        )),
+                                    }),
+                                });
+                            }
+                            Ok(mkcref(ret))
                         }
-                        Ok(mkcref(ret))
                     })?
                 }
                 sqlast::SelectItem::QualifiedWildcard { .. } => {

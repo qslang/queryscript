@@ -112,6 +112,10 @@ impl Ident {
             quote_style: Some('\"'),
         }
     }
+
+    pub fn replace_location(&self, loc: SourceLocation) -> Ident {
+        Ident::with_location(loc, self.value.clone())
+    }
 }
 
 pub type Path = Vec<Ident>;
