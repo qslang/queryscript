@@ -18,14 +18,17 @@ pub enum SourceLocation {
 impl SourceLocation {
     pub fn annotate(&self, code: &str) -> Option<String> {
         let lines = code.lines().collect::<Vec<_>>();
-        let (start_col, end_col, lines) = match self {
+        let line_digits = (lines.len() as f64).log10().floor() as usize + 1;
+        let (start_line, start_col, end_col, lines) = match self {
             SourceLocation::Unknown | SourceLocation::File(_) => return None,
             SourceLocation::Single(_, l) => (
+                l.line,
                 l.column,
                 l.column,
                 &lines[(l.line as usize) - 1..l.line as usize],
             ),
             SourceLocation::Range(_, s, e) => (
+                s.line,
                 s.column,
                 e.column,
                 &lines[s.line as usize - 1..e.line as usize],
@@ -41,16 +44,22 @@ impl SourceLocation {
             .iter()
             .enumerate()
             .flat_map(|(i, l)| {
+                let line = start_line + i as u64;
                 let start = if i == 0 { start_col } else { 1 };
                 let end = if i == num_lines - 1 {
                     end_col
                 } else {
                     (l.len()) as u64
                 };
-                let annotation = (1..start + 2).map(|_| " ").collect::<String>()
+                let annotation = (1..start + line_digits as u64 + 4)
+                    .map(|_| " ")
+                    .collect::<String>()
                     + (start..end + 1).map(|_| "^").collect::<String>().as_str();
                 vec![
-                    "  ".to_string() + l.to_string().as_str(),
+                    format!("  {: >line_digits$}  ", line)
+                        .bright_blue()
+                        .to_string()
+                        + l.to_string().as_str(),
                     annotation.bright_red().to_string(),
                 ]
             })
