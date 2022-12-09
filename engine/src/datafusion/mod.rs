@@ -1,3 +1,4 @@
+use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use datafusion::arrow::datatypes::{
     DataType as DFDataType, Schema as DFSchema, SchemaRef as DFSchemaRef,
 };
@@ -5,7 +6,7 @@ use datafusion::common::{DataFusionError, Result as DFResult, ScalarValue};
 use datafusion::datasource::memory::MemTable;
 use datafusion::execution::context::{SessionConfig, SessionContext};
 use datafusion::execution::runtime_env::RuntimeEnv;
-use datafusion::logical_expr::{LogicalPlan, TableSource};
+use datafusion::logical_expr::TableSource;
 use datafusion::physical_expr::var_provider::{VarProvider, VarType};
 use datafusion::physical_plan::collect;
 use datafusion::sql::planner::SqlToRel;
@@ -13,56 +14,49 @@ use sqlparser::ast as sqlast;
 use std::{any::Any, collections::HashMap, sync::Arc};
 
 use super::error::Result;
-use crate::types;
-use crate::types::{Relation, Type, Value};
-
-pub async fn eval(
-    query: &sqlast::Query,
-    params: HashMap<String, SQLParam>,
-) -> Result<Arc<dyn Relation>> {
-    let mut ctx =
-        SessionContext::with_config_rt(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
-
-    let schema_provider = Arc::new(SchemaProvider::new(params));
-    register_params(schema_provider.clone(), &mut ctx)?;
-
-    let state = ctx.state();
-    let sql_to_rel = SqlToRel::new(&state);
-
-    let mut ctes = HashMap::new(); // We may eventually want to parse/support these
-    let plan = sql_to_rel.query_to_plan(query.clone(), &mut ctes)?;
-    let plan = ctx.optimize(&plan)?;
-
-    let records = execute_plan(&ctx, &plan).await?;
-    Ok(records)
-}
-
-async fn execute_plan(ctx: &SessionContext, plan: &LogicalPlan) -> Result<Arc<dyn Relation>> {
-    let pplan = ctx.create_physical_plan(&plan).await?;
-    let task_ctx = ctx.task_ctx();
-    let results = Arc::new(collect(pplan, task_ctx).await?);
-    Ok(results)
-}
+use crate::sql::{SQLEngine, SQLParam};
+use crate::types::{Relation, Value};
 
 #[derive(Debug)]
-pub struct SQLParam {
-    pub name: String,
-    pub value: Value,
-    pub type_: Type,
+pub struct DataFusionEngine();
+
+impl DataFusionEngine {
+    pub fn new() -> DataFusionEngine {
+        DataFusionEngine()
+    }
+}
+
+#[async_trait::async_trait]
+impl SQLEngine for DataFusionEngine {
+    async fn eval(
+        &self,
+        query: &sqlast::Query,
+        params: HashMap<String, SQLParam>,
+    ) -> Result<Arc<dyn Relation>> {
+        let mut ctx =
+            SessionContext::with_config_rt(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
+
+        let schema_provider = Arc::new(SchemaProvider::new(params));
+        register_params(schema_provider.clone(), &mut ctx)?;
+
+        let state = ctx.state();
+        let sql_to_rel = SqlToRel::new(&state);
+
+        let mut ctes = HashMap::new(); // We may eventually want to parse/support these
+        let plan = sql_to_rel.query_to_plan(query.clone(), &mut ctes)?;
+        let plan = ctx.optimize(&plan)?;
+
+        let pplan = ctx.create_physical_plan(&plan).await?;
+        let task_ctx = ctx.task_ctx();
+        let results = Arc::new(collect(pplan, task_ctx).await?);
+        Ok(results)
+    }
 }
 
 impl SQLParam {
-    pub fn new(name: String, value: Value, type_: &types::Type) -> SQLParam {
-        SQLParam {
-            name,
-            value,
-            type_: type_.clone(), // TODO: We should make this a reference that lives as long as
-                                  // the SQLParam
-        }
-    }
-
+    // XXX Can we remove or rename this function?
     pub fn register(&self, ctx: &mut SessionContext) -> DFResult<()> {
-        let schema: Arc<DFSchema> = match (&self.type_).try_into() {
+        let schema: Arc<ArrowSchema> = match (&self.type_).try_into() {
             Ok(schema) => Arc::new(schema),
             Err(_) => return Ok(()), // Registering a non-table is a no-op
         };

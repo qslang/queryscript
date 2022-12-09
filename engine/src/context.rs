@@ -1,5 +1,5 @@
-use crate::types::Value;
-use std::collections::BTreeMap;
+use crate::{sql::SQLEngine, types::Value};
+use std::{collections::BTreeMap, sync::Arc};
 
 // A basic context with runtime state we can pass into functions. We may want
 // to merge or consolidate this with the DataFusion context at some point
@@ -7,4 +7,5 @@ use std::collections::BTreeMap;
 pub struct Context {
     pub folder: Option<String>,
     pub values: BTreeMap<String, Value>,
+    pub sql_engine: Arc<dyn SQLEngine>,
 }

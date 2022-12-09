@@ -72,6 +72,13 @@ pub fn get_rowtype(compiler: Compiler, relation: CRef<MType>) -> Result<CRef<MTy
     })?)
 }
 
+fn ident(value: String) -> sqlast::Ident {
+    sqlast::Ident {
+        value,
+        quote_style: None,
+    }
+}
+
 pub fn compile_sqlreference(
     compiler: Compiler,
     schema: Ref<Schema>,
@@ -113,14 +120,8 @@ pub fn compile_sqlreference(
                                         params: BTreeMap::new(),
                                         body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(
                                             vec![
-                                                sqlast::Ident {
-                                                    value: fm.relation.value.clone(),
-                                                    quote_style: None,
-                                                },
-                                                sqlast::Ident {
-                                                    value: name.clone(),
-                                                    quote_style: None,
-                                                },
+                                                ident(fm.relation.value.clone()),
+                                                ident(name.clone()),
                                             ],
                                         )),
                                     }))),
@@ -223,10 +224,7 @@ pub fn compile_reference(
                 _ => panic!("placeholder expected to be an identifier"),
             };
             let mut full_name = vec![placeholder_name.clone()];
-            full_name.extend(remainder.clone().into_iter().map(|n| sqlast::Ident {
-                value: n.value,
-                quote_style: None,
-            }));
+            full_name.extend(remainder.clone().into_iter().map(|n| ident(n.value)));
 
             let expr = Arc::new(Expr::SQL(Arc::new(SQL {
                 params: placeholder.params.clone(),
@@ -252,10 +250,7 @@ pub fn intern_placeholder(
 
             Ok(Arc::new(SQL {
                 params: Params::from([(placeholder_name.clone(), expr.clone())]),
-                body: SQLBody::Expr(sqlast::Expr::Identifier(sqlast::Ident {
-                    value: placeholder_name.clone(),
-                    quote_style: None,
-                })),
+                body: SQLBody::Expr(sqlast::Expr::Identifier(ident(placeholder_name.clone()))),
             }))
         }
     }
@@ -471,15 +466,9 @@ pub fn compile_relation(
                     from_params.insert(placeholder_name.clone(), relation);
 
                     sqlast::TableFactor::Table {
-                        name: sqlast::ObjectName(vec![sqlast::Ident {
-                            value: placeholder_name,
-                            quote_style: None,
-                        }]),
+                        name: sqlast::ObjectName(vec![ident(placeholder_name)]),
                         alias: Some(sqlast::TableAlias {
-                            name: sqlast::Ident {
-                                value: name.to_string(),
-                                quote_style: None,
-                            },
+                            name: ident(name.to_string()),
                             columns: Vec::new(),
                         }),
                         args: None,
@@ -882,10 +871,7 @@ pub fn compile_select(
             for sqlexpr in &*proj_exprs {
                 insert_sqlparams(&mut params, sqlexpr.sql.as_ref())?;
                 projection.push(sqlast::SelectItem::ExprWithAlias {
-                    alias: sqlast::Ident {
-                        value: sqlexpr.name.value.clone(),
-                        quote_style: None,
-                    },
+                    alias: ident(sqlexpr.name.value.clone()),
                     expr: sqlexpr
                         .sql
                         .body

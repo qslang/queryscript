@@ -1251,17 +1251,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "duckdb-test"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "cxx",
- "cxx-build",
- "duckdb",
- "hashlink",
-]
-
-[[package]]
 name = "dyn-clone"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1278,6 +1267,26 @@ name = "endian-type"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c34f04666d835ff5d62e058c3995147c06f42fe86ff053337632bca83e42702d"
+
+[[package]]
+name = "engine"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "arrow-buffer",
+ "async-trait",
+ "cxx",
+ "cxx-build",
+ "datafusion",
+ "duckdb",
+ "dyn-clone",
+ "half 2.1.0",
+ "hashlink",
+ "object_store",
+ "snafu",
+ "sqlparser",
+ "tabled",
+]
 
 [[package]]
 name = "env_logger"
@@ -2506,9 +2515,9 @@ dependencies = [
  "datafusion",
  "difference",
  "dyn-clone",
+ "engine",
  "lazy_static",
  "object_store",
- "runtime",
  "snafu",
  "sqlparser",
  "tokio",
@@ -2727,26 +2736,6 @@ dependencies = [
  "quote",
  "rustc_version",
  "syn",
-]
-
-[[package]]
-name = "runtime"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "arrow-buffer",
- "async-trait",
- "cxx",
- "cxx-build",
- "datafusion",
- "duckdb",
- "dyn-clone",
- "half 2.1.0",
- "hashlink",
- "object_store",
- "snafu",
- "sqlparser",
- "tabled",
 ]
 
 [[package]]

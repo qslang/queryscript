@@ -1,23 +1,15 @@
 #include <iostream>
-#include "duckdb-test/include/duckdb-extra.hpp"
-#include "duckdb-test/src/duckdbcpp.rs.h"
+#include "engine/include/duckdb-extra.hpp"
+#include "engine/src/duckdb/engine.rs.h"
 
 std::unique_ptr<ArrowArrayStreamWrapper> new_array_stream_wrapper(uintptr_t data, duckdb::ArrowStreamParameters &parameters)
 {
-    // XXX Do we NEED to push down filters?
-    std::cerr << "starting new_array_stream_wrapper!\n";
-    ArrowArrayStream *array_stream = (ArrowArrayStream *)rust_build_array_stream((uint32_t *)data, parameters.projected_columns.columns);
-    ArrowSchema arrow_schema;
-    array_stream->get_schema(array_stream, &arrow_schema);
-    std::cerr << "got the first schema!\n";
+    auto ret = duckdb::make_unique<ArrowArrayStreamWrapper>();
 
-    auto ret = duckdb::make_unique<ArrowArrayStreamWrapper>(); // new ArrowArrayStreamWrapper());
-    ret->arrow_array_stream = *array_stream;
-    std::cerr << "hello world!\n";
-    fprintf(stderr, "get_schema: %p\n", ret->arrow_array_stream.get_schema);
-    fprintf(stderr, "get_next: %p\n", ret->arrow_array_stream.get_next);
-    fprintf(stderr, "private_data: %p\n", ret->arrow_array_stream.private_data);
-    std::cerr << "done hello world!\n";
+    rust_build_array_stream(
+        (uint32_t *)data,
+        parameters.projected_columns.columns,
+        (uint32_t *)&ret->arrow_array_stream);
 
     return ret;
 }

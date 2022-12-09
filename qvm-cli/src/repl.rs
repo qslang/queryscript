@@ -12,7 +12,7 @@ use crate::readline_helper::ReadlineHelper;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub fn run(rt: &runtime::Runtime) {
+pub fn run(rt: &runtime::Runtime, engine_type: qvm::runtime::SQLEngineType) {
     let cwd = std::env::current_dir()
         .expect("current working directory")
         .display()
@@ -86,6 +86,7 @@ pub fn run(rt: &runtime::Runtime) {
                     repl_compiler.clone(),
                     repl_schema.clone(),
                     &*curr_buffer.borrow(),
+                    engine_type,
                 );
                 match result {
                     Ok(RunCommandResult::Done) => {
@@ -140,6 +141,7 @@ fn run_command(
     compiler: compile::Compiler,
     repl_schema: schema::SchemaRef,
     cmd: &str,
+    engine_type: qvm::runtime::SQLEngineType,
 ) -> Result<RunCommandResult, QVMError> {
     let file = "<repl>";
     let (tokens, eof) = parser::tokenize(file, &cmd)?;
@@ -173,7 +175,7 @@ fn run_command(
             };
 
             if let Some(compiled) = compiled {
-                let ctx = qvm::runtime::build_context(&repl_schema);
+                let ctx = qvm::runtime::build_context(&repl_schema, engine_type);
                 let expr = compiled.to_runtime_type().context(RuntimeSnafu {
                     file: file.to_string(),
                 })?;

@@ -1,10 +1,14 @@
-use super::sql::SQLParam;
-use crate::compile::schema;
-use crate::runtime::error::*;
-use crate::types;
-use crate::types::{Arc, Value};
-use ::runtime::context::Context;
 use std::collections::{BTreeMap, HashMap};
+
+use crate::compile::schema;
+
+use engine::{
+    context::Context,
+    error::*,
+    sql::SQLParam,
+    types,
+    types::{Arc, Value},
+};
 
 type TypeRef = schema::Ref<types::Type>;
 
@@ -32,11 +36,12 @@ pub async fn eval_params<'a>(
     Ok(param_values)
 }
 
-pub fn build_context(schema: &schema::SchemaRef) -> Context {
+pub fn build_context(schema: &schema::SchemaRef, engine_type: engine::SQLEngineType) -> Context {
     let schema = schema.read().unwrap();
     Context {
         folder: schema.folder.clone(),
         values: BTreeMap::new(),
+        sql_engine: engine::new_engine(engine_type),
     }
 }
 
@@ -112,7 +117,7 @@ pub fn eval<'a>(
                 let query = body.as_query()?;
 
                 // TODO: This ownership model implies some necessary copying (below).
-                let rows = super::sql::eval(&query, sql_params).await?;
+                let rows = { ctx.sql_engine.eval(&query, sql_params).await? };
 
                 match body {
                     schema::SQLBody::Expr(_) => {

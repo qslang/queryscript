@@ -3,7 +3,7 @@
 // NOTE: This included duckdb.hpp file is exactly the released version of duckdb.hpp
 // copied from libduckdb-sys (bundled in duckdb-rs). If we update the library, we must
 // update this file as well.
-#include "duckdb-test/include/duckdb.hpp"
+#include "engine/include/duckdb.hpp"
 
 namespace duckdb
 {

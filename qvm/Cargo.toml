@@ -20,4 +20,4 @@ snafu = { version = "0.7.3" }
 sqlparser = { path = "../sqlparser-rs" }
 tokio = "1.0"
 
-runtime = { path = "../runtime" }
+engine = { path = "../engine" }

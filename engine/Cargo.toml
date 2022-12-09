@@ -1,5 +1,5 @@
 [package]
-name = "runtime"
+name = "engine"
 version = "0.1.0"
 edition = "2021"
 
@@ -26,7 +26,7 @@ arrow = { version = "*", default-features = false, features = [
 hashlink = { version = "*" }
 
 # Datafusion
-datafusion = { path = "../arrow-datafusion/datafusion/core" } # XXX Can we remove?
+datafusion = { path = "../arrow-datafusion/datafusion/core" }
 arrow-buffer = "26.0.0"                                       # This has to be tracked with datafusion
 
 [build-dependencies]

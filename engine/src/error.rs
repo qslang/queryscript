@@ -3,7 +3,7 @@ use snafu::{Backtrace, GenerateImplicitData, Snafu};
 use std::num::ParseFloatError;
 use std::sync::Arc;
 
-pub type Result<T> = std::result::Result<T, RuntimeError>;
+pub type Result<T, E = RuntimeError> = std::result::Result<T, E>;
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
@@ -29,6 +29,12 @@ pub enum RuntimeError {
     #[snafu(context(false))]
     DataFusionError {
         source: Arc<datafusion::common::DataFusionError>,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(context(false))]
+    DuckDBError {
+        source: duckdb::Error,
         backtrace: Option<Backtrace>,
     },
 

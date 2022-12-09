@@ -26,6 +26,9 @@ struct Cli {
 
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
+
+    #[arg(long, default_value_t = String::from("duckdb"))]
+    engine: String,
 }
 
 enum Mode {
@@ -61,6 +64,8 @@ fn main_result() -> Result<(), QVMError> {
         Mode::Execute
     };
 
+    let engine_type = qvm::runtime::SQLEngineType::from_name(&cli.engine).unwrap();
+
     match cli.file {
         Some(file) => {
             let rt = runtime::build().context(RuntimeSnafu {
@@ -68,7 +73,7 @@ fn main_result() -> Result<(), QVMError> {
             })?;
 
             let compiler = compile::Compiler::new()?;
-            match run_file(compiler.clone(), &rt, &file, mode) {
+            match run_file(compiler.clone(), &rt, engine_type, &file, mode) {
                 Err(err) => {
                     let errs = if cli.verbose {
                         err.format_backtrace()
@@ -96,7 +101,7 @@ fn main_result() -> Result<(), QVMError> {
                 file: "<repl>".to_string(),
             })?;
 
-            crate::repl::run(&rt);
+            crate::repl::run(&rt, engine_type);
             Ok(())
         }
     }
@@ -105,6 +110,7 @@ fn main_result() -> Result<(), QVMError> {
 fn run_file(
     compiler: compile::Compiler,
     rt: &runtime::Runtime,
+    engine_type: qvm::runtime::SQLEngineType,
     file: &str,
     mode: Mode,
 ) -> Result<(), QVMError> {
@@ -136,7 +142,7 @@ fn run_file(
         return Ok(());
     }
 
-    let ctx = qvm::runtime::build_context(&schema);
+    let ctx = qvm::runtime::build_context(&schema, engine_type);
     let locked_schema = schema.read()?;
     for expr in locked_schema.exprs.iter() {
         let expr = expr.to_runtime_type().context(RuntimeSnafu {
