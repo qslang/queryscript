@@ -41,13 +41,13 @@ impl SourceLocation {
             .iter()
             .enumerate()
             .flat_map(|(i, l)| {
-                let start = if i == 0 { start_col } else { 0 };
+                let start = if i == 0 { start_col } else { 1 };
                 let end = if i == num_lines - 1 {
                     end_col
                 } else {
-                    (l.len() - 1) as u64
+                    (l.len()) as u64
                 };
-                let annotation = (0..start + 1).map(|_| " ").collect::<String>()
+                let annotation = (1..start + 2).map(|_| " ").collect::<String>()
                     + (start..end + 1).map(|_| "^").collect::<String>().as_str();
                 vec![
                     "  ".to_string() + l.to_string().as_str(),
