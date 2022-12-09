@@ -10,11 +10,10 @@ pub enum QVMError {
         source: crate::parser::error::ParserError,
     },
 
-    #[snafu(display("Compiler error: {}", source))]
+    #[snafu(display("Compiler error: {}", source), context(false))]
     CompileError {
         #[snafu(backtrace)]
         source: crate::compile::error::CompileError,
-        file: String,
     },
 
     #[snafu(display("Runtime error: {}", source))]
@@ -53,7 +52,7 @@ impl PrettyError for QVMError {
     fn location(&self) -> ErrorLocation {
         match self {
             QVMError::ParserError { source } => source.location(),
-            QVMError::CompileError { file, .. } => ErrorLocation::File(file.clone()),
+            QVMError::CompileError { source } => source.location(),
             QVMError::RuntimeError { file, .. } => ErrorLocation::File(file.clone()),
             _ => ErrorLocation::Unknown,
         }

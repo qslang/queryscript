@@ -67,9 +67,7 @@ fn main_result() -> Result<(), QVMError> {
                 file: file.to_string(),
             })?;
 
-            let compiler = compile::Compiler::new().context(CompileSnafu {
-                file: file.to_string(),
-            })?;
+            let compiler = compile::Compiler::new()?;
             match run_file(compiler.clone(), &rt, &file, mode) {
                 Err(err) => {
                     let err = if cli.verbose {
@@ -77,10 +75,7 @@ fn main_result() -> Result<(), QVMError> {
                     } else {
                         err.format_without_backtrace()
                     };
-                    let err = match compiler
-                        .file_contents(file.as_str())
-                        .context(CompileSnafu { file: file.clone() })?
-                    {
+                    let err = match compiler.file_contents(file.as_str())? {
                         Some(contents) => err.pretty_with_code(contents.as_str()),
                         None => err.pretty(),
                     };
@@ -132,10 +127,7 @@ fn run_file(
 
     let schema = compiler
         .compile_schema_from_file(&Path::new(&file))
-        .as_result()
-        .context(CompileSnafu {
-            file: file.to_string(),
-        })?
+        .as_result()?
         .unwrap();
 
     if matches!(mode, Mode::Compile) {

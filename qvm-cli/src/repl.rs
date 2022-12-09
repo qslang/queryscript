@@ -154,10 +154,7 @@ fn run_command(
 
             compiler
                 .compile_schema_ast(repl_schema.clone(), &ast)
-                .as_result()
-                .context(CompileSnafu {
-                    file: file.to_string(),
-                })?;
+                .as_result()?;
 
             let compiled = {
                 let locked_schema = repl_schema.read()?;
