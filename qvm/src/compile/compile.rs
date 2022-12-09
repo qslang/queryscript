@@ -236,7 +236,7 @@ impl Compiler {
     }
 
     pub fn open_file(&self, file_path: &FilePath) -> Result<(String, Option<String>, ast::Schema)> {
-        let parsed_path = FilePath::new(file_path).canonicalize()?;
+        let parsed_path = FilePath::new(file_path);
         let file = parsed_path.to_str().unwrap().to_string();
         let parent_path = parsed_path.parent();
         let folder = match parent_path {

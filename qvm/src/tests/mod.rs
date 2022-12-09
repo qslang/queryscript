@@ -25,8 +25,9 @@ mod tests {
             let entry = entry.expect(format!("Could not read {}", dir.display()).as_str());
             let path = entry.path();
             if path.is_file() && is_schema_file(path.extension().and_then(OsStr::to_str)) {
-                println!("Running {}", path.display());
-                test_schema(&rt, &path);
+                let rel_path = path.strip_prefix(std::env::current_dir().unwrap()).unwrap();
+                println!("Running {}", rel_path.display());
+                test_schema(&rt, &rel_path);
             } else {
                 println!("Skipping {}", path.display());
             }
@@ -35,7 +36,7 @@ mod tests {
 
     fn execute_test_schema(
         rt: &runtime::Runtime,
-        path: &PathBuf,
+        path: &std::path::Path,
     ) -> BTreeMap<String, Box<dyn fmt::Debug>> {
         let mut result = BTreeMap::<String, Box<dyn fmt::Debug>>::new();
 
@@ -105,11 +106,11 @@ mod tests {
         result
     }
 
-    fn test_schema(rt: &runtime::Runtime, path: &PathBuf) {
+    fn test_schema(rt: &runtime::Runtime, path: &std::path::Path) {
         let result = execute_test_schema(rt, path);
         let result_str = format!("{:#?}", result);
 
-        let mut expected_file = path.clone();
+        let mut expected_file = PathBuf::from(path);
         expected_file.set_extension("expected");
         if expected_file.exists() {
             let expected_str = fs::read_to_string(&expected_file)
