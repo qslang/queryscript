@@ -10,10 +10,13 @@ use cxx::{CxxString, CxxVector};
 use duckdb::{ffi as cffi, Connection};
 use sqlparser::ast as sqlast;
 
-use crate::error::Result;
-use crate::normalize::{Normalize, TreeNormalizer};
-use crate::sql::{SQLEngine, SQLParam};
 use crate::types::{Relation, Value};
+
+use crate::runtime::{
+    error::Result,
+    normalize::{Normalize, TreeNormalizer},
+    sql::{SQLEngine, SQLParam},
+};
 
 #[cxx::bridge]
 pub mod cppffi {
@@ -25,7 +28,7 @@ pub mod cppffi {
         );
     }
     unsafe extern "C++" {
-        include!("engine/include/duckdb-extra.hpp");
+        include!("qvm/include/duckdb-extra.hpp");
 
         type ArrowArrayStreamWrapper;
         type Value;

@@ -1,14 +1,12 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::compile::schema;
-
-use engine::{
-    context::Context,
-    error::*,
-    sql::SQLParam,
+use crate::{
     types,
     types::{Arc, Value},
 };
+
+use super::{context::Context, error::*, new_engine, sql::SQLParam, SQLEngineType};
 
 type TypeRef = schema::Ref<types::Type>;
 
@@ -36,12 +34,12 @@ pub async fn eval_params<'a>(
     Ok(param_values)
 }
 
-pub fn build_context(schema: &schema::SchemaRef, engine_type: engine::SQLEngineType) -> Context {
+pub fn build_context(schema: &schema::SchemaRef, engine_type: SQLEngineType) -> Context {
     let schema = schema.read().unwrap();
     Context {
         folder: schema.folder.clone(),
         values: BTreeMap::new(),
-        sql_engine: engine::new_engine(engine_type),
+        sql_engine: new_engine(engine_type),
     }
 }
 

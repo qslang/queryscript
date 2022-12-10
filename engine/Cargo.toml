@@ -14,20 +14,5 @@ tabled = "0.10"
 snafu = { version = "0.7.3" }
 sqlparser = { path = "../sqlparser-rs" }
 
-# TODO: We should put each database dependency runtime behind a feature flag
-# DuckDB.
-duckdb = { version = "0.6.0", features = ["bundled"] }
-cxx = "1.0"
-# These are duckdb dependencies that we access directly
-arrow = { version = "*", default-features = false, features = [
-    "prettyprint",
-    "ffi",
-] }
-hashlink = { version = "*" }
-
-# Datafusion
-datafusion = { path = "../arrow-datafusion/datafusion/core" }
-arrow-buffer = "26.0.0"                                       # This has to be tracked with datafusion
-
 [build-dependencies]
 cxx-build = "1.0"

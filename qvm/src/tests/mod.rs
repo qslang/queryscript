@@ -67,7 +67,7 @@ mod tests {
             }
         }
 
-        let engine_type = engine::SQLEngineType::DuckDB;
+        let engine_type = runtime::SQLEngineType::DuckDB;
         let mut exprs = Vec::new();
         for expr in &schema.read().unwrap().exprs {
             #[derive(Debug)]

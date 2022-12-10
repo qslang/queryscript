@@ -1,6 +1,6 @@
 #include <iostream>
-#include "engine/include/duckdb-extra.hpp"
-#include "engine/src/duckdb/engine.rs.h"
+#include "qvm/include/duckdb-extra.hpp"
+#include "qvm/src/runtime/duckdb/engine.rs.h"
 
 std::unique_ptr<ArrowArrayStreamWrapper> new_array_stream_wrapper(uintptr_t data, duckdb::ArrowStreamParameters &parameters)
 {

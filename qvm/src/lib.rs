@@ -4,8 +4,6 @@ pub mod error;
 pub mod parser;
 pub mod runtime;
 pub mod tests;
-
-// XXX REMOVE
-pub use ::engine::types;
+pub mod types;
 
 pub use error::QVMError;

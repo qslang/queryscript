@@ -14,7 +14,7 @@ use sqlparser::ast as sqlast;
 use std::{any::Any, collections::HashMap, sync::Arc};
 
 use super::error::Result;
-use crate::sql::{SQLEngine, SQLParam};
+use super::sql::{SQLEngine, SQLParam};
 use crate::types::{Relation, Value};
 
 #[derive(Debug)]

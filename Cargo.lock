@@ -1272,16 +1272,10 @@ checksum = "c34f04666d835ff5d62e058c3995147c06f42fe86ff053337632bca83e42702d"
 name = "engine"
 version = "0.1.0"
 dependencies = [
- "arrow",
- "arrow-buffer",
  "async-trait",
- "cxx",
  "cxx-build",
- "datafusion",
- "duckdb",
  "dyn-clone",
  "half 2.1.0",
- "hashlink",
  "object_store",
  "snafu",
  "sqlparser",
@@ -2508,18 +2502,24 @@ dependencies = [
 name = "qvm"
 version = "0.1.0"
 dependencies = [
+ "arrow",
  "arrow-buffer",
  "async-trait",
  "chrono",
  "colored",
+ "cxx",
+ "cxx-build",
  "datafusion",
  "difference",
+ "duckdb",
  "dyn-clone",
- "engine",
+ "half 2.1.0",
+ "hashlink",
  "lazy_static",
  "object_store",
  "snafu",
  "sqlparser",
+ "tabled",
  "tokio",
 ]
 

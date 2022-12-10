@@ -1,5 +1,7 @@
-use crate::{sql::SQLEngine, types::Value};
 use std::{collections::BTreeMap, sync::Arc};
+
+use super::sql::SQLEngine;
+use crate::types::Value;
 
 // A basic context with runtime state we can pass into functions. We may want
 // to merge or consolidate this with the DataFusion context at some point

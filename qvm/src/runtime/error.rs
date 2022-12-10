@@ -82,7 +82,7 @@ impl From<datafusion::common::DataFusionError> for RuntimeError {
     }
 }
 
-#[macro_export]
+#[allow(unused_macros)]
 macro_rules! fail {
     ($base: expr $(, $args:expr)* $(,)?) => {
         crate::runtime::error::StringSnafu {
@@ -91,9 +91,9 @@ macro_rules! fail {
     };
 }
 
-pub use fail;
+pub(crate) use fail;
 
-#[macro_export]
+#[allow(unused_macros)]
 macro_rules! rt_unimplemented {
     ($base: expr $(, $args:expr)* $(,)?) => {
         crate::runtime::error::UnimplementedSnafu {
@@ -102,4 +102,4 @@ macro_rules! rt_unimplemented {
     };
 }
 
-pub use rt_unimplemented;
+pub(crate) use rt_unimplemented;

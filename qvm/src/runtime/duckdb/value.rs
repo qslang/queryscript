@@ -7,7 +7,7 @@ use duckdb::{
 
 fn unimplemented(what: &str) -> duckdb::Result<ToSqlOutput<'_>> {
     return Err(duckdb::Error::ToSqlConversionFailure(Box::new(
-        crate::error::UnimplementedSnafu {
+        crate::runtime::error::UnimplementedSnafu {
             what: what.to_string(),
         }
         .build(),

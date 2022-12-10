@@ -1,7 +1,7 @@
 use sqlparser::ast as sqlast;
 use std::{collections::HashMap, sync::Arc};
 
-use crate::error::Result;
+use super::error::Result;
 use crate::types::{Relation, Type, Value};
 
 use async_trait::async_trait;
@@ -50,7 +50,7 @@ impl SQLEngineType {
             "duckdb" => DuckDB,
             "datafusion" => DataFusion,
             name => {
-                return Err(crate::error::RuntimeError::unimplemented(
+                return Err(crate::runtime::RuntimeError::unimplemented(
                     format!("SQL engine {}", name).as_str(),
                 ))
             }
@@ -61,7 +61,7 @@ impl SQLEngineType {
 pub fn new_engine(kind: SQLEngineType) -> Arc<dyn SQLEngine> {
     use SQLEngineType::*;
     match kind {
-        DuckDB => Arc::new(crate::duckdb::DuckDBEngine::new()),
-        DataFusion => Arc::new(crate::datafusion::DataFusionEngine()),
+        DuckDB => Arc::new(super::duckdb::DuckDBEngine::new()),
+        DataFusion => Arc::new(super::datafusion::DataFusionEngine()),
     }
 }

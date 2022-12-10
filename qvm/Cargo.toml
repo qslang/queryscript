@@ -6,18 +6,33 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arrow-buffer = "26.0.0"                                       # This has to be tracked with datafusion
-datafusion = { path = "../arrow-datafusion/datafusion/core" } # XXX Can we remove?
-
-async-trait = "0.1"                                       # XXX REMOVE?
+async-trait = "0.1"
 chrono = { version = "0.4.22", default-features = false }
 colored = "2"
 difference = "2.0"
-dyn-clone = "1.0.9"                                       # XXX REMOVE?
+dyn-clone = "1.0.9"
+half = "2.1"
 lazy_static = "1.4.0"
 object_store = "0.5.0"
 snafu = { version = "0.7.3" }
 sqlparser = { path = "../sqlparser-rs" }
+tabled = "0.10"
 tokio = "1.0"
 
-engine = { path = "../engine" }
+# TODO: We should put each database dependency runtime behind a feature flag
+# DuckDB.
+duckdb = { version = "0.6.0", features = ["bundled"] }
+cxx = "1.0"
+# These are duckdb dependencies that we access directly
+arrow = { version = "*", default-features = false, features = [
+    "prettyprint",
+    "ffi",
+] }
+hashlink = { version = "*" }
+
+# Datafusion
+datafusion = { path = "../arrow-datafusion/datafusion/core" }
+arrow-buffer = "26.0.0"                                       # This has to be tracked with datafusion
+
+[build-dependencies]
+cxx-build = "1.0"

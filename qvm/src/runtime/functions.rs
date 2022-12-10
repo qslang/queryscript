@@ -19,15 +19,16 @@ use object_store::ObjectMeta;
 use std::path::{Path as FilePath, PathBuf as FilePathBuf};
 use std::sync::Arc;
 
-use engine::{
-    context::Context,
-    error::{fail, Result},
+use crate::compile::schema;
+use crate::{
     types,
     types::{FnValue, Value},
 };
 
-use super::runtime;
-use crate::compile::schema;
+use super::{
+    error::{fail, Result},
+    runtime, Context,
+};
 
 type TypeRef = schema::Ref<types::Type>;
 
