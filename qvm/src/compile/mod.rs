@@ -1,6 +1,6 @@
 mod builtin_types;
+mod coerce;
 pub mod compile;
-mod datafusion;
 pub mod error;
 pub mod inference;
 pub mod schema;

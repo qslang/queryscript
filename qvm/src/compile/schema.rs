@@ -1,6 +1,6 @@
 use crate::ast::Pretty;
+pub use arrow::datatypes::DataType as ArrowDataType;
 use colored::*;
-pub use datafusion::arrow::datatypes::DataType as ArrowDataType;
 use snafu::prelude::*;
 use sqlparser::ast as sqlast;
 use std::collections::{BTreeMap, BTreeSet};
@@ -340,7 +340,7 @@ impl Constrainable for MType {
         left: &Ref<Self>,
         right: &Ref<Self>,
     ) -> Result<CRef<Self>> {
-        let df_op = match super::datafusion::parser_binop_to_df_binop(op) {
+        let df_op = match super::coerce::parser_binop_to_df_binop(op) {
             Ok(op) => op,
             Err(e) => {
                 return Err(CompileError::unimplemented(
