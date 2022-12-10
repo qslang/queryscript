@@ -32,7 +32,7 @@ hashlink = { version = "*" }
 
 # Datafusion
 datafusion = { path = "../arrow-datafusion/datafusion/core" }
-arrow-buffer = "26.0.0"                                       # This has to be tracked with datafusion
+arrow-buffer = { version = "*" }
 
 [build-dependencies]
 cxx-build = "1.0"
