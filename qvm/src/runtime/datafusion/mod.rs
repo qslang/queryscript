@@ -17,6 +17,8 @@ use super::error::Result;
 use super::sql::{SQLEngine, SQLParam};
 use crate::types::{Relation, Value};
 
+pub mod value;
+
 #[derive(Debug)]
 pub struct DataFusionEngine();
 

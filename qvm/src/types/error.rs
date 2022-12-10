@@ -16,9 +16,9 @@ pub enum TypesystemError {
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(context(false))]
-    DataFusionError {
-        source: datafusion::common::DataFusionError,
+    #[snafu(display("Failed to parse as number: {}", val))]
+    NumericParseError {
+        val: String,
         backtrace: Option<Backtrace>,
     },
 }

@@ -1,4 +1,4 @@
-pub use datafusion::arrow::datatypes::{
+pub use arrow::datatypes::{
     DataType as ArrowDataType, Field as ArrowField, IntervalUnit, Schema as ArrowSchema, TimeUnit,
 };
 use sqlparser::ast::{

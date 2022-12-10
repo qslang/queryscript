@@ -1,11 +1,13 @@
-use datafusion::arrow::array::{
-    Date32Array, Date64Array, FixedSizeBinaryArray, GenericBinaryArray, IntervalDayTimeArray,
-    IntervalMonthDayNanoArray, IntervalYearMonthArray, LargeStringArray, PrimitiveArray,
-    StringArray, Time32MillisecondArray, Time32SecondArray, Time64MicrosecondArray,
-    Time64NanosecondArray, TimestampMicrosecondArray, TimestampMillisecondArray,
-    TimestampNanosecondArray, TimestampSecondArray,
+use arrow::{
+    array::{
+        Date32Array, Date64Array, FixedSizeBinaryArray, GenericBinaryArray, IntervalDayTimeArray,
+        IntervalMonthDayNanoArray, IntervalYearMonthArray, LargeStringArray, PrimitiveArray,
+        StringArray, Time32MillisecondArray, Time32SecondArray, Time64MicrosecondArray,
+        Time64NanosecondArray, TimestampMicrosecondArray, TimestampMillisecondArray,
+        TimestampNanosecondArray, TimestampSecondArray,
+    },
+    datatypes::ArrowPrimitiveType,
 };
-use datafusion::arrow::datatypes::ArrowPrimitiveType;
 
 use super::list::VecList;
 use super::record::VecRow;
@@ -88,8 +90,8 @@ impl<'a, T: ArrowArray> List for &'a T {
 
     fn as_vec(&self) -> Vec<Value> {
         use super::ArrowDataType::*;
-        use datafusion::arrow::array::*;
-        use datafusion::arrow::datatypes::*;
+        use arrow::array::*;
+        use arrow::datatypes::*;
         let vec_list: VecWrapper = match T::data_type(self) {
             Null => VecWrapper(
                 (0..(as_null_array(self).data().len()))
