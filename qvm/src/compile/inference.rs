@@ -1,3 +1,4 @@
+use crate::compile::coerce::CoerceOp;
 use crate::compile::error::*;
 use crate::compile::schema::{mkref, Ref};
 use crate::runtime;
@@ -24,11 +25,7 @@ pub trait Constrainable: Clone + fmt::Debug + Send + Sync {
         ))
     }
 
-    fn coerce(
-        _op: &sqlparser::ast::BinaryOperator,
-        left: &Ref<Self>,
-        right: &Ref<Self>,
-    ) -> Result<CRef<Self>>
+    fn coerce(_op: &CoerceOp, left: &Ref<Self>, right: &Ref<Self>) -> Result<CRef<Self>>
     where
         Self: 'static,
     {

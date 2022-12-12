@@ -10,6 +10,7 @@ use std::sync::{Arc, RwLock};
 use crate::ast;
 use crate::ast::SourceLocation;
 use crate::compile::{
+    coerce::{coerce_types, CoerceOp},
     error::*,
     inference::{mkcref, Constrainable, Constrained},
 };
@@ -335,21 +336,7 @@ impl Constrainable for MType {
         Ok(())
     }
 
-    fn coerce(
-        op: &sqlast::BinaryOperator,
-        left: &Ref<Self>,
-        right: &Ref<Self>,
-    ) -> Result<CRef<Self>> {
-        let df_op = match super::coerce::parser_binop_to_df_binop(op) {
-            Ok(op) => op,
-            Err(e) => {
-                return Err(CompileError::unimplemented(
-                    left.read()?.location(),
-                    &(e.to_string()),
-                ))
-            }
-        };
-
+    fn coerce(op: &CoerceOp, left: &Ref<Self>, right: &Ref<Self>) -> Result<CRef<Self>> {
         let left_type = left.read()?;
         let right_type = right.read()?;
 
@@ -363,23 +350,17 @@ impl Constrainable for MType {
             loc: right_loc.clone(),
         })?;
 
-        let left_df: ArrowDataType = (&left_rt).try_into().context(TypesystemSnafu {
-            loc: left_loc.clone(),
-        })?;
-        let right_df: ArrowDataType = (&right_rt).try_into().context(TypesystemSnafu {
-            loc: right_loc.clone(),
-        })?;
-
-        let coerced_df = match datafusion::logical_expr::type_coercion::binary::coerce_types(
-            &left_df, &df_op, &right_df,
-        ) {
-            Ok(t) => t,
-            Err(e) => return Err(CompileError::internal(left_loc.clone(), &(e.to_string()))),
+        let coerced_type = match coerce_types(&left_rt, op, &right_rt) {
+            Some(t) => t,
+            None => {
+                return Err(CompileError::coercion(
+                    left_type.location(),
+                    &left_type,
+                    &right_type,
+                ))
+            }
         };
 
-        let coerced_type: Type = (&coerced_df).try_into().context(TypesystemSnafu {
-            loc: left_loc.clone(),
-        })?;
         Ok(mkcref(MType::from_runtime_type(&coerced_type)?))
     }
 }

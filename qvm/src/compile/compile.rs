@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::ast;
 use crate::ast::{SourceLocation, ToStrings};
 use crate::compile::builtin_types::{BUILTIN_LOC, GLOBAL_SCHEMA};
+use crate::compile::coerce::CoerceOp;
 use crate::compile::error::*;
 use crate::compile::inference::*;
 use crate::compile::schema::*;
@@ -1105,7 +1106,7 @@ pub fn gather_schema_externs(schema: Ref<Schema>) -> Result<()> {
 
 pub fn coerce<T: Constrainable + 'static>(
     compiler: Compiler,
-    op: sqlparser::ast::BinaryOperator,
+    op: CoerceOp,
     left: CRef<T>,
     right: CRef<T>,
 ) -> Result<CRef<T>> {

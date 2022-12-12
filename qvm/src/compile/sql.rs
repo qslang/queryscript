@@ -7,6 +7,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::ast::{SourceLocation, ToPath};
+use crate::compile::coerce::CoerceOp;
 use crate::compile::compile::{coerce, lookup_path, resolve_global_atom, typecheck_path, Compiler};
 use crate::compile::error::*;
 use crate::compile::inference::*;
@@ -1125,7 +1126,12 @@ fn coerce_all(
         target = first.type_.clone();
         for next in iter {
             exprs.push(next.clone());
-            target = coerce(compiler.clone(), op.clone(), target, next.type_.clone())?;
+            target = coerce(
+                compiler.clone(),
+                CoerceOp::Binary(op.clone()),
+                target,
+                next.type_.clone(),
+            )?;
         }
     }
 
