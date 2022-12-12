@@ -751,7 +751,18 @@ pub fn compile_select(
         .map(|p| {
             Ok(match p {
                 sqlast::SelectItem::UnnamedExpr(expr) => {
-                    let name = format!("{}", expr);
+                    // If the expression is an identifier, then simply forward it along. In the case of a
+                    // compound identifier (e.g. table.foo), SQL semantics are to pick the last element (i.e.
+                    // foo) as the new name.
+                    let name = match expr {
+                        sqlast::Expr::Identifier(i) => i.value.clone(),
+                        sqlast::Expr::CompoundIdentifier(c) => c
+                            .last()
+                            .expect("Compound identifiers should have at least one element")
+                            .value
+                            .clone(),
+                        _ => format!("{}", expr),
+                    };
                     let compiled =
                         compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
                     mkcref(vec![CTypedNameAndSQL {
