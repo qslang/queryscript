@@ -16,15 +16,15 @@ use std::path::Path;
 use std::rc::Rc;
 
 #[derive(Clone, Debug)]
-pub struct ReadlineStats {
+pub struct RustylineStats {
     tried: u64,
     completed: u64,
     msg: String,
 }
 
-impl ReadlineStats {
-    pub fn new() -> ReadlineStats {
-        ReadlineStats {
+impl RustylineStats {
+    pub fn new() -> RustylineStats {
+        RustylineStats {
             tried: 0,
             completed: 0,
             msg: String::new(),
@@ -32,32 +32,32 @@ impl ReadlineStats {
     }
 }
 
-impl fmt::Display for ReadlineStats {
+impl fmt::Display for RustylineStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!("{:?}", self))?;
         Ok(())
     }
 }
 
-pub struct ReadlineHelper {
+pub struct RustylineHelper {
     pub compiler: compile::Compiler,
     pub schema: schema::Ref<schema::Schema>,
     pub curr_buffer: Rc<RefCell<String>>,
-    pub stats: Rc<RefCell<ReadlineStats>>,
+    pub stats: Rc<RefCell<RustylineStats>>,
     pub debug: bool,
 }
 
-impl ReadlineHelper {
+impl RustylineHelper {
     pub fn new(
         compiler: compile::Compiler,
         schema: schema::Ref<schema::Schema>,
         curr_buffer: Rc<RefCell<String>>,
-    ) -> ReadlineHelper {
-        ReadlineHelper {
+    ) -> RustylineHelper {
+        RustylineHelper {
             compiler,
             schema,
             curr_buffer,
-            stats: Rc::new(RefCell::new(ReadlineStats::new())),
+            stats: Rc::new(RefCell::new(RustylineStats::new())),
             debug: false, // Switch this to true to get diagnostics as you type
         }
     }
@@ -176,7 +176,7 @@ fn get_record_fields(
     Ok(Vec::new())
 }
 
-impl Completer for ReadlineHelper {
+impl Completer for RustylineHelper {
     type Candidate = Pair;
 
     fn complete(
@@ -320,7 +320,7 @@ impl Completer for ReadlineHelper {
     }
 }
 
-impl Hinter for ReadlineHelper {
+impl Hinter for RustylineHelper {
     type Hint = String;
 
     fn hint(&self, _line: &str, _pos: usize, _ctx: &Context<'_>) -> Option<Self::Hint> {
@@ -332,6 +332,6 @@ impl Hinter for ReadlineHelper {
     }
 }
 
-impl Highlighter for ReadlineHelper {}
-impl Validator for ReadlineHelper {}
-impl Helper for ReadlineHelper {}
+impl Highlighter for RustylineHelper {}
+impl Validator for RustylineHelper {}
+impl Helper for RustylineHelper {}

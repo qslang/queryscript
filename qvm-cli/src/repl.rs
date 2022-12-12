@@ -7,8 +7,8 @@ use qvm::error::*;
 use qvm::parser;
 use qvm::parser::error::PrettyError;
 use qvm::runtime;
+use qvm_tools::rustyline::RustylineHelper;
 
-use crate::readline_helper::ReadlineHelper;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -21,7 +21,7 @@ pub fn run(rt: &runtime::Runtime, engine_type: qvm::runtime::SQLEngineType) {
     let file = "<repl>".to_string();
     let repl_schema = schema::Schema::new(file.clone(), Some(cwd));
     let curr_buffer = Rc::new(RefCell::new(String::new()));
-    let helper = ReadlineHelper::new(
+    let helper = RustylineHelper::new(
         repl_compiler.clone(),
         repl_schema.clone(),
         curr_buffer.clone(),

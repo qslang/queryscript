@@ -1,18 +1,15 @@
 [package]
-name = "qvm-cli"
+name = "qvm-tools"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[[bin]]
-name = "qvm"
-path = "src/main.rs"
+# [[bin]]
+# name = "qvm-tools"
+# path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4.0", features=["derive"] }
-home = "0.5.4"
 qvm = { path="../qvm" }
-qvm-tools = { path="../qvm-tools" }
 rustyline = "10.0.0"
 snafu = { version = "0.7.3" , features = [ "backtraces" ] }
