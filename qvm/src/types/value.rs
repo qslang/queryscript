@@ -2,11 +2,12 @@ pub use arrow::{
     array::Array as ArrowArray,
     array::ArrayRef as ArrowArrayRef,
     datatypes::{
-        i256, DECIMAL128_MAX_PRECISION, DECIMAL128_MAX_SCALE, DECIMAL256_MAX_PRECISION,
+        DECIMAL128_MAX_PRECISION, DECIMAL128_MAX_SCALE, DECIMAL256_MAX_PRECISION,
         DECIMAL256_MAX_SCALE,
     },
     record_batch::RecordBatch as ArrowRecordBatch,
 };
+pub use arrow_buffer::i256;
 use async_trait::async_trait;
 use dyn_clone::{clone_trait_object, DynClone};
 pub use std::any::Any;
