@@ -10,6 +10,7 @@ use qvm::parser::error::PrettyError;
 use qvm::runtime;
 
 mod repl;
+mod rustyline;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]

@@ -2516,16 +2516,6 @@ dependencies = [
  "clap 4.0.22",
  "home",
  "qvm",
- "qvm-tools",
- "rustyline",
- "snafu",
-]
-
-[[package]]
-name = "qvm-tools"
-version = "0.1.0"
-dependencies = [
- "qvm",
  "rustyline",
  "snafu",
 ]

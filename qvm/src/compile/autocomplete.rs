@@ -1,11 +1,10 @@
-use rustyline::{completion::*, highlight::*, hint::*, validate::*, Context, Helper, Result};
 use snafu::prelude::*;
 
-use qvm::ast;
-use qvm::ast::ToStrings;
-use qvm::compile;
-use qvm::compile::schema;
-use qvm::parser;
+use crate::ast;
+use crate::ast::ToStrings;
+use crate::compile;
+use crate::compile::schema;
+use crate::parser;
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -16,15 +15,15 @@ use std::path::Path;
 use std::rc::Rc;
 
 #[derive(Clone, Debug)]
-pub struct RustylineStats {
-    tried: u64,
-    completed: u64,
-    msg: String,
+pub struct AutoCompleterStats {
+    pub tried: u64,
+    pub completed: u64,
+    pub msg: String,
 }
 
-impl RustylineStats {
-    pub fn new() -> RustylineStats {
-        RustylineStats {
+impl AutoCompleterStats {
+    pub fn new() -> AutoCompleterStats {
+        AutoCompleterStats {
             tried: 0,
             completed: 0,
             msg: String::new(),
@@ -32,32 +31,32 @@ impl RustylineStats {
     }
 }
 
-impl fmt::Display for RustylineStats {
+impl fmt::Display for AutoCompleterStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!("{:?}", self))?;
         Ok(())
     }
 }
 
-pub struct RustylineHelper {
+pub struct AutoCompleter {
     pub compiler: compile::Compiler,
     pub schema: schema::Ref<schema::Schema>,
     pub curr_buffer: Rc<RefCell<String>>,
-    pub stats: Rc<RefCell<RustylineStats>>,
+    pub stats: Rc<RefCell<AutoCompleterStats>>,
     pub debug: bool,
 }
 
-impl RustylineHelper {
+impl AutoCompleter {
     pub fn new(
         compiler: compile::Compiler,
         schema: schema::Ref<schema::Schema>,
         curr_buffer: Rc<RefCell<String>>,
-    ) -> RustylineHelper {
-        RustylineHelper {
+    ) -> AutoCompleter {
+        AutoCompleter {
             compiler,
             schema,
             curr_buffer,
-            stats: Rc::new(RefCell::new(RustylineStats::new())),
+            stats: Rc::new(RefCell::new(AutoCompleterStats::new())),
             debug: false, // Switch this to true to get diagnostics as you type
         }
     }
@@ -176,15 +175,8 @@ fn get_record_fields(
     Ok(Vec::new())
 }
 
-impl Completer for RustylineHelper {
-    type Candidate = Pair;
-
-    fn complete(
-        &self,
-        line: &str,
-        pos: usize,
-        _ctx: &Context<'_>,
-    ) -> Result<(usize, Vec<Self::Candidate>)> {
+impl AutoCompleter {
+    pub fn auto_complete(&self, line: &str, pos: usize) -> (usize, Vec<String>) {
         (&mut *self.stats.borrow_mut()).tried += 1;
 
         let mut full = self.curr_buffer.borrow().clone();
@@ -198,7 +190,7 @@ impl Completer for RustylineHelper {
             Ok(r) => r,
             Err(e) => {
                 (&mut *self.stats.borrow_mut()).msg = format!("{}", e);
-                return Ok((0, Vec::new()));
+                return (0, Vec::new());
             }
         };
         let mut parser = parser::Parser::new("<repl>", tokens, eof);
@@ -214,7 +206,7 @@ impl Completer for RustylineHelper {
 
         if suggestion_pos < start_pos {
             (&mut *self.stats.borrow_mut()).msg = format!("failed before");
-            return Ok((0, Vec::new()));
+            return (0, Vec::new());
         }
 
         let mut ident_types = BTreeMap::<char, Vec<String>>::new();
@@ -296,7 +288,7 @@ impl Completer for RustylineHelper {
 
         let all = vec![vars, types, schemas, keywords].concat();
         let filtered = all
-            .iter()
+            .into_iter()
             .filter(|a| a.starts_with(partial.as_str()))
             .collect::<Vec<_>>();
 
@@ -306,32 +298,9 @@ impl Completer for RustylineHelper {
             partial,
             filtered,
         );
-        let pairs = filtered
-            .into_iter()
-            .map(|s| Pair {
-                display: s.clone(),
-                replacement: s.clone(),
-            })
-            .collect();
 
         (&mut *self.stats.borrow_mut()).completed += 1;
 
-        Ok((suggestion_pos - start_pos, pairs))
+        (suggestion_pos - start_pos, filtered)
     }
 }
-
-impl Hinter for RustylineHelper {
-    type Hint = String;
-
-    fn hint(&self, _line: &str, _pos: usize, _ctx: &Context<'_>) -> Option<Self::Hint> {
-        if self.debug {
-            Some(format!("         {}", self.stats.borrow()))
-        } else {
-            None
-        }
-    }
-}
-
-impl Highlighter for RustylineHelper {}
-impl Validator for RustylineHelper {}
-impl Helper for RustylineHelper {}

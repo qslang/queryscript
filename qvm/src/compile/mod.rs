@@ -1,3 +1,4 @@
+pub mod autocomplete;
 mod builtin_types;
 mod coerce;
 pub mod compile;

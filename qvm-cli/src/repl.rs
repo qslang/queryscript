@@ -1,13 +1,13 @@
 use rustyline::{error::ReadlineError, Editor};
 use snafu::prelude::*;
 
+use crate::rustyline::RustylineHelper;
 use qvm::compile;
 use qvm::compile::schema;
 use qvm::error::*;
 use qvm::parser;
 use qvm::parser::error::PrettyError;
 use qvm::runtime;
-use qvm_tools::rustyline::RustylineHelper;
 
 use std::cell::RefCell;
 use std::rc::Rc;
