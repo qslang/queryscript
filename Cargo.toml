@@ -3,4 +3,5 @@
 members = [
     "qvm",
     "qvm-cli",
+    "qvm-lsp",
 ]
