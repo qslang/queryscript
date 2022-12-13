@@ -29,6 +29,9 @@ struct Cli {
 
     #[arg(long, default_value_t = String::from("duckdb"))]
     engine: String,
+
+    #[arg(short, long)]
+    execute: Option<String>,
 }
 
 enum Mode {
@@ -73,7 +76,7 @@ fn main_result() -> Result<(), QVMError> {
             })?;
 
             let compiler = compile::Compiler::new()?;
-            match run_file(compiler.clone(), &rt, engine_type, &file, mode) {
+            match run_file(compiler.clone(), &rt, engine_type, &file, mode, cli.execute) {
                 Err(err) => {
                     let errs = if cli.verbose {
                         err.format_backtrace()
@@ -97,6 +100,9 @@ fn main_result() -> Result<(), QVMError> {
             if cli.parse {
                 whatever!("Cannot run with parse-only mode (--parse) in the repl");
             }
+            if cli.execute.is_some() {
+                whatever!("Cannot run single expression (--execute) in the repl");
+            }
             let rt = runtime::build().context(RuntimeSnafu {
                 file: "<repl>".to_string(),
             })?;
@@ -113,6 +119,7 @@ fn run_file(
     engine_type: qvm::runtime::SQLEngineType,
     file: &str,
     mode: Mode,
+    execute: Option<String>,
 ) -> Result<(), QVMError> {
     let path = Path::new(&file);
     if !path.exists() {
@@ -137,8 +144,27 @@ fn run_file(
         .as_result()?
         .unwrap();
 
+    if let Some(execute) = &execute {
+        // Add a semicolon on so that it's not required in the last expression within the argument
+        // to --execute
+        //
+        let execute = execute.clone() + ";";
+
+        // If a string was provided to execute against the schema, then clear out any other
+        // expressions to replace them with the provided one.
+        //
+        schema.write()?.exprs = vec![];
+        compiler
+            .compile_string(schema.clone(), execute.as_str())
+            .as_result()?;
+    }
+
     if matches!(mode, Mode::Compile) {
-        println!("{:#?}", schema);
+        if execute.is_none() {
+            println!("{:#?}", schema);
+        } else {
+            println!("{:#?}", schema.read()?.exprs.first().unwrap());
+        }
         return Ok(());
     }
 
