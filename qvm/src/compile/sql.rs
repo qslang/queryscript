@@ -1622,10 +1622,6 @@ pub fn compile_sqlexpr(
                 }
             }
 
-            // XXX: Now that we are binding SQL queries, we need to detect whether the arguments
-            // contain any references to values within the SQL query and avoid lifting the function
-            // expression if they do.
-            //
             let type_ = fn_type.ret.clone();
             let is_builtin = match func.expr.as_ref() {
                 Expr::SchemaEntry(STypedExpr { expr, .. }) => {
@@ -1644,34 +1640,37 @@ pub fn compile_sqlexpr(
                 _ => false,
             };
 
-            let expr = if is_builtin {
-                let arg_exprs: Vec<_> = arg_exprs
-                    .iter()
-                    .map(|e| {
-                        let ts = intern_cref_placeholder(
-                            compiler.clone(),
-                            "arg".to_string(),
-                            CTypedExpr {
-                                type_: e.type_.clone(),
-                                expr: e.expr.clone(),
-                            },
-                        )?;
-                        let name = Arc::new(e.name.clone());
-                        ts.sql.then(move |sql: Ref<SQL<CRef<MType>>>| {
-                            // This is a bit annoying. It'd be a lot nicer if we didn't
-                            // have to clone the name twice.
-                            Ok(mkcref(NameAndSQL {
-                                name: name.as_ref().clone(),
-                                sql: Arc::new(sql.read()?.clone()),
-                            }))
-                        })
-                    })
-                    .collect::<Result<_>>()?;
+            let expr = compiler.async_cref({
+                let compiler = compiler.clone();
+                let loc = loc.clone();
+                let name = name.clone();
+                async move {
+                    if is_builtin {
+                        let arg_exprs: Vec<_> = arg_exprs
+                            .iter()
+                            .map(|e| {
+                                let ts = intern_cref_placeholder(
+                                    compiler.clone(),
+                                    "arg".to_string(),
+                                    CTypedExpr {
+                                        type_: e.type_.clone(),
+                                        expr: e.expr.clone(),
+                                    },
+                                )?;
+                                let name = Arc::new(e.name.clone());
+                                ts.sql.then(move |sql: Ref<SQL<CRef<MType>>>| {
+                                    // This is a bit annoying. It'd be a lot nicer if we didn't
+                                    // have to clone the name twice.
+                                    Ok(mkcref(NameAndSQL {
+                                        name: name.as_ref().clone(),
+                                        sql: Arc::new(sql.read()?.clone()),
+                                    }))
+                                })
+                            })
+                            .collect::<Result<_>>()?;
 
-                let name_wrapper = Arc::new(name.clone());
-                combine_crefs(arg_exprs)?.then({
-                    let loc = loc.clone();
-                    move |arg_exprs: Ref<Vec<Ref<NameAndSQL>>>| {
+                        let name_wrapper = Arc::new(name.clone());
+                        let arg_exprs = combine_crefs(arg_exprs)?.await?;
                         let mut args = Vec::new();
                         let mut params = BTreeMap::new();
                         for arg in arg_exprs.read()?.iter() {
@@ -1704,106 +1703,53 @@ pub fn compile_sqlexpr(
                                 special: false,
                             })),
                         }))))
-                    }
-                })?
-            } else {
-                let arg_exprs = arg_exprs
-                    .into_iter()
-                    .map(move |cte| {
-                        cte.expr.then(move |expr: Ref<Expr<CRef<MType>>>| {
-                            Ok(mkcref(TypedExpr {
-                                type_: cte.type_.clone(),
-                                expr: Arc::new(expr.read()?.clone()),
-                            }))
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                combine_crefs(arg_exprs)?.then(
-                    move |arg_exprs: Ref<Vec<Ref<TypedExpr<CRef<MType>>>>>| {
+                    } else {
+                        let arg_exprs = arg_exprs
+                            .into_iter()
+                            .map(move |cte| {
+                                cte.expr.then(move |expr: Ref<Expr<CRef<MType>>>| {
+                                    Ok(mkcref(TypedExpr {
+                                        type_: cte.type_.clone(),
+                                        expr: Arc::new(expr.read()?.clone()),
+                                    }))
+                                })
+                            })
+                            .collect::<Result<Vec<_>>>()?;
+                        let arg_exprs = combine_crefs(arg_exprs)?.await?;
+                        let args = arg_exprs
+                            .read()?
+                            .iter()
+                            .map(|e| Ok(e.read()?.clone()))
+                            .collect::<Result<Vec<_>>>()?;
+
                         Ok(mkcref(Expr::FnCall(FnCallExpr {
                             func: Arc::new(TypedExpr {
                                 type_: mkcref(MType::Fn(fn_type.clone())),
                                 expr: func.expr.clone(),
                             }),
-                            args: arg_exprs
-                                .read()?
-                                .iter()
-                                .map(|e| Ok(e.read()?.clone()))
-                                .collect::<Result<_>>()?,
+                            args,
                             ctx_folder: schema.read()?.folder.clone(),
                         })))
-                    },
-                )?
-            };
-            // let args_nonames = arg_sqlexprs
-            //     .iter()
-            //     .map(|e| CTypedSQL {
-            //         type_: e.type_.clone(),
-            //         expr: e.expr.clone(),
-            //     })
-            //     .collect::<Vec<_>>();
-            // let mut params = combine_sqlparams(args_nonames.iter().collect())?;
+                    }
+                }
+            })?;
 
-            // let placeholder_name = QVM_NAMESPACE.to_string()
-            //     + new_placeholder_name(schema.clone(), "func").as_str();
-
-            // params.insert(
-            //     placeholder_name.clone(),
-            //     TypedExpr {
-            //         expr: func.expr,
-            //         type_: fn_type.ret.clone(),
-            //     },
-            // );
-
-            // Arc::new(Expr::SQL(Arc::new(SQL {
-            //     params,
-            //     expr: sqlast::Expr::Function(sqlast::Function {
-            //         name: sqlast::ObjectName(vec![sqlast::Ident {
-            //             value: placeholder_name.clone(),
-            //             quote_style: None,
-            //         }]),
-            //         args: arg_sqlexprs
-            //             .iter()
-            //             .map(|e| sqlast::FunctionArg::Named {
-            //                 name: sqlast::Ident {
-            //                     value: e.name.clone(),
-            //                     quote_style: None,
-            //                 },
-            //                 arg: sqlast::FunctionArgExpr::Expr(e.expr.expr.clone()),
-            //             })
-            //             .collect(),
-            //         over: None,
-            //         distinct: false,
-            //         special: false,
-            //     }),
-            // })))
-
-            // XXX There are cases here where we could inline eagerly
-            //
             CTypedExpr { type_, expr }
         }
-        sqlast::Expr::CompoundIdentifier(sqlpath) => {
-            // XXX There are cases here where we could inline eagerly
-            //
-            compile_sqlreference(
-                compiler.clone(),
-                schema.clone(),
-                scope.clone(),
-                loc,
-                sqlpath,
-            )?
-        }
-        sqlast::Expr::Identifier(ident) => {
-            // XXX There are cases here where we could inline eagerly
-            //
-            compile_sqlreference(
-                compiler.clone(),
-                schema.clone(),
-                scope.clone(),
-                loc,
-                &vec![ident.clone()],
-            )?
-        }
+        sqlast::Expr::CompoundIdentifier(sqlpath) => compile_sqlreference(
+            compiler.clone(),
+            schema.clone(),
+            scope.clone(),
+            loc,
+            sqlpath,
+        )?,
+        sqlast::Expr::Identifier(ident) => compile_sqlreference(
+            compiler.clone(),
+            schema.clone(),
+            scope.clone(),
+            loc,
+            &vec![ident.clone()],
+        )?,
         _ => {
             return Err(CompileError::unimplemented(
                 loc.clone(),
