@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
 use regex::Regex;
-use tower_lsp::jsonrpc::Result;
+use tower_lsp::jsonrpc::{Error, Result};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
@@ -60,11 +60,6 @@ impl LanguageServer for Backend {
             None => false,
         };
 
-        eprintln!(
-            "has configuration capability: {:?}",
-            config.has_configuration_capability
-        );
-
         let result = InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
@@ -76,6 +71,9 @@ impl LanguageServer for Backend {
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(true),
                     ..Default::default()
+                }),
+                code_lens_provider: Some(CodeLensOptions {
+                    resolve_provider: Some(true),
                 }),
                 ..Default::default()
             },
@@ -211,6 +209,48 @@ impl LanguageServer for Backend {
             }
         }
         Ok(item)
+    }
+
+    async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
+        eprintln!("params: {:?}", params);
+
+        let uri = params.text_document.uri;
+        let documents = self.documents.read().unwrap();
+
+        let text = documents
+            .get(&uri.to_string())
+            .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?
+            .clone();
+
+        let mut lenses = Vec::new();
+        for (i, line) in text.lines().enumerate() {
+            let range = Range {
+                start: Position {
+                    line: i as u32,
+                    character: 0,
+                },
+                end: Position {
+                    line: i as u32,
+                    character: line.len() as u32,
+                },
+            };
+            let command = Command {
+                title: "Show references".to_string(),
+                command: "showReferences".to_string(),
+
+                // TODO: I think we'll want to turn the arguments into a struct
+                // of some sort
+                arguments: Some(vec![
+                    uri.to_string().into(), /* , range.clone().into() */
+                ]),
+            };
+            lenses.push(CodeLens {
+                range,
+                command: Some(command),
+                data: None,
+            });
+        }
+        Ok(Some(lenses))
     }
 }
 
