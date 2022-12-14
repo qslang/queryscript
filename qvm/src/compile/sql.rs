@@ -2,7 +2,7 @@ use lazy_static::lazy_static;
 use snafu::prelude::*;
 use sqlparser::{ast as sqlast, ast::DataType as ParserDataType};
 use std::borrow::Cow;
-use std::collections::{btree_map, BTreeMap};
+use std::collections::{btree_map, BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
@@ -101,7 +101,7 @@ pub fn compile_sqlreference(
             if let Some(relation) = scope.read()?.relations.get(&name) {
                 let type_ = get_rowtype(compiler.clone(), relation.type_.clone())?;
                 let expr = mkcref(Expr::SQL(Arc::new(SQL {
-                    params: BTreeMap::new(),
+                    names: CSQLNames::from_unbound(sqlpath),
                     body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
                 })));
                 return Ok(CTypedExpr { type_, expr });
@@ -115,15 +115,14 @@ pub fn compile_sqlreference(
                     move |available: Ref<InsertionOrderMap<String, FieldMatch>>| {
                         if let Some(fm) = available.read()?.get(&name) {
                             if let Some(type_) = fm.type_.clone() {
+                                let sqlpath =
+                                    vec![ident(fm.relation.value.clone()), ident(name.clone())];
                                 Ok(mkcref(TypedExpr {
                                     type_: type_.clone(),
                                     expr: Arc::new(Expr::SQL(Arc::new(SQL {
-                                        params: BTreeMap::new(),
+                                        names: CSQLNames::from_unbound(&sqlpath),
                                         body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(
-                                            vec![
-                                                ident(fm.relation.value.clone()),
-                                                ident(name.clone()),
-                                            ],
+                                            sqlpath,
                                         )),
                                     }))),
                                 }))
@@ -164,7 +163,7 @@ pub fn compile_sqlreference(
                     vec![Ident::with_location(loc.clone(), field_name)].as_slice(),
                 )?;
                 let expr = mkcref(Expr::SQL(Arc::new(SQL {
-                    params: BTreeMap::new(),
+                    names: CSQLNames::from_unbound(&sqlpath),
                     body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
                 })));
                 return Ok(CTypedExpr { type_, expr });
@@ -228,7 +227,7 @@ pub fn compile_reference(
             full_name.extend(remainder.clone().into_iter().map(|n| ident(n.value)));
 
             let expr = Arc::new(Expr::SQL(Arc::new(SQL {
-                params: placeholder.params.clone(),
+                names: placeholder.names.clone(),
                 body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(full_name)),
             })));
 
@@ -250,7 +249,10 @@ pub fn intern_placeholder(
             let placeholder_name = "@".to_string() + compiler.next_placeholder(kind)?.as_str();
 
             Ok(Arc::new(SQL {
-                params: Params::from([(placeholder_name.clone(), expr.clone())]),
+                names: SQLNames {
+                    params: Params::from([(placeholder_name.clone(), expr.clone())]),
+                    unbound: BTreeSet::new(),
+                },
                 body: SQLBody::Expr(sqlast::Expr::Identifier(ident(placeholder_name.clone()))),
             }))
         }
@@ -291,7 +293,7 @@ pub fn compile_sqlarg(
     intern_cref_placeholder(compiler.clone(), "param".to_string(), compiled)
 }
 
-type CParams = Params<CRef<MType>>;
+type CSQLNames = SQLNames<CRef<MType>>;
 
 pub fn combine_crefs<T: 'static + Constrainable>(all: Vec<CRef<T>>) -> Result<CRef<Vec<Ref<T>>>> {
     let mut ret = mkcref(Vec::new());
@@ -305,19 +307,12 @@ pub fn combine_crefs<T: 'static + Constrainable>(all: Vec<CRef<T>>) -> Result<CR
     Ok(ret)
 }
 
-pub fn combine_sqlparams(all: &Vec<Ref<SQL<CRef<MType>>>>) -> Result<CParams> {
-    let mut ret = BTreeMap::new();
+pub fn combine_sqlnames(all: &Vec<Ref<SQL<CRef<MType>>>>) -> Result<CSQLNames> {
+    let mut ret = CSQLNames::new();
     for e in all {
-        insert_sqlparams(&mut ret, &*e.read()?)?;
+        ret.extend(e.read()?.names.clone());
     }
     Ok(ret)
-}
-
-pub fn insert_sqlparams(dest: &mut CParams, src: &SQL<CRef<MType>>) -> Result<()> {
-    for (n, p) in &src.params {
-        dest.insert(n.clone(), p.clone());
-    }
-    Ok(())
 }
 
 #[derive(Clone, Debug)]
@@ -397,6 +392,36 @@ impl SQLScope {
             Ok(mkcref(ret))
         })
     }
+
+    pub fn remove_bound_references(
+        &self,
+        compiler: Compiler,
+        names: CSQLNames,
+    ) -> Result<CRef<CSQLNames>> {
+        let relations = self.relations.clone();
+        compiler.async_cref({
+            let compiler = compiler.clone();
+            async move {
+                let mut names = names.clone();
+                for (relation, expr) in &relations {
+                    names.unbound.remove(&vec![relation.clone()]);
+                    let rowtype = get_rowtype(compiler.clone(), expr.type_.clone())?.await?;
+                    match &*rowtype.read()? {
+                        MType::Record(MRecordType { fields, .. }) => {
+                            for field in fields {
+                                names
+                                    .unbound
+                                    .remove(&vec![relation.clone(), field.name.value.clone()]);
+                                names.unbound.remove(&vec![field.name.value.clone()]);
+                            }
+                        }
+                        _ => {}
+                    };
+                }
+                Ok(mkcref(names))
+            }
+        })
+    }
 }
 
 impl Constrainable for SQLScope {}
@@ -407,7 +432,7 @@ pub fn compile_relation(
     scope: &Ref<SQLScope>,
     loc: &SourceLocation,
     relation: &sqlast::TableFactor,
-    from_params: &mut Params<CRef<MType>>,
+    from_names: &mut CSQLNames,
 ) -> Result<sqlast::TableFactor> {
     Ok(match relation {
         sqlast::TableFactor::Table {
@@ -464,7 +489,7 @@ pub fn compile_relation(
 
                     let placeholder_name =
                         QVM_NAMESPACE.to_string() + compiler.next_placeholder("rel")?.as_str();
-                    from_params.insert(placeholder_name.clone(), relation);
+                    from_names.params.insert(placeholder_name.clone(), relation);
 
                     sqlast::TableFactor::Table {
                         name: sqlast::ObjectName(vec![ident(placeholder_name)]),
@@ -499,7 +524,7 @@ pub fn compile_join_constraint(
     scope: &Ref<SQLScope>,
     loc: &SourceLocation,
     join_constraint: &sqlast::JoinConstraint,
-) -> Result<CRef<CWrap<(Params<CRef<MType>>, sqlast::JoinConstraint)>>> {
+) -> Result<CRef<CWrap<(CSQLNames, sqlast::JoinConstraint)>>> {
     use sqlast::JoinConstraint::*;
     Ok(match join_constraint {
         On(e) => {
@@ -512,7 +537,7 @@ pub fn compile_join_constraint(
                     let sql = sql.sql.await?;
                     let sql = sql.read()?;
                     Ok(cwrap((
-                        sql.params.clone(),
+                        sql.names.clone(),
                         On(sql
                             .body
                             .as_expr()
@@ -522,8 +547,8 @@ pub fn compile_join_constraint(
             })?
         }
         Using(_) => return Err(CompileError::unimplemented(loc.clone(), "JOIN ... USING")),
-        Natural => cwrap((Params::new(), Natural)),
-        None => cwrap((Params::new(), None)),
+        Natural => cwrap((CSQLNames::new(), Natural)),
+        None => cwrap((CSQLNames::new(), None)),
     })
 }
 
@@ -533,7 +558,7 @@ pub fn compile_join_operator(
     scope: &Ref<SQLScope>,
     loc: &SourceLocation,
     join_operator: &sqlast::JoinOperator,
-) -> Result<CRef<CWrap<(Params<CRef<MType>>, sqlast::JoinOperator)>>> {
+) -> Result<CRef<CWrap<(CSQLNames, sqlast::JoinOperator)>>> {
     use sqlast::JoinOperator::*;
     let join_constructor = match join_operator {
         Inner(_) => Some(Inner),
@@ -547,8 +572,8 @@ pub fn compile_join_operator(
         Inner(c) | LeftOuter(c) | RightOuter(c) | FullOuter(c) => {
             let constraint = compile_join_constraint(compiler, schema, scope, loc, c)?;
             compiler.async_cref(async move {
-                let (params, sql) = cunwrap(constraint.await?)?;
-                Ok(cwrap((params, join_constructor.unwrap()(sql))))
+                let (names, sql) = cunwrap(constraint.await?)?;
+                Ok(cwrap((names, join_constructor.unwrap()(sql))))
             })?
         }
         o => {
@@ -566,15 +591,15 @@ pub fn compile_table_with_joins(
     scope: &Ref<SQLScope>,
     loc: &SourceLocation,
     table: &sqlast::TableWithJoins,
-) -> Result<CRef<CWrap<(Params<CRef<MType>>, sqlast::TableWithJoins)>>> {
-    let mut table_params = BTreeMap::new();
+) -> Result<CRef<CWrap<(CSQLNames, sqlast::TableWithJoins)>>> {
+    let mut table_names = CSQLNames::new();
     let relation = compile_relation(
         compiler,
         schema,
         scope,
         loc,
         &table.relation,
-        &mut table_params,
+        &mut table_names,
     )?;
 
     let mut join_rels = Vec::new();
@@ -586,7 +611,7 @@ pub fn compile_table_with_joins(
             scope,
             loc,
             &join.relation,
-            &mut table_params,
+            &mut table_names,
         )?;
 
         join_rels.push(join_relation);
@@ -601,15 +626,15 @@ pub fn compile_table_with_joins(
     compiler.async_cref(async move {
         let mut joins = Vec::new();
         for (jo, relation) in join_ops.into_iter().zip(join_rels.into_iter()) {
-            let (params, join_operator) = cunwrap(jo.await?)?;
-            table_params.extend(params);
+            let (names, join_operator) = cunwrap(jo.await?)?;
+            table_names.extend(names);
             joins.push(sqlast::Join {
                 relation,
                 join_operator,
             });
         }
         Ok(cwrap((
-            table_params,
+            table_names,
             sqlast::TableWithJoins { relation, joins },
         )))
     })
@@ -622,11 +647,11 @@ pub fn compile_from(
     from: &Vec<sqlast::TableWithJoins>,
 ) -> Result<(
     Ref<SQLScope>,
-    CRef<CWrap<(Params<CRef<MType>>, Vec<sqlast::TableWithJoins>)>>,
+    CRef<CWrap<(CSQLNames, Vec<sqlast::TableWithJoins>)>>,
 )> {
     let scope = SQLScope::empty();
     let from = match from.len() {
-        0 => cwrap((Params::new(), Vec::new())),
+        0 => cwrap((CSQLNames::new(), Vec::new())),
         _ => {
             let tables = from
                 .iter()
@@ -634,16 +659,16 @@ pub fn compile_from(
                 .collect::<Result<Vec<_>>>()?;
 
             compiler.async_cref(async move {
-                let mut all_params = Params::new();
+                let mut all_names = CSQLNames::new();
                 let mut all_tables = Vec::new();
 
                 for table in tables.into_iter() {
-                    let (params, table) = cunwrap(table.await?)?;
-                    all_params.extend(params);
+                    let (names, table) = cunwrap(table.await?)?;
+                    all_names.extend(names);
                     all_tables.push(table);
                 }
 
-                Ok(cwrap((all_params, all_tables)))
+                Ok(cwrap((all_names, all_tables)))
             })?
         }
     };
@@ -657,7 +682,7 @@ pub fn compile_order_by(
     scope: &Ref<SQLScope>,
     loc: &SourceLocation,
     order_by: &Vec<sqlast::OrderByExpr>,
-) -> Result<CRef<CWrap<(Params<CRef<MType>>, Vec<sqlast::OrderByExpr>)>>> {
+) -> Result<CRef<CWrap<(CSQLNames, Vec<sqlast::OrderByExpr>)>>> {
     let mut compiled_order_by = Vec::new();
     let mut compiled_opts = Vec::new();
     for ob in order_by {
@@ -675,13 +700,13 @@ pub fn compile_order_by(
         let loc = loc.clone();
         async move {
             let mut resolved_order_by = Vec::new();
-            let mut params = Params::new();
+            let mut names = CSQLNames::new();
             for (expr, (asc, nulls_first)) in
                 compiled_order_by.into_iter().zip(compiled_opts.into_iter())
             {
                 let resolved_expr = expr.sql.await?;
                 let resolved_expr = resolved_expr.read()?;
-                params.extend(resolved_expr.params.clone());
+                names.extend(resolved_expr.names.clone());
                 resolved_order_by.push(sqlast::OrderByExpr {
                     expr: resolved_expr
                         .body
@@ -692,7 +717,7 @@ pub fn compile_order_by(
                 });
             }
 
-            Ok(cwrap((params, resolved_order_by)))
+            Ok(cwrap((names, resolved_order_by)))
         }
     })
 }
@@ -705,7 +730,7 @@ pub fn compile_select(
 ) -> Result<(
     Ref<SQLScope>,
     CRef<MType>,
-    CRef<CWrap<(Params<CRef<MType>>, Box<sqlast::SetExpr>)>>,
+    CRef<CWrap<(CSQLNames, Box<sqlast::SetExpr>)>>,
 )> {
     if select.distinct {
         return Err(CompileError::unimplemented(loc.clone(), "DISTINCT"));
@@ -798,22 +823,23 @@ pub fn compile_select(
                                             .replace_location(loc.clone())]))
                                     }
                                 };
+                                let sqlpath = vec![
+                                    sqlast::Ident {
+                                        value: m.relation.value.clone(),
+                                        quote_style: None,
+                                    },
+                                    sqlast::Ident {
+                                        value: m.field.value.clone(),
+                                        quote_style: None,
+                                    },
+                                ];
                                 ret.push(CTypedNameAndSQL {
                                     name: m.field.clone(),
                                     type_,
                                     sql: mkcref(SQL {
-                                        params: BTreeMap::new(),
+                                        names: CSQLNames::from_unbound(&sqlpath),
                                         body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(
-                                            vec![
-                                                sqlast::Ident {
-                                                    value: m.relation.value.clone(),
-                                                    quote_style: None,
-                                                },
-                                                sqlast::Ident {
-                                                    value: m.field.value.clone(),
-                                                    quote_style: None,
-                                                },
-                                            ],
+                                            sqlpath,
                                         )),
                                     }),
                                 });
@@ -860,7 +886,7 @@ pub fn compile_select(
         let scope = scope.clone();
         let loc = loc.clone();
         async move {
-            let (from_params, from) = cunwrap(from.await?)?;
+            let (from_names, from) = cunwrap(from.await?)?;
 
             let exprs = projections.await?;
             let mut proj_exprs = Vec::new();
@@ -878,10 +904,10 @@ pub fn compile_select(
 
             let select = select.clone();
 
-            let mut params = BTreeMap::new();
+            let mut names = CSQLNames::new();
             let mut projection = Vec::new();
             for sqlexpr in &*proj_exprs {
-                insert_sqlparams(&mut params, sqlexpr.sql.as_ref())?;
+                names.extend(sqlexpr.sql.names.clone());
                 projection.push(sqlast::SelectItem::ExprWithAlias {
                     alias: ident(sqlexpr.name.value.clone()),
                     expr: sqlexpr
@@ -891,7 +917,7 @@ pub fn compile_select(
                         .context(RuntimeSnafu { loc: loc.clone() })?,
                 });
             }
-            params.extend(from_params.into_iter());
+            names.extend(from_names);
 
             let selection = match &select.selection {
                 Some(selection) => {
@@ -906,7 +932,7 @@ pub fn compile_select(
                         .type_
                         .unify(&resolve_global_atom(compiler.clone(), "bool")?)?;
                     let sql = compiled.sql.await?.read()?.clone();
-                    insert_sqlparams(&mut params, &sql)?;
+                    names.extend(sql.names.clone());
                     Some(
                         sql.body
                             .as_expr()
@@ -921,7 +947,7 @@ pub fn compile_select(
                 let compiled =
                     compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), &loc, gb)?;
                 let sql = compiled.sql.await?.read()?.clone();
-                insert_sqlparams(&mut params, &sql)?;
+                names.extend(sql.names.clone());
                 group_by.push(
                     sql.body
                         .as_expr()
@@ -935,8 +961,13 @@ pub fn compile_select(
             ret.selection = selection;
             ret.group_by = group_by;
 
+            let names = scope
+                .read()?
+                .remove_bound_references(compiler.clone(), names)?;
+            let names = names.await?.read()?.clone();
+
             Ok(cwrap((
-                params,
+                names,
                 Box::new(sqlast::SetExpr::Select(Box::new(ret.clone()))),
             )))
         }
@@ -948,12 +979,12 @@ pub fn compile_select(
 pub async fn finish_sqlexpr(
     loc: &SourceLocation,
     expr: CRef<Expr<CRef<MType>>>,
-    params: &mut Params<CRef<MType>>,
+    names: &mut CSQLNames,
 ) -> Result<sqlast::Expr> {
     let expr = expr.clone_inner().await?;
     Ok(match expr {
         Expr::SQL(s) => {
-            params.extend(s.params.clone().into_iter());
+            names.extend(s.names.clone());
             s.body
                 .as_expr()
                 .context(RuntimeSnafu { loc: loc.clone() })?
@@ -1034,28 +1065,34 @@ pub fn compile_sqlquery(
                 type_,
                 expr: compiler.async_cref({
                     let loc = loc.clone();
+                    let compiler = compiler.clone();
                     async move {
-                        let (mut params, body) = cunwrap(select.await?)?;
+                        let (mut names, body) = cunwrap(select.await?)?;
                         let limit = match limit {
                             Some(limit) => {
-                                Some(finish_sqlexpr(&loc, limit.expr, &mut params).await?)
+                                Some(finish_sqlexpr(&loc, limit.expr, &mut names).await?)
                             }
                             None => None,
                         };
 
                         let offset = match offset {
                             Some((offset, rows)) => Some(sqlparser::ast::Offset {
-                                value: finish_sqlexpr(&loc, offset.expr, &mut params).await?,
+                                value: finish_sqlexpr(&loc, offset.expr, &mut names).await?,
                                 rows,
                             }),
                             None => None,
                         };
 
-                        let (ob_params, order_by) = cunwrap(compiled_order_by.await?)?;
-                        params.extend(ob_params);
+                        let (ob_names, order_by) = cunwrap(compiled_order_by.await?)?;
+                        names.extend(ob_names);
+
+                        let names = scope
+                            .read()?
+                            .remove_bound_references(compiler.clone(), names)?;
+                        let names = names.await?.read()?.clone();
 
                         Ok(mkcref(Expr::SQL(Arc::new(SQL {
-                            params,
+                            names,
                             body: SQLBody::Query(sqlast::Query {
                                 with: None,
                                 body,
@@ -1083,7 +1120,7 @@ pub fn compile_sqlquery(
 lazy_static! {
     static ref GLOBAL_COMPILER: Compiler = Compiler::new().unwrap();
     static ref NULL_SQLEXPR: Arc<SQL<CRef<MType>>> = Arc::new(SQL {
-        params: BTreeMap::new(),
+        names: CSQLNames::new(),
         body: SQLBody::Expr(sqlast::Expr::Value(sqlast::Value::Null)),
     });
     static ref NULL: CTypedExpr = CTypedExpr {
@@ -1108,7 +1145,7 @@ fn apply_sqlcast(
     Ok(compiler.async_cref(async move {
         let final_expr = sql.clone_inner().await?;
         Ok(mkcref(SQL {
-            params: final_expr.params,
+            names: final_expr.names,
             body: SQLBody::Expr(sqlast::Expr::Cast {
                 expr: Box::new(
                     final_expr
@@ -1193,18 +1230,17 @@ where
     }
 }
 
-pub fn combine_sql_exprs<'a, T, I>(
+pub fn combine_sql_exprs<'a, I>(
     loc: &SourceLocation,
     iter: I,
-    params: &mut Params<CRef<T>>,
+    names: &mut CSQLNames,
 ) -> Result<Vec<sqlast::Expr>>
 where
-    T: Constrainable + 'static,
-    I: Iterator<Item = &'a Ref<SQL<CRef<T>>>>,
+    I: Iterator<Item = &'a Ref<SQL<CRef<MType>>>>,
 {
     iter.map(|c| {
         let c = c.read()?;
-        params.extend(c.params.clone());
+        names.extend(c.names.clone());
         Ok(c.body
             .as_expr()
             .context(RuntimeSnafu { loc: loc.clone() })?)
@@ -1230,7 +1266,7 @@ pub fn compile_sqlexpr(
                     parse_numeric_type(n).context(TypesystemSnafu { loc: loc.clone() })?,
                 )),
                 expr: mkcref(Expr::SQL(Arc::new(SQL {
-                    params: BTreeMap::new(),
+                    names: CSQLNames::new(),
                     body: SQLBody::Expr(expr.clone()),
                 }))),
             },
@@ -1241,14 +1277,14 @@ pub fn compile_sqlexpr(
             | sqlast::Value::DoubleQuotedString(_) => CTypedExpr {
                 type_: resolve_global_atom(compiler.clone(), "string")?,
                 expr: mkcref(Expr::SQL(Arc::new(SQL {
-                    params: BTreeMap::new(),
+                    names: CSQLNames::new(),
                     body: SQLBody::Expr(expr.clone()),
                 }))),
             },
             sqlast::Value::Boolean(_) => CTypedExpr {
                 type_: resolve_global_atom(compiler.clone(), "bool")?,
                 expr: mkcref(Expr::SQL(Arc::new(SQL {
-                    params: BTreeMap::new(),
+                    names: CSQLNames::new(),
                     body: SQLBody::Expr(expr.clone()),
                 }))),
             },
@@ -1261,9 +1297,9 @@ pub fn compile_sqlexpr(
             }
         },
         sqlast::Expr::Array(sqlast::Array { elem, .. }) => {
-            let c_elems: Vec<CTypedExpr> = elem
+            let c_elems = elem
                 .iter()
-                .map(|e| compile_sqlexpr(compiler.clone(), schema.clone(), scope.clone(), loc, e))
+                .map(|e| compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, e))
                 .collect::<Result<Vec<_>>>()?;
             let mut c_elem_iter = c_elems.iter();
             let data_type = if let Some(first) = c_elem_iter.next() {
@@ -1277,10 +1313,16 @@ pub fn compile_sqlexpr(
 
             CTypedExpr {
                 type_: data_type,
-                expr: mkcref(Expr::SQL(Arc::new(SQL {
-                    params: BTreeMap::new(),
-                    body: SQLBody::Expr(expr.clone()),
-                }))),
+                expr: combine_crefs(c_elems.iter().map(|s| s.sql.clone()).collect())?.then({
+                    let expr = expr.clone();
+                    move |args: Ref<Vec<Ref<SQL<CRef<MType>>>>>| {
+                        let names = combine_sqlnames(&*args.read()?)?;
+                        Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                            names,
+                            body: SQLBody::Expr(expr.clone()),
+                        }))))
+                    }
+                })?,
             }
         }
         sqlast::Expr::IsNotNull(expr) => {
@@ -1297,7 +1339,7 @@ pub fn compile_sqlexpr(
                     let loc = loc.clone();
                     move |sqlexpr: Ref<SQL<CRef<MType>>>| {
                         Ok(mkcref(Expr::SQL(Arc::new(SQL {
-                            params: sqlexpr.read()?.params.clone(),
+                            names: sqlexpr.read()?.names.clone(),
                             body: SQLBody::Expr(sqlast::Expr::IsNotNull(Box::new(
                                 sqlexpr
                                     .read()?
@@ -1360,9 +1402,9 @@ pub fn compile_sqlexpr(
                 expr: combine_crefs(vec![cleft.sql, cright.sql])?.then({
                     let loc = loc.clone();
                     move |args: Ref<Vec<Ref<SQL<CRef<MType>>>>>| {
-                        let params = combine_sqlparams(&*args.read()?)?;
+                        let names = combine_sqlnames(&*args.read()?)?;
                         Ok(mkcref(Expr::SQL(Arc::new(SQL {
-                            params,
+                            names,
                             body: SQLBody::Expr(sqlast::Expr::BinaryOp {
                                 left: Box::new(
                                     args.read()?[0]
@@ -1444,12 +1486,12 @@ pub fn compile_sqlexpr(
                 expr: compiler.async_cref({
                     let loc = loc.clone();
                     async move {
-                        let mut params = BTreeMap::new();
+                        let mut names = CSQLNames::new();
                         let operand = match c_operand {
                             Some(ref o) => {
                                 let operand = (&o.sql).await?;
                                 let operand = operand.read()?;
-                                params.extend(operand.params.clone());
+                                names.extend(operand.names.clone());
                                 Some(Box::new(
                                     operand
                                         .body
@@ -1463,20 +1505,20 @@ pub fn compile_sqlexpr(
                         let conditions = combine_sql_exprs(
                             &loc,
                             combined_conditions.await?.read()?.iter(),
-                            &mut params,
+                            &mut names,
                         )?;
 
                         let results = combine_sql_exprs(
                             &loc,
                             combined_results.await?.read()?.iter(),
-                            &mut params,
+                            &mut names,
                         )?;
 
                         let else_result = match c_else_result {
                             Some(ref o) => {
                                 let operand = (&o.sql).await?;
                                 let operand = operand.read()?;
-                                params.extend(operand.params.clone());
+                                names.extend(operand.names.clone());
                                 Some(Box::new(
                                     operand
                                         .body
@@ -1495,7 +1537,7 @@ pub fn compile_sqlexpr(
                         };
 
                         Ok(mkcref(Expr::SQL(Arc::new(SQL {
-                            params,
+                            names,
                             body: SQLBody::Expr(body),
                         }))))
                     }
@@ -1665,7 +1707,7 @@ pub fn compile_sqlexpr(
                         .collect::<Result<Vec<_>>>()?;
 
                     if is_builtin {
-                        let mut params = BTreeMap::new();
+                        let mut names = CSQLNames::new();
                         let mut args = Vec::new();
                         for arg in &*arg_exprs.read()? {
                             let sql = intern_placeholder(
@@ -1681,11 +1723,11 @@ pub fn compile_sqlexpr(
                                         .context(RuntimeSnafu { loc: loc.clone() })?,
                                 ),
                             });
-                            insert_sqlparams(&mut params, &sql)?;
+                            names.extend(sql.names.clone());
                         }
 
                         Ok(mkcref(Expr::SQL(Arc::new(SQL {
-                            params,
+                            names,
                             body: SQLBody::Expr(sqlast::Expr::Function(sqlast::Function {
                                 name,
                                 args,

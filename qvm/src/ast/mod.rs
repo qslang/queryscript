@@ -127,6 +127,12 @@ impl Ident {
     }
 }
 
+impl Into<String> for Ident {
+    fn into(self) -> String {
+        self.value
+    }
+}
+
 pub type Path = Vec<Ident>;
 
 impl Pretty for Path {
@@ -153,7 +159,7 @@ pub trait ToPath {
     fn to_path(&self, loc: &SourceLocation) -> Path;
 }
 
-impl ToPath for &Vec<sqlast::Ident> {
+impl ToPath for Vec<sqlast::Ident> {
     fn to_path(&self, loc: &SourceLocation) -> Path {
         self.iter()
             .map(|p| {
@@ -174,7 +180,7 @@ impl ToPath for &Vec<sqlast::Ident> {
     }
 }
 
-impl ToPath for &sqlast::ObjectName {
+impl ToPath for sqlast::ObjectName {
     fn to_path(&self, loc: &SourceLocation) -> Path {
         (&self.0).to_path(loc)
     }

@@ -481,6 +481,7 @@ impl SchemaInstance {
 pub type Value = crate::types::Value;
 
 pub type Params<TypeRef> = BTreeMap<String, TypedExpr<TypeRef>>;
+pub type UnboundPaths = BTreeSet<Vec<String>>;
 
 #[derive(Clone)]
 pub enum SQLBody {
@@ -534,12 +535,62 @@ impl SQLBody {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct SQLNames<TypeRef>
+where
+    TypeRef: Clone + fmt::Debug + Send + Sync,
+{
+    // A mapping of names to expressions that must be computed and provided in order for the SQL
+    // body to run correctly.  This enables us to reference the results of non-SQL expressions from
+    // within the SQL (e.g. the output of a native function that can't be inlined).
+    //
+    pub params: Params<TypeRef>,
+
+    // The set of identifiers in the body that refer to objects not defined within the parameters or
+    // the body itself (i.e. builtin function or sql references to tables outside the contained
+    // expression or query).  A SQL expression with unbound variables cannot be executed directly,
+    // and must be inlined into a broader query that provides definitions for the unbound names.
+    //
+    pub unbound: UnboundPaths,
+}
+
+impl<TypeRef> Constrainable for SQLNames<TypeRef> where TypeRef: Clone + fmt::Debug + Send + Sync {}
+
+impl<TypeRef> SQLNames<TypeRef>
+where
+    TypeRef: Clone + fmt::Debug + Send + Sync,
+{
+    pub fn new() -> SQLNames<TypeRef> {
+        SQLNames {
+            params: BTreeMap::new(),
+            unbound: BTreeSet::new(),
+        }
+    }
+
+    pub fn from_unbound(sqlpath: &Vec<sqlast::Ident>) -> SQLNames<TypeRef> {
+        SQLNames {
+            params: BTreeMap::new(),
+            unbound: BTreeSet::from([sqlpath.iter().map(|i| i.value.clone()).collect()]),
+        }
+    }
+
+    pub fn extend(&mut self, other: SQLNames<TypeRef>) {
+        self.params.extend(other.params);
+        self.unbound.extend(other.unbound);
+    }
+}
+
 #[derive(Clone)]
 pub struct SQL<TypeRef>
 where
     TypeRef: Clone + fmt::Debug + Send + Sync,
 {
-    pub params: Params<TypeRef>,
+    // Descriptions of all externally defined names within the SQL body.
+    //
+    pub names: SQLNames<TypeRef>,
+
+    // The AST representing the actual body of the SQL query or expression.
+    //
     pub body: SQLBody,
 }
 
@@ -550,7 +601,7 @@ impl<T: Clone + fmt::Debug + Send + Sync> fmt::Debug for SQL<T> {
             SQLBody::Query(query) => query.to_string(),
         };
         f.debug_struct("SQL")
-            .field("params", &self.params)
+            .field("params", &self.names)
             .field("body", &body)
             .finish()
     }
@@ -619,12 +670,16 @@ impl Expr<CRef<MType>> {
     pub fn to_runtime_type(&self) -> runtime::error::Result<Expr<Ref<Type>>> {
         match self {
             Expr::SQL(e) => {
-                let SQL { params, body } = e.as_ref();
+                let SQL { names, body } = e.as_ref();
                 Ok(Expr::SQL(Arc::new(SQL {
-                    params: params
-                        .iter()
-                        .map(|(name, param)| Ok((name.clone(), param.to_runtime_type()?)))
-                        .collect::<runtime::error::Result<_>>()?,
+                    names: SQLNames {
+                        params: names
+                            .params
+                            .iter()
+                            .map(|(name, param)| Ok((name.clone(), param.to_runtime_type()?)))
+                            .collect::<runtime::error::Result<_>>()?,
+                        unbound: names.unbound.clone(),
+                    },
                     body: body.clone(),
                 })))
             }
@@ -659,12 +714,16 @@ where
     fn visit(&self, visitor: &V) -> Self {
         match self {
             Expr::SQL(e) => {
-                let SQL { params, body } = e.as_ref();
+                let SQL { names, body } = e.as_ref();
                 Expr::SQL(Arc::new(SQL {
-                    params: params
-                        .iter()
-                        .map(|(name, param)| (name.clone(), param.visit(visitor)))
-                        .collect(),
+                    names: SQLNames {
+                        params: names
+                            .params
+                            .iter()
+                            .map(|(name, param)| (name.clone(), param.visit(visitor)))
+                            .collect(),
+                        unbound: names.unbound.clone(),
+                    },
                     body: match body {
                         SQLBody::Expr(expr) => SQLBody::Expr(expr.visit(visitor)),
                         SQLBody::Query(query) => SQLBody::Query(query.visit(visitor)),
