@@ -1,4 +1,4 @@
-use crate::compile::traverse::{Visit, Visitor};
+use crate::compile::traverse::{SQLVisitor, VisitSQL};
 use sqlparser::ast as sqlast;
 use std::collections::HashMap;
 
@@ -8,7 +8,7 @@ pub trait Normalizer {
 
     fn normalize<'s>(&'s self, query: &sqlast::Query) -> sqlast::Query {
         let visitor = NormalizerVisitor::<'s, Self> { normalizer: &self };
-        query.visit(&visitor)
+        query.visit_sql(&visitor)
     }
 }
 
@@ -19,11 +19,11 @@ where
     normalizer: &'n N,
 }
 
-impl<'n, N> Visitor for NormalizerVisitor<'n, N>
+impl<'n, N> SQLVisitor for NormalizerVisitor<'n, N>
 where
     N: Normalizer + 'n + ?Sized,
 {
-    fn visit_ident(&self, ident: &sqlast::Ident) -> Option<sqlast::Ident> {
+    fn visit_sqlident(&self, ident: &sqlast::Ident) -> Option<sqlast::Ident> {
         let params = self.normalizer.params();
         Some(match params.get(&ident.value) {
             Some(name) => sqlast::Ident {
