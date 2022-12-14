@@ -21,6 +21,28 @@
 	],
 	"main": "./client/out/extension",
 	"contributes": {
+		"languages": [
+			{
+				"id": "tql",
+				"extensions": [
+					".tql"
+				],
+				"aliases": [
+					"Typed Query Language",
+					"TypedQL",
+					"tql"
+				],
+				"filenames": [],
+				"configuration": "./syntaxes/tql.configuration.json"
+			}
+		],
+		"grammars": [
+			{
+				"language": "tql",
+				"scopeName": "source.sql",
+				"path": "./syntaxes/SQL.plist"
+			}
+		],
 		"configuration": {
 			"type": "object",
 			"title": "Example configuration",

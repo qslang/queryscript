@@ -34,23 +34,6 @@ export function activate(context: ExtensionContext) {
 		debug: run,
 	};
 
-	/*
-	// The server is implemented in node
-	const serverModule = context.asAbsolutePath(
-		path.join('server', 'out', 'server.js')
-	);
-
-	// If the extension is launched in debug mode then the debug server options are used
-	// Otherwise the run options are used
-	const serverOptions: ServerOptions = {
-		run: { module: serverModule, transport: TransportKind.ipc },
-		debug: {
-			module: serverModule,
-			transport: TransportKind.ipc,
-		}
-	};
-	*/
-
 	// Options to control the language client
 	const clientOptions: LanguageClientOptions = {
 		// Register the server for plain text documents
@@ -63,8 +46,8 @@ export function activate(context: ExtensionContext) {
 
 	// Create the language client and start the client.
 	client = new LanguageClient(
-		'languageServerExample',
-		'Language Server Example',
+		'QVMLSP',
+		'QueryVM Language Server',
 		serverOptions,
 		clientOptions
 	);
