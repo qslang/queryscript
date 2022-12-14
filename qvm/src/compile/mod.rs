@@ -4,6 +4,7 @@ mod coerce;
 pub mod compile;
 pub mod error;
 pub mod inference;
+pub mod inline;
 pub mod schema;
 pub mod sql;
 pub mod traverse;

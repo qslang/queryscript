@@ -11,6 +11,7 @@ use crate::compile::coerce::CoerceOp;
 use crate::compile::compile::{coerce, lookup_path, resolve_global_atom, typecheck_path, Compiler};
 use crate::compile::error::*;
 use crate::compile::inference::*;
+use crate::compile::inline::*;
 use crate::compile::schema::*;
 use crate::compile::util::InsertionOrderMap;
 use crate::types::{number::parse_numeric_type, AtomicType};
@@ -1722,11 +1723,11 @@ pub fn compile_sqlexpr(
 
                     let func_expr = func.expr.unwrap_schema_entry().await?;
 
-                    let fn_kind = match func_expr.as_ref() {
-                        Expr::NativeFn(_) => FnKind::Native,
+                    let (fn_kind, fn_body) = match func_expr.as_ref() {
+                        Expr::NativeFn(_) => (FnKind::Native, None),
                         Expr::Fn(FnExpr { body, .. }) => match body {
-                            FnBody::SQLBuiltin => FnKind::SQLBuiltin,
-                            _ => FnKind::Expr,
+                            FnBody::SQLBuiltin => (FnKind::SQLBuiltin, None),
+                            FnBody::Expr(expr) => (FnKind::Expr, Some(expr.clone())),
                         },
                         _ => {
                             return Err(CompileError::internal(
@@ -1736,8 +1737,15 @@ pub fn compile_sqlexpr(
                         }
                     };
 
+                    // Function calls against native functions that do not reference any unbound
+                    // SQL names in their arguments can be lifted out of the SQL body, which is
+                    // important because we don't yet support running native functions within SQL.
+                    // It will always be necessary to some extent, because some native functions
+                    // can't be pushed down either because of their types or because they must be
+                    // run locally (e.g. `load`).
+                    //
                     let lift = !args.iter().any(|a| has_unbound_names(a.expr.clone()))
-                        && !matches!(fn_kind, FnKind::SQLBuiltin);
+                        && matches!(fn_kind, FnKind::Native);
 
                     if lift {
                         let args = args
@@ -1753,49 +1761,88 @@ pub fn compile_sqlexpr(
                             ctx_folder: schema.read()?.folder.clone(),
                         })))
                     } else {
-                        let mut names = CSQLNames::new();
-                        let name = if matches!(fn_kind, FnKind::SQLBuiltin) {
-                            name
-                        } else {
-                            // XXX: This should inline the function instead
+                        match (&fn_kind, fn_body) {
+                            // If the function body is an expression, inline it.
                             //
-                            let (func_name, func) =
-                                intern_nonsql_placeholder(compiler.clone(), "func", &func)?;
-                            names.extend(func.names.clone());
-                            sqlast::ObjectName(vec![func_name])
-                        };
+                            (FnKind::Expr, Some(fn_body)) => {
+                                // Within a function body, arguments are represented as
+                                // Expr::ContextRef with the given name.  This first pass will
+                                // replace any context references with the actual argument bodies,
+                                // but leave those expressions in place.  This means the function
+                                // aguments will be embedded within the params of the expression
+                                // temporarily, even though they may contain free SQL variables.
+                                //
+                                let fn_body = inline_context(
+                                    fn_body,
+                                    args.iter()
+                                        .map(|a| (a.name.value.clone(), a.expr.clone()))
+                                        .collect(),
+                                )
+                                .await?;
+                                // Next, eagerly inline any parameters with SQL definitions into
+                                // the SQL of the function body.  This should result in a version
+                                // of the body with all SQL arguments fully inlined.
+                                //
+                                let fn_body = inline_params(fn_body).await?;
 
-                        let mut args = Vec::new();
-                        for arg in &*arg_exprs.read()? {
-                            let sql = intern_placeholder(
-                                compiler.clone(),
-                                "arg",
-                                &arg.read()?.to_typed_expr(),
-                            )?;
-                            args.push(sqlast::FunctionArg::Named {
-                                name: arg.read()?.name.to_sqlident(),
-                                arg: sqlast::FunctionArgExpr::Expr(
-                                    sql.body
-                                        .as_expr()
-                                        .context(RuntimeSnafu { loc: loc.clone() })?,
-                                ),
-                            });
-                            names.extend(sql.names.clone());
+                                Ok(mkcref(fn_body.as_ref().clone()))
+                            }
+                            // Otherwise, create a SQL function call.
+                            //
+                            _ => {
+                                let mut names = CSQLNames::new();
+                                let mut args = Vec::new();
+                                for arg in &*arg_exprs.read()? {
+                                    let sql = intern_placeholder(
+                                        compiler.clone(),
+                                        "arg",
+                                        &arg.read()?.to_typed_expr(),
+                                    )?;
+                                    args.push(sqlast::FunctionArg::Named {
+                                        name: arg.read()?.name.to_sqlident(),
+                                        arg: sqlast::FunctionArgExpr::Expr(
+                                            sql.body
+                                                .as_expr()
+                                                .context(RuntimeSnafu { loc: loc.clone() })?,
+                                        ),
+                                    });
+                                    names.extend(sql.names.clone());
+                                }
+
+                                let name = match fn_kind {
+                                    FnKind::SQLBuiltin => name,
+                                    _ => {
+                                        // Note that this branch will only be matched in the case
+                                        // of a native function that couldn't be lifted (i.e.
+                                        // because an argument referenced a SQL name).  It will
+                                        // attempt to provide the function value as a parameter to
+                                        // the SQL, which will fail in the runtime code until we
+                                        // implement UDFs.
+                                        //
+                                        let (func_name, func) = intern_nonsql_placeholder(
+                                            compiler.clone(),
+                                            "func",
+                                            &func,
+                                        )?;
+                                        names.extend(func.names.clone());
+                                        sqlast::ObjectName(vec![func_name])
+                                    }
+                                };
+                                Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                                    names,
+                                    body: SQLBody::Expr(sqlast::Expr::Function(sqlast::Function {
+                                        name,
+                                        args,
+
+                                        // TODO: We may want to forward these fields from the
+                                        // expr (but doing that blindly causes ownership errors)
+                                        over: None,
+                                        distinct: false,
+                                        special: false,
+                                    })),
+                                }))))
+                            }
                         }
-
-                        Ok(mkcref(Expr::SQL(Arc::new(SQL {
-                            names,
-                            body: SQLBody::Expr(sqlast::Expr::Function(sqlast::Function {
-                                name,
-                                args,
-
-                                // TODO: We may want to forward these fields from the
-                                // expr (but doing that blindly causes ownership errors)
-                                over: None,
-                                distinct: false,
-                                special: false,
-                            })),
-                        }))))
                     }
                 }
             })?;
