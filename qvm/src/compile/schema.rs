@@ -815,6 +815,20 @@ where
     pub expr: Arc<Expr<TypeRef>>,
 }
 
+impl<TypeRef> TypedNameAndExpr<TypeRef>
+where
+    TypeRef: Clone + fmt::Debug + Send + Sync,
+{
+    pub fn to_typed_expr(&self) -> TypedExpr<TypeRef> {
+        TypedExpr {
+            type_: self.type_.clone(),
+            expr: self.expr.clone(),
+        }
+    }
+}
+
+impl Constrainable for TypedNameAndExpr<CRef<MType>> {}
+
 pub type SchemaRef = Ref<Schema>;
 
 #[derive(Clone, Debug)]

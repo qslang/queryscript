@@ -1645,55 +1645,49 @@ pub fn compile_sqlexpr(
                 let loc = loc.clone();
                 let name = name.clone();
                 async move {
-                    if is_builtin {
-                        let arg_exprs: Vec<_> = arg_exprs
-                            .iter()
-                            .map(|e| {
-                                let ts = intern_cref_placeholder(
-                                    compiler.clone(),
-                                    "arg".to_string(),
-                                    CTypedExpr {
-                                        type_: e.type_.clone(),
-                                        expr: e.expr.clone(),
-                                    },
-                                )?;
-                                let name = Arc::new(e.name.clone());
-                                ts.sql.then(move |sql: Ref<SQL<CRef<MType>>>| {
-                                    // This is a bit annoying. It'd be a lot nicer if we didn't
-                                    // have to clone the name twice.
-                                    Ok(mkcref(NameAndSQL {
-                                        name: name.as_ref().clone(),
-                                        sql: Arc::new(sql.read()?.clone()),
-                                    }))
-                                })
+                    let arg_exprs = arg_exprs
+                        .into_iter()
+                        .map(move |cte| {
+                            cte.expr.then(move |expr: Ref<Expr<CRef<MType>>>| {
+                                Ok(mkcref(TypedNameAndExpr {
+                                    type_: cte.type_.clone(),
+                                    name: cte.name.clone(),
+                                    expr: Arc::new(expr.read()?.clone()),
+                                }))
                             })
-                            .collect::<Result<_>>()?;
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    let arg_exprs = combine_crefs(arg_exprs)?.await?;
+                    let args = arg_exprs
+                        .read()?
+                        .iter()
+                        .map(|e| Ok(e.read()?.clone()))
+                        .collect::<Result<Vec<_>>>()?;
 
-                        let name_wrapper = Arc::new(name.clone());
-                        let arg_exprs = combine_crefs(arg_exprs)?.await?;
-                        let mut args = Vec::new();
+                    if is_builtin {
                         let mut params = BTreeMap::new();
-                        for arg in arg_exprs.read()?.iter() {
-                            let arg = arg.read()?;
+                        let mut args = Vec::new();
+                        for arg in &*arg_exprs.read()? {
+                            let sql = intern_placeholder(
+                                compiler.clone(),
+                                "arg",
+                                &arg.read()?.to_typed_expr(),
+                            )?;
                             args.push(sqlast::FunctionArg::Named {
-                                name: sqlast::Ident {
-                                    value: arg.name.value.clone(),
-                                    quote_style: None,
-                                },
+                                name: arg.read()?.name.to_sqlident(),
                                 arg: sqlast::FunctionArgExpr::Expr(
-                                    arg.sql
-                                        .body
+                                    sql.body
                                         .as_expr()
                                         .context(RuntimeSnafu { loc: loc.clone() })?,
                                 ),
                             });
-                            params.extend(arg.sql.params.clone());
+                            insert_sqlparams(&mut params, &sql)?;
                         }
 
                         Ok(mkcref(Expr::SQL(Arc::new(SQL {
                             params,
                             body: SQLBody::Expr(sqlast::Expr::Function(sqlast::Function {
-                                name: name_wrapper.as_ref().clone(),
+                                name,
                                 args,
 
                                 // TODO: We may want to forward these fields from the
@@ -1704,24 +1698,10 @@ pub fn compile_sqlexpr(
                             })),
                         }))))
                     } else {
-                        let arg_exprs = arg_exprs
-                            .into_iter()
-                            .map(move |cte| {
-                                cte.expr.then(move |expr: Ref<Expr<CRef<MType>>>| {
-                                    Ok(mkcref(TypedExpr {
-                                        type_: cte.type_.clone(),
-                                        expr: Arc::new(expr.read()?.clone()),
-                                    }))
-                                })
-                            })
-                            .collect::<Result<Vec<_>>>()?;
-                        let arg_exprs = combine_crefs(arg_exprs)?.await?;
-                        let args = arg_exprs
-                            .read()?
+                        let args = args
                             .iter()
-                            .map(|e| Ok(e.read()?.clone()))
-                            .collect::<Result<Vec<_>>>()?;
-
+                            .map(TypedNameAndExpr::to_typed_expr)
+                            .collect::<Vec<_>>();
                         Ok(mkcref(Expr::FnCall(FnCallExpr {
                             func: Arc::new(TypedExpr {
                                 type_: mkcref(MType::Fn(fn_type.clone())),
