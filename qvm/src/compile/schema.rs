@@ -13,6 +13,7 @@ use crate::compile::{
     coerce::{coerce_types, CoerceOp},
     error::*,
     inference::{mkcref, Constrainable, Constrained},
+    traverse::{Visit, Visitor},
 };
 use crate::runtime;
 use crate::types::{AtomicType, Field, FnType, Type};
@@ -651,6 +652,49 @@ impl Expr<CRef<MType>> {
     }
 }
 
+impl<TypeRef, V: Visitor> Visit<V> for Expr<TypeRef>
+where
+    TypeRef: Clone + fmt::Debug + Send + Sync,
+{
+    fn visit(&self, visitor: &V) -> Self {
+        match self {
+            Expr::SQL(e) => {
+                let SQL { params, body } = e.as_ref();
+                Expr::SQL(Arc::new(SQL {
+                    params: params
+                        .iter()
+                        .map(|(name, param)| (name.clone(), param.visit(visitor)))
+                        .collect(),
+                    body: match body {
+                        SQLBody::Expr(expr) => SQLBody::Expr(expr.visit(visitor)),
+                        SQLBody::Query(query) => SQLBody::Query(query.visit(visitor)),
+                    },
+                }))
+            }
+            Expr::Fn(FnExpr { inner_schema, body }) => Expr::Fn(FnExpr {
+                inner_schema: inner_schema.clone(),
+                body: match body {
+                    FnBody::SQLBuiltin => FnBody::SQLBuiltin,
+                    FnBody::Expr(expr) => FnBody::Expr(Arc::new(expr.visit(visitor))),
+                },
+            }),
+            Expr::FnCall(FnCallExpr {
+                func,
+                args,
+                ctx_folder,
+            }) => Expr::FnCall(FnCallExpr {
+                func: Arc::new(func.visit(visitor)),
+                args: args.iter().map(|a| a.visit(visitor)).collect(),
+                ctx_folder: ctx_folder.clone(),
+            }),
+            Expr::SchemaEntry(e) => Expr::SchemaEntry(e.clone()),
+            Expr::NativeFn(f) => Expr::NativeFn(f.clone()),
+            Expr::ContextRef(r) => Expr::ContextRef(r.clone()),
+            Expr::Unknown => Expr::Unknown,
+        }
+    }
+}
+
 impl<Ty: Clone + fmt::Debug + Send + Sync> Constrainable for Expr<Ty> {}
 
 #[derive(Clone, Debug)]
@@ -668,6 +712,18 @@ impl TypedExpr<CRef<MType>> {
             type_: mkref(self.type_.must()?.read()?.to_runtime_type()?),
             expr: Arc::new(self.expr.to_runtime_type()?),
         })
+    }
+}
+
+impl<TypeRef, V: Visitor> Visit<V> for TypedExpr<TypeRef>
+where
+    TypeRef: Clone + fmt::Debug + Send + Sync,
+{
+    fn visit(&self, visitor: &V) -> Self {
+        TypedExpr {
+            type_: self.type_.clone(),
+            expr: Arc::new(self.expr.visit(visitor)),
+        }
     }
 }
 
