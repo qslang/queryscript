@@ -6,6 +6,7 @@ pub mod error;
 pub mod inference;
 pub mod schema;
 pub mod sql;
+pub mod traverse;
 mod util;
 
 pub use compile::{lookup_path, lookup_schema, Compiler};

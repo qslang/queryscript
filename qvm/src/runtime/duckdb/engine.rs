@@ -14,7 +14,7 @@ use crate::types::{Relation, Value};
 
 use crate::runtime::{
     error::Result,
-    normalize::{Normalize, TreeNormalizer},
+    normalize::Normalizer,
     sql::{SQLEngine, SQLParam},
 };
 
@@ -55,7 +55,7 @@ impl DuckDBNormalizer {
     }
 }
 
-impl TreeNormalizer for DuckDBNormalizer {
+impl Normalizer for DuckDBNormalizer {
     fn quote_style(&self) -> Option<char> {
         Some('"')
     }
@@ -148,7 +148,7 @@ impl SQLEngine for DuckDBEngine {
         scalar_params.sort();
 
         let normalizer = DuckDBNormalizer::new(&scalar_params);
-        let query = query.normalize(&normalizer);
+        let query = normalizer.normalize(&query);
         let query_string = format!("{}", query);
 
         let duckdb_params: Vec<&dyn duckdb::ToSql> = scalar_params
