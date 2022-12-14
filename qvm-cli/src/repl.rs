@@ -98,13 +98,11 @@ pub fn run(rt: &runtime::Runtime, engine_type: qvm::runtime::SQLEngineType) {
                         // Allow the loop to run again (and parse more)
                     }
                     Err(e) => {
-                        // XXX: This is an awful lot of copying to be doing
-                        //
                         repl_compiler
                             .set_file_contents(file.clone(), curr_buffer.borrow().clone())
                             .unwrap();
                         let code = repl_compiler.file_contents().unwrap();
-                        eprintln!("{}", e.pretty_with_code(&code));
+                        eprintln!("{}", e.pretty_with_code(&code.files));
                         rl.add_history_entry(curr_buffer.borrow().as_str());
                         curr_buffer.borrow_mut().clear();
                     }

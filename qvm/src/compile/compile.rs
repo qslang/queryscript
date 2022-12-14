@@ -276,24 +276,20 @@ impl Compiler {
             Some(p) => p.to_str().map(|f| f.to_string()),
             None => None,
         };
-        let contents = match self.data.write()?.files.entry(file.clone()) {
+
+        let mut data = self.data.write()?;
+        let entry = data.files.entry(file.clone());
+        let contents = match entry {
             std::collections::btree_map::Entry::Vacant(entry) => {
                 let contents = fs::read_to_string(&parsed_path)?;
-                // TODO: Avoid this clone somehow
-                //
-                entry.insert(contents.clone());
-                contents
+                entry.insert(contents.clone())
             }
-            std::collections::btree_map::Entry::Occupied(entry) => {
-                // TODO: Avoid this clone somehow
-                //
-                entry.get().clone()
-            }
+            std::collections::btree_map::Entry::Occupied(ref entry) => entry.get().as_str(),
         };
         Ok((
             file,
             folder,
-            parse_schema(parsed_path.to_str().unwrap(), contents.as_str())?,
+            parse_schema(parsed_path.to_str().unwrap(), contents)?,
         ))
     }
 
@@ -302,10 +298,10 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn file_contents(&self) -> Result<BTreeMap<String, String>> {
+    pub fn file_contents(&self) -> Result<std::sync::RwLockReadGuard<'_, CompilerData>> {
         // TODO: Avoid this clone somehow
         //
-        Ok(self.data.read()?.files.clone())
+        Ok(self.data.read()?)
     }
 }
 

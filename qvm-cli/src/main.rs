@@ -92,7 +92,7 @@ fn main_result() -> Result<(), QVMError> {
                     let contents = compiler.file_contents()?;
                     let err_strs = errs
                         .iter()
-                        .map(|e| e.pretty_with_code(&contents))
+                        .map(|e| e.pretty_with_code(&contents.files))
                         .collect::<Vec<_>>();
                     whatever!("{}", err_strs.join("\n"))
                 }
