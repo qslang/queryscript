@@ -608,6 +608,13 @@ impl<T: Clone + fmt::Debug + Send + Sync> fmt::Debug for SQL<T> {
 }
 
 #[derive(Debug, Clone)]
+pub enum FnKind {
+    SQLBuiltin,
+    Native,
+    Expr,
+}
+
+#[derive(Debug, Clone)]
 pub enum FnBody<TypeRef>
 where
     TypeRef: Clone + fmt::Debug + Send + Sync,
@@ -703,6 +710,20 @@ impl Expr<CRef<MType>> {
             Expr::NativeFn(f) => Ok(Expr::NativeFn(f.clone())),
             Expr::ContextRef(r) => Ok(Expr::ContextRef(r.clone())),
             Expr::Unknown => Ok(Expr::Unknown),
+        }
+    }
+
+    pub async fn unwrap_schema_entry(
+        self: &Arc<Expr<CRef<MType>>>,
+    ) -> Result<Arc<Expr<CRef<MType>>>> {
+        let mut ret = self.clone();
+        loop {
+            match ret.as_ref() {
+                Expr::SchemaEntry(STypedExpr { expr, .. }) => {
+                    ret = Arc::new(expr.await?.read()?.clone())
+                }
+                _ => return Ok(ret),
+            }
         }
     }
 }

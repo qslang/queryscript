@@ -218,11 +218,8 @@ pub fn compile_reference(
         _ => {
             // Turn the top level reference into a SQL placeholder, and return
             // a path accessing it
-            let placeholder = intern_placeholder(compiler.clone(), "param", &top_level_ref)?;
-            let placeholder_name = match &placeholder.body {
-                SQLBody::Expr(sqlast::Expr::Identifier(i)) => i,
-                _ => panic!("placeholder expected to be an identifier"),
-            };
+            let (placeholder_name, placeholder) =
+                intern_nonsql_placeholder(compiler.clone(), "param", &top_level_ref)?;
             let mut full_name = vec![placeholder_name.clone()];
             full_name.extend(remainder.clone().into_iter().map(|n| ident(n.value)));
 
@@ -246,15 +243,35 @@ pub fn intern_placeholder(
     match &*expr.expr {
         Expr::SQL(sql) => Ok(sql.clone()),
         _ => {
+            let (_, e) = intern_nonsql_placeholder(compiler.clone(), kind, expr)?;
+            Ok(e)
+        }
+    }
+}
+
+pub fn intern_nonsql_placeholder(
+    compiler: Compiler,
+    kind: &str,
+    expr: &TypedExpr<CRef<MType>>,
+) -> Result<(sqlast::Ident, Arc<SQL<CRef<MType>>>)> {
+    match &*expr.expr {
+        Expr::SQL(_) => Err(CompileError::internal(
+            SourceLocation::Unknown,
+            "Cannot call intern_nonsql_placeholder on a SQL expression",
+        )),
+        _ => {
             let placeholder_name = "@".to_string() + compiler.next_placeholder(kind)?.as_str();
 
-            Ok(Arc::new(SQL {
-                names: SQLNames {
-                    params: Params::from([(placeholder_name.clone(), expr.clone())]),
-                    unbound: BTreeSet::new(),
-                },
-                body: SQLBody::Expr(sqlast::Expr::Identifier(ident(placeholder_name.clone()))),
-            }))
+            Ok((
+                ident(placeholder_name.clone()),
+                Arc::new(SQL {
+                    names: SQLNames {
+                        params: Params::from([(placeholder_name.clone(), expr.clone())]),
+                        unbound: BTreeSet::new(),
+                    },
+                    body: SQLBody::Expr(sqlast::Expr::Identifier(ident(placeholder_name.clone()))),
+                }),
+            ))
         }
     }
 }
@@ -1248,6 +1265,19 @@ where
     .collect::<Result<Vec<_>>>()
 }
 
+pub fn has_unbound_names(expr: Arc<Expr<CRef<MType>>>) -> bool {
+    match expr.as_ref() {
+        Expr::SQL(e) => {
+            !e.names.unbound.is_empty()
+                || e.names
+                    .params
+                    .iter()
+                    .any(|(_, p)| has_unbound_names(p.expr.clone()))
+        }
+        _ => false,
+    }
+}
+
 pub fn compile_sqlexpr(
     compiler: Compiler,
     schema: Ref<Schema>,
@@ -1665,22 +1695,6 @@ pub fn compile_sqlexpr(
             }
 
             let type_ = fn_type.ret.clone();
-            let is_builtin = match func.expr.as_ref() {
-                Expr::SchemaEntry(STypedExpr { expr, .. }) => {
-                    expr.is_known()?
-                        && matches!(
-                            *(expr
-                                .must()
-                                .context(RuntimeSnafu { loc: loc.clone() })?
-                                .read()?),
-                            Expr::Fn(FnExpr {
-                                body: FnBody::SQLBuiltin,
-                                ..
-                            })
-                        )
-                }
-                _ => false,
-            };
 
             let expr = compiler.async_cref({
                 let compiler = compiler.clone();
@@ -1706,8 +1720,51 @@ pub fn compile_sqlexpr(
                         .map(|e| Ok(e.read()?.clone()))
                         .collect::<Result<Vec<_>>>()?;
 
-                    if is_builtin {
+                    let func_expr = func.expr.unwrap_schema_entry().await?;
+
+                    let fn_kind = match func_expr.as_ref() {
+                        Expr::NativeFn(_) => FnKind::Native,
+                        Expr::Fn(FnExpr { body, .. }) => match body {
+                            FnBody::SQLBuiltin => FnKind::SQLBuiltin,
+                            _ => FnKind::Expr,
+                        },
+                        _ => {
+                            return Err(CompileError::internal(
+                                loc.clone(),
+                                "Function value must be function expression",
+                            ))
+                        }
+                    };
+
+                    let lift = !args.iter().any(|a| has_unbound_names(a.expr.clone()))
+                        && !matches!(fn_kind, FnKind::SQLBuiltin);
+
+                    if lift {
+                        let args = args
+                            .iter()
+                            .map(TypedNameAndExpr::to_typed_expr)
+                            .collect::<Vec<_>>();
+                        Ok(mkcref(Expr::FnCall(FnCallExpr {
+                            func: Arc::new(TypedExpr {
+                                type_: mkcref(MType::Fn(fn_type.clone())),
+                                expr: func.expr.clone(),
+                            }),
+                            args,
+                            ctx_folder: schema.read()?.folder.clone(),
+                        })))
+                    } else {
                         let mut names = CSQLNames::new();
+                        let name = if matches!(fn_kind, FnKind::SQLBuiltin) {
+                            name
+                        } else {
+                            // XXX: This should inline the function instead
+                            //
+                            let (func_name, func) =
+                                intern_nonsql_placeholder(compiler.clone(), "func", &func)?;
+                            names.extend(func.names.clone());
+                            sqlast::ObjectName(vec![func_name])
+                        };
+
                         let mut args = Vec::new();
                         for arg in &*arg_exprs.read()? {
                             let sql = intern_placeholder(
@@ -1739,19 +1796,6 @@ pub fn compile_sqlexpr(
                                 special: false,
                             })),
                         }))))
-                    } else {
-                        let args = args
-                            .iter()
-                            .map(TypedNameAndExpr::to_typed_expr)
-                            .collect::<Vec<_>>();
-                        Ok(mkcref(Expr::FnCall(FnCallExpr {
-                            func: Arc::new(TypedExpr {
-                                type_: mkcref(MType::Fn(fn_type.clone())),
-                                expr: func.expr.clone(),
-                            }),
-                            args,
-                            ctx_folder: schema.read()?.folder.clone(),
-                        })))
                     }
                 }
             })?;
