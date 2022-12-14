@@ -43,6 +43,13 @@
 				"path": "./syntaxes/SQL.plist"
 			}
 		],
+		"commands": [
+			{
+				"command": "runQuery.start",
+				"title": "Run a query",
+				"category": "QueryVM"
+			}
+		],
 		"configuration": {
 			"type": "object",
 			"title": "Example configuration",

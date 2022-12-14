@@ -157,6 +157,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        eprintln!("DID OPEN: {:?}", params);
         let uri = params.text_document.uri;
         let version = params.text_document.version;
         let text = params.text_document.text;
@@ -254,26 +255,6 @@ impl LanguageServer for Backend {
     }
 }
 
-fn position_of_index(text: &str, index: usize) -> Position {
-    let mut line = 0;
-    let mut column = 0;
-    for (i, c) in text.char_indices() {
-        if i == index {
-            break;
-        }
-        if c == '\n' {
-            line += 1;
-            column = 0;
-        } else {
-            column += 1;
-        }
-    }
-    Position {
-        line,
-        character: column,
-    }
-}
-
 impl Backend {
     async fn on_change(&self, uri: Url, text: String, version: Option<i32>) {
         {
@@ -352,6 +333,31 @@ impl Backend {
             .publish_diagnostics(uri.clone(), diagnostics, version)
             .await
     }
+
+    async fn run_query(&self, params: serde_json::Value) -> Result<String> {
+        eprintln!("PARAMS: {:?}", params);
+        Ok("foo".to_string())
+    }
+}
+
+fn position_of_index(text: &str, index: usize) -> Position {
+    let mut line = 0;
+    let mut column = 0;
+    for (i, c) in text.char_indices() {
+        if i == index {
+            break;
+        }
+        if c == '\n' {
+            line += 1;
+            column = 0;
+        } else {
+            column += 1;
+        }
+    }
+    Position {
+        line,
+        character: column,
+    }
 }
 
 #[tokio::main]
@@ -359,7 +365,7 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(|client| Backend {
+    let (service, socket) = LspService::build(|client| Backend {
         client,
         configuration: Arc::new(RwLock::new(Configuration {
             has_configuration_capability: false,
@@ -368,6 +374,8 @@ async fn main() {
         })),
         settings: Arc::new(RwLock::new(BTreeMap::new())),
         documents: Arc::new(RwLock::new(BTreeMap::new())),
-    });
+    })
+    .custom_method("qvm/runQuery", Backend::run_query)
+    .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
 }

@@ -4,7 +4,7 @@
  * ------------------------------------------------------------------------------------------ */
 
 import * as path from 'path';
-import { window, workspace, ExtensionContext } from 'vscode';
+import { commands, window, workspace, ExtensionContext } from 'vscode';
 
 import {
 	Executable,
@@ -17,7 +17,6 @@ import {
 let client: LanguageClient;
 
 export function activate(context: ExtensionContext) {
-	const traceOutputChannel = window.createOutputChannel("Test Language Server trace");
 	const command = process.env.SERVER_PATH || "qvm-lsp";
 	const run: Executable = {
 		command,
@@ -51,6 +50,15 @@ export function activate(context: ExtensionContext) {
 		serverOptions,
 		clientOptions
 	);
+
+	context.subscriptions.push(
+		commands.registerCommand('runQuery.start', async () => {
+			console.log(client);
+			const foo = await client.sendRequest("qvm/runQuery", {});
+			console.log(foo);
+		})
+	);
+
 
 	// Start the client. This will also launch the server
 	client.start();
