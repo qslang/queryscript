@@ -57,7 +57,7 @@ impl SQLVisitor for ParamInliner {
         };
 
         if let Some(e) = self.context.get(&ident) {
-            Some(e.as_expr().unwrap()) // XXX
+            Some(e.as_expr())
         } else {
             None
         }
@@ -75,7 +75,7 @@ impl SQLVisitor for ParamInliner {
                 if let Some(e) = self.context.get(&name.0[0].value) {
                     Some(sqlast::TableFactor::Derived {
                         lateral: false,
-                        subquery: Box::new(e.as_query().unwrap()), // XXX
+                        subquery: Box::new(e.as_query()),
                         alias: alias.clone(),
                     })
                 } else {

@@ -112,7 +112,7 @@ pub fn eval<'a>(
             schema::Expr::SQL(e) => {
                 let schema::SQL { body, names } = e.as_ref();
                 let sql_params = eval_params(ctx, &names.params).await?;
-                let query = body.as_query()?;
+                let query = body.as_query();
 
                 // TODO: This ownership model implies some necessary copying (below).
                 let rows = { ctx.sql_engine.eval(&query, sql_params).await? };

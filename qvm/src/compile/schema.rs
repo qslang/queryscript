@@ -13,6 +13,7 @@ use crate::compile::{
     coerce::{coerce_types, CoerceOp},
     error::*,
     inference::{mkcref, Constrainable, Constrained},
+    sql::ident,
 };
 use crate::runtime;
 use crate::types::{AtomicType, Field, FnType, Type};
@@ -489,18 +490,78 @@ pub enum SQLBody {
 }
 
 impl SQLBody {
-    pub fn as_expr(&self) -> runtime::error::Result<sqlast::Expr> {
+    pub fn as_expr(&self) -> sqlast::Expr {
+        // XXX Currently, as_expr and as_query are inconsistent with each other, since we are
+        // always assuming that queries return arrays.  Consequently, calling as_query on an
+        // expression will yield a query guaranteed to return a single value, but round-tripping it
+        // back through as_expr will give an expression that returns an array.  In order to make
+        // this consistent again, we'll have to take in the type information and use it to inform
+        // the conversions.
+        //
         match self {
-            SQLBody::Expr(expr) => Ok(expr.clone()),
-            SQLBody::Query(_) => Err(runtime::error::RuntimeError::unimplemented(
-                "Scalar subqueries",
-            )),
+            SQLBody::Expr(expr) => expr.clone(),
+            SQLBody::Query(query) => sqlast::Expr::Subquery(Box::new(sqlast::Query {
+                with: None,
+                body: Box::new(sqlast::SetExpr::Select(Box::new(sqlast::Select {
+                    distinct: false,
+                    top: None,
+                    projection: vec![sqlast::SelectItem::ExprWithAlias {
+                        expr: sqlast::Expr::Function(sqlast::Function {
+                            name: sqlast::ObjectName(vec![ident("array_agg".to_string())]),
+                            args: vec![sqlast::FunctionArg::Unnamed(
+                                sqlast::FunctionArgExpr::Expr(sqlast::Expr::Identifier(ident(
+                                    "subquery".to_string(),
+                                ))),
+                            )],
+                            over: None,
+                            distinct: false,
+                            special: false,
+                        }),
+                        alias: sqlast::Ident {
+                            value: "value".to_string(),
+                            quote_style: None,
+                        },
+                    }],
+                    into: None,
+                    from: vec![sqlast::TableWithJoins {
+                        relation: sqlast::TableFactor::Derived {
+                            lateral: false,
+                            subquery: Box::new(query.clone()),
+                            alias: Some(sqlast::TableAlias {
+                                name: ident("subquery".to_string()),
+                                columns: Vec::new(),
+                            }),
+                        },
+                        joins: Vec::new(),
+                    }],
+                    lateral_views: Vec::new(),
+                    selection: None,
+                    group_by: Vec::new(),
+                    cluster_by: Vec::new(),
+                    distribute_by: Vec::new(),
+                    sort_by: Vec::new(),
+                    having: None,
+                    qualify: None,
+                }))),
+                order_by: Vec::new(),
+                limit: None,
+                offset: None,
+                fetch: None,
+                lock: None,
+            })),
         }
     }
 
-    pub fn as_query(&self) -> runtime::error::Result<sqlast::Query> {
+    pub fn as_query(&self) -> sqlast::Query {
+        // XXX Currently, as_expr and as_query are inconsistent with each other, since we are
+        // always assuming that queries return arrays.  Consequently, calling as_query on an
+        // expression will yield a query guaranteed to return a single value, but round-tripping it
+        // back through as_expr will give an expression that returns an array.  In order to make
+        // this consistent again, we'll have to take in the type information and use it to inform
+        // the conversions.
+        //
         match self {
-            SQLBody::Expr(expr) => Ok(sqlast::Query {
+            SQLBody::Expr(expr) => sqlast::Query {
                 with: None,
                 body: Box::new(sqlast::SetExpr::Select(Box::new(sqlast::Select {
                     distinct: false,
@@ -528,8 +589,8 @@ impl SQLBody {
                 offset: None,
                 fetch: None,
                 lock: None,
-            }),
-            SQLBody::Query(query) => Ok(query.clone()),
+            },
+            SQLBody::Query(query) => query.clone(),
         }
     }
 }

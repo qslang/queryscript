@@ -74,7 +74,7 @@ pub fn get_rowtype(compiler: Compiler, relation: CRef<MType>) -> Result<CRef<MTy
     })?)
 }
 
-fn ident(value: String) -> sqlast::Ident {
+pub fn ident(value: String) -> sqlast::Ident {
     sqlast::Ident {
         value,
         quote_style: None,
@@ -550,17 +550,10 @@ pub fn compile_join_constraint(
             sql.type_
                 .unify(&resolve_global_atom(compiler.clone(), "bool")?)?;
             compiler.async_cref({
-                let loc = loc.clone();
                 async move {
                     let sql = sql.sql.await?;
                     let sql = sql.read()?;
-                    Ok(cwrap((
-                        sql.names.clone(),
-                        On(sql
-                            .body
-                            .as_expr()
-                            .context(RuntimeSnafu { loc: loc.clone() })?),
-                    )))
+                    Ok(cwrap((sql.names.clone(), On(sql.body.as_expr()))))
                 }
             })?
         }
@@ -715,7 +708,6 @@ pub fn compile_order_by(
     }
 
     compiler.async_cref({
-        let loc = loc.clone();
         async move {
             let mut resolved_order_by = Vec::new();
             let mut names = CSQLNames::new();
@@ -726,10 +718,7 @@ pub fn compile_order_by(
                 let resolved_expr = resolved_expr.read()?;
                 names.extend(resolved_expr.names.clone());
                 resolved_order_by.push(sqlast::OrderByExpr {
-                    expr: resolved_expr
-                        .body
-                        .as_expr()
-                        .context(RuntimeSnafu { loc: loc.clone() })?,
+                    expr: resolved_expr.body.as_expr(),
                     asc,
                     nulls_first,
                 });
@@ -928,11 +917,7 @@ pub fn compile_select(
                 names.extend(sqlexpr.sql.names.clone());
                 projection.push(sqlast::SelectItem::ExprWithAlias {
                     alias: ident(sqlexpr.name.value.clone()),
-                    expr: sqlexpr
-                        .sql
-                        .body
-                        .as_expr()
-                        .context(RuntimeSnafu { loc: loc.clone() })?,
+                    expr: sqlexpr.sql.body.as_expr(),
                 });
             }
             names.extend(from_names);
@@ -951,11 +936,7 @@ pub fn compile_select(
                         .unify(&resolve_global_atom(compiler.clone(), "bool")?)?;
                     let sql = compiled.sql.await?.read()?.clone();
                     names.extend(sql.names.clone());
-                    Some(
-                        sql.body
-                            .as_expr()
-                            .context(RuntimeSnafu { loc: loc.clone() })?,
-                    )
+                    Some(sql.body.as_expr())
                 }
                 None => None,
             };
@@ -966,11 +947,7 @@ pub fn compile_select(
                     compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), &loc, gb)?;
                 let sql = compiled.sql.await?.read()?.clone();
                 names.extend(sql.names.clone());
-                group_by.push(
-                    sql.body
-                        .as_expr()
-                        .context(RuntimeSnafu { loc: loc.clone() })?,
-                );
+                group_by.push(sql.body.as_expr());
             }
 
             let mut ret = select.clone();
@@ -1003,10 +980,7 @@ pub async fn finish_sqlexpr(
     Ok(match expr {
         Expr::SQL(s) => {
             names.extend(s.names.clone());
-            s.body
-                .as_expr()
-                .context(RuntimeSnafu { loc: loc.clone() })?
-                .clone()
+            s.body.as_expr()
         }
         _ => {
             return Err(CompileError::unimplemented(
@@ -1165,12 +1139,7 @@ fn apply_sqlcast(
         Ok(mkcref(SQL {
             names: final_expr.names,
             body: SQLBody::Expr(sqlast::Expr::Cast {
-                expr: Box::new(
-                    final_expr
-                        .body
-                        .as_expr()
-                        .context(RuntimeSnafu { loc: loc.clone() })?,
-                ),
+                expr: Box::new(final_expr.body.as_expr()),
                 data_type: dt,
             }),
         }))
@@ -1248,20 +1217,14 @@ where
     }
 }
 
-pub fn combine_sql_exprs<'a, I>(
-    loc: &SourceLocation,
-    iter: I,
-    names: &mut CSQLNames,
-) -> Result<Vec<sqlast::Expr>>
+pub fn combine_sql_exprs<'a, I>(iter: I, names: &mut CSQLNames) -> Result<Vec<sqlast::Expr>>
 where
     I: Iterator<Item = &'a Ref<SQL<CRef<MType>>>>,
 {
     iter.map(|c| {
         let c = c.read()?;
         names.extend(c.names.clone());
-        Ok(c.body
-            .as_expr()
-            .context(RuntimeSnafu { loc: loc.clone() })?)
+        Ok(c.body.as_expr())
     })
     .collect::<Result<Vec<_>>>()
 }
@@ -1367,16 +1330,11 @@ pub fn compile_sqlexpr(
             CTypedExpr {
                 type_: resolve_global_atom(compiler.clone(), "bool")?,
                 expr: compiled.sql.then({
-                    let loc = loc.clone();
                     move |sqlexpr: Ref<SQL<CRef<MType>>>| {
                         Ok(mkcref(Expr::SQL(Arc::new(SQL {
                             names: sqlexpr.read()?.names.clone(),
                             body: SQLBody::Expr(sqlast::Expr::IsNotNull(Box::new(
-                                sqlexpr
-                                    .read()?
-                                    .body
-                                    .as_expr()
-                                    .context(RuntimeSnafu { loc: loc.clone() })?,
+                                sqlexpr.read()?.body.as_expr(),
                             ))),
                         }))))
                     }
@@ -1431,27 +1389,14 @@ pub fn compile_sqlexpr(
             CTypedExpr {
                 type_,
                 expr: combine_crefs(vec![cleft.sql, cright.sql])?.then({
-                    let loc = loc.clone();
                     move |args: Ref<Vec<Ref<SQL<CRef<MType>>>>>| {
                         let names = combine_sqlnames(&*args.read()?)?;
                         Ok(mkcref(Expr::SQL(Arc::new(SQL {
                             names,
                             body: SQLBody::Expr(sqlast::Expr::BinaryOp {
-                                left: Box::new(
-                                    args.read()?[0]
-                                        .read()?
-                                        .body
-                                        .as_expr()
-                                        .context(RuntimeSnafu { loc: loc.clone() })?,
-                                ),
+                                left: Box::new(args.read()?[0].read()?.body.as_expr()),
                                 op: op.clone(),
-                                right: Box::new(
-                                    args.read()?[1]
-                                        .read()?
-                                        .body
-                                        .as_expr()
-                                        .context(RuntimeSnafu { loc: loc.clone() })?,
-                                ),
+                                right: Box::new(args.read()?[1].read()?.body.as_expr()),
                             }),
                         }))))
                     }
@@ -1515,7 +1460,6 @@ pub fn compile_sqlexpr(
             CTypedExpr {
                 type_: result_type,
                 expr: compiler.async_cref({
-                    let loc = loc.clone();
                     async move {
                         let mut names = CSQLNames::new();
                         let operand = match c_operand {
@@ -1523,39 +1467,25 @@ pub fn compile_sqlexpr(
                                 let operand = (&o.sql).await?;
                                 let operand = operand.read()?;
                                 names.extend(operand.names.clone());
-                                Some(Box::new(
-                                    operand
-                                        .body
-                                        .as_expr()
-                                        .context(RuntimeSnafu { loc: loc.clone() })?,
-                                ))
+                                Some(Box::new(operand.body.as_expr()))
                             }
                             None => None,
                         };
 
                         let conditions = combine_sql_exprs(
-                            &loc,
                             combined_conditions.await?.read()?.iter(),
                             &mut names,
                         )?;
 
-                        let results = combine_sql_exprs(
-                            &loc,
-                            combined_results.await?.read()?.iter(),
-                            &mut names,
-                        )?;
+                        let results =
+                            combine_sql_exprs(combined_results.await?.read()?.iter(), &mut names)?;
 
                         let else_result = match c_else_result {
                             Some(ref o) => {
                                 let operand = (&o.sql).await?;
                                 let operand = operand.read()?;
                                 names.extend(operand.names.clone());
-                                Some(Box::new(
-                                    operand
-                                        .body
-                                        .as_expr()
-                                        .context(RuntimeSnafu { loc: loc.clone() })?,
-                                ))
+                                Some(Box::new(operand.body.as_expr()))
                             }
                             None => None,
                         };
@@ -1805,11 +1735,7 @@ pub fn compile_sqlexpr(
                                     )?;
                                     args.push(sqlast::FunctionArg::Named {
                                         name: arg.read()?.name.to_sqlident(),
-                                        arg: sqlast::FunctionArgExpr::Expr(
-                                            sql.body
-                                                .as_expr()
-                                                .context(RuntimeSnafu { loc: loc.clone() })?,
-                                        ),
+                                        arg: sqlast::FunctionArgExpr::Expr(sql.body.as_expr()),
                                     });
                                     names.extend(sql.names.clone());
                                 }
