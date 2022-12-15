@@ -1,15 +1,48 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug",
-            "program": "${workspaceFolder}/src/target/debug/qvm",
-            "args": [],
-        }
-    ]
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"type": "extensionHost",
+			"request": "launch",
+			"name": "Launch VSCode Extension",
+			"runtimeExecutable": "${execPath}",
+			"args": [
+				"--extensionDevelopmentPath=${workspaceRoot}"
+			],
+			"outFiles": [
+				"${workspaceRoot}/client/out/**/*.js"
+			],
+			"autoAttachChildProcesses": true,
+			"preLaunchTask": {
+				"type": "npm",
+				"script": "watch"
+			},
+			"env": {
+				"SERVER_PATH": "${workspaceFolder}/target/debug/qvm-lsp"
+			},
+			"options": {
+				"cwd": "${workspaceFolder}/qvm-lsp"
+			}
+		},
+		{
+			"name": "Language Server E2E Test",
+			"type": "extensionHost",
+			"request": "launch",
+			"runtimeExecutable": "${execPath}",
+			"args": [
+				"--extensionDevelopmentPath=${workspaceRoot}",
+				"--extensionTestsPath=${workspaceRoot}/client/out/test/index",
+				"${workspaceRoot}/client/testFixture"
+			],
+			"outFiles": [
+				"${workspaceRoot}/client/out/test/**/*.js"
+			],
+			"env": {
+				"SERVER_PATH": "${workspaceRoot}/target/debug/qvm-lsp"
+			},
+			"options": {
+				"cwd": "${workspaceFolder}/qvm-lsp"
+			}
+		}
+	]
 }

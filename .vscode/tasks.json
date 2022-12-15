@@ -15,6 +15,42 @@
 			"options": {
 				"cwd": "${workspaceFolder}"
 			}
+		},
+		{
+			"type": "npm",
+			"script": "compile",
+			"group": "build",
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "never"
+			},
+			"problemMatcher": [
+				"$tsc"
+			],
+			"dependsOn": "rust: cargo build",
+            "label": "npm: build extension",
+			"options": {
+				"cwd": "${workspaceFolder}/qvm-lsp"
+			}
+		},
+		{
+			"type": "npm",
+			"script": "watch",
+			"isBackground": true,
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "never"
+			},
+			"problemMatcher": [
+				"$tsc-watch"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/qvm-lsp"
+			}
 		}
 	]
 }

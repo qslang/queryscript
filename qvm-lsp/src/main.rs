@@ -1,4 +1,3 @@
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::path::Path as FilePath;
 use std::sync::{Arc, RwLock};
@@ -16,12 +15,15 @@ struct Configuration {
     pub has_diagnostic_related_information_capability: bool,
 }
 
+// XXX Remove this or add real settings in
+#[allow(unused)]
 #[derive(Debug)]
 struct ExampleSettings {
     pub max_number_of_problems: u32,
 }
 
 // XXX Remove this or add real settings in
+#[allow(unused)]
 const DEFAULT_SETTINGS: ExampleSettings = ExampleSettings {
     max_number_of_problems: 1000,
 };
