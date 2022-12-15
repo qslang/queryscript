@@ -12,4 +12,5 @@ mod util;
 
 pub use compile::{lookup_path, lookup_schema, Compiler, CompilerConfig};
 pub use error::{CompileError, Result};
+pub use schema::{Schema, SchemaRef};
 pub use sql::compile_reference;
