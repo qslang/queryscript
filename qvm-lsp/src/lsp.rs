@@ -1,4 +1,5 @@
 use regex::Regex;
+use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::path::Path as FilePath;
 use std::sync::{Arc, Mutex, RwLock};
@@ -10,7 +11,7 @@ use tower_lsp::{Client, LanguageServer};
 
 use qvm::{
     compile::{Compiler, Schema, SchemaRef},
-    parser::parse_schema,
+    parser::{error::PrettyError, parse_schema},
 };
 
 // XXX Do we need any of these settings? If not, we can probably remove them.
@@ -34,9 +35,10 @@ const DEFAULT_SETTINGS: ExampleSettings = ExampleSettings {
     max_number_of_problems: 1000,
 };
 
+#[derive(Debug, Clone)]
 pub struct Document {
     pub uri: Url,
-    pub version: Option<i64>,
+    pub version: Option<i32>,
     pub text: String,
     pub schema: SchemaRef,
 }
@@ -46,7 +48,7 @@ pub struct Backend {
     client: Client,
     configuration: Arc<RwLock<Configuration>>,
     settings: Arc<RwLock<BTreeMap<String, ExampleSettings>>>,
-    documents: Arc<RwLock<BTreeMap<String, String>>>,
+    documents: Arc<RwLock<BTreeMap<String, Document>>>,
 
     // We use a mutex for the compiler, because we want to serialize compilation
     // (not sure if the compiler can interleave multiple compilations correctly,
@@ -184,6 +186,7 @@ impl LanguageServer for Backend {
             self.settings.write().unwrap().clear();
         }
 
+        /* XXX FIX
         let mut futures = Vec::new();
         for (uri, document) in self.documents.read().unwrap().iter() {
             futures.push(self.on_change(Url::parse(uri).unwrap(), document.clone(), None));
@@ -192,6 +195,7 @@ impl LanguageServer for Backend {
         for future in futures {
             future.await;
         }
+        */
     }
 
     async fn did_change_workspace_folders(&self, _params: DidChangeWorkspaceFoldersParams) {
@@ -273,6 +277,7 @@ impl LanguageServer for Backend {
         let text = documents
             .get(&uri.to_string())
             .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?
+            .text
             .clone();
 
         let mut lenses = Vec::new();
@@ -309,124 +314,106 @@ impl LanguageServer for Backend {
 
 impl Backend {
     async fn on_change(&self, uri: Url, text: String, version: Option<i32>) {
-        {
+        let file = uri.path().to_string();
+
+        let folder = FilePath::new(uri.path())
+            .parent()
+            .map(|p| p.to_str().unwrap())
+            .map(String::from);
+
+        // XXX this is probably unecessary and too long to hold the write lock. We could
+        // either copy the document text into the map (and just use the original value + schema
+        // passed in), or hold a lock through parsing and release it right afterwards.
+        let (document, ast) = {
             let mut documents = self.documents.write().unwrap();
-            documents.insert(uri.to_string(), text.clone());
-        }
+
+            let document = Document {
+                uri,
+                version,
+                text,
+                schema: Schema::new(file.clone(), folder),
+            };
+
+            let mut document_entry = documents.entry(document.uri.to_string());
+            let document = match document_entry {
+                Entry::Vacant(entry) => entry.insert(document),
+                Entry::Occupied(ref mut entry) => {
+                    let _old = std::mem::replace(entry.get_mut(), document);
+                    entry.get()
+                }
+            };
+
+            let ast = match parse_schema(&document.uri.path(), &document.text) {
+                Ok(ast) => ast,
+                Err(e) => {
+                    // XXX Fix this to send the error as a diagnostic (w/ the location)
+                    eprintln!("ERROR (that should be sent as a diagnostic): {:?}", e);
+                    return;
+                }
+            };
+
+            // XXX This is a bad clone
+            (document.clone(), ast)
+        };
+
+        // XXX We actually should keep the write lock here, because we are changing the value of schema,
+        // so don't want others to read it.
+        let schema = document.schema.clone();
+        let compiler = self.compiler.clone();
+
+        let compile_result = task::spawn_blocking(move || {
+            let compiler = compiler.lock().expect("Failed to access compiler");
+            compiler.compile_schema_ast(schema.clone(), &ast)
+        })
+        .await
+        .expect("compiler thread failed");
 
         let has_diagnostic_related_information_capability = {
             let config = self.configuration.read().unwrap();
             config.has_diagnostic_related_information_capability
         };
 
-        let file = uri.path().to_string();
-
-        // XXX Refactor this into a separate function
-        let folder = FilePath::new(uri.path())
-            .parent()
-            .map(|p| p.to_str().unwrap())
-            .map(String::from);
-        let ast = match parse_schema(&file, &text) {
-            Ok(ast) => ast,
-            Err(e) => {
-                eprintln!("ERROR (that should be sent as a diagnostic): {:?}", e);
-                return;
-            }
-        };
-
-        let schema = Schema::new(file, folder);
-        let compiler = self.compiler.clone();
-
-        eprintln!("GOING TO COMPILE");
-        task::spawn_blocking(move || {
-            eprintln!("IN COMPILER");
-            let compiler = compiler.lock().expect("Failed to access compiler");
-            eprintln!("COMPILNG!");
-            let compile_result = compiler.compile_schema_ast(schema.clone(), &ast);
-            eprintln!("COMPILE RESULT: {:?}", compile_result);
-        })
-        .await
-        .expect("compiler thread failed");
-
-        // XXX send the compile errors as diagnostics up to the client
-
-        let pattern = Regex::new(r"\b[A-Z]{2,}\b").unwrap();
-
         let mut problems = 0;
         let mut diagnostics = Vec::new();
 
         let allowed_problems = 10;
-        for m in pattern.find_iter(&text) {
+        for (_idx, err) in compile_result.errors {
             if problems >= allowed_problems {
                 break;
             }
 
-            let mut diagnostic = Diagnostic {
-                severity: Some(DiagnosticSeverity::WARNING),
-                range: Range {
-                    start: position_of_index(&text, m.start()),
-                    end: position_of_index(&text, m.end()),
-                },
-                message: format!("{} is all uppercase.", m.as_str()),
-                source: Some("ex".to_string()),
-                ..Default::default()
+            let (start_line, start_col, end_line, end_col) = match err.location().range() {
+                Some(loc) => loc,
+                None => continue, // In this case, we may want to send file-level diagnostics?
             };
-            if has_diagnostic_related_information_capability {
-                diagnostic.related_information = Some(vec![
-                    DiagnosticRelatedInformation {
-                        location: Location {
-                            uri: uri.clone(),
-                            range: Range {
-                                start: position_of_index(&text, m.start()),
-                                end: position_of_index(&text, m.end()),
-                            },
-                        },
-                        message: "Spelling matters".to_string(),
+
+            diagnostics.push(Diagnostic {
+                severity: Some(DiagnosticSeverity::ERROR),
+                range: Range {
+                    start: Position {
+                        line: (start_line - 1) as u32,
+                        character: (start_col - 1) as u32,
                     },
-                    DiagnosticRelatedInformation {
-                        location: Location {
-                            uri: uri.clone(),
-                            range: Range {
-                                start: position_of_index(&text, m.start()),
-                                end: position_of_index(&text, m.end()),
-                            },
-                        },
-                        message: "Particularly for names".to_string(),
+                    end: Position {
+                        line: (end_line - 1) as u32,
+                        character: (end_col - 1) as u32,
                     },
-                ]);
-            }
-            diagnostics.push(diagnostic);
+                },
+                message: err.pretty(),
+                source: Some("qvm".to_string()),
+                ..Default::default()
+            });
 
             problems += 1;
         }
 
         self.client
-            .publish_diagnostics(uri.clone(), diagnostics, version)
+            .publish_diagnostics(document.uri.clone(), diagnostics, version)
             .await
     }
 
     async fn run_query(&self, params: serde_json::Value) -> Result<String> {
         eprintln!("PARAMS: {:?}", params);
         Ok("foo".to_string())
-    }
-}
-
-fn position_of_index(text: &str, index: usize) -> Position {
-    let mut line = 0;
-    let mut column = 0;
-    for (i, c) in text.char_indices() {
-        if i == index {
-            break;
-        }
-        if c == '\n' {
-            line += 1;
-            column = 0;
-        } else {
-            column += 1;
-        }
-    }
-    Position {
-        line,
-        character: column,
     }
 }
