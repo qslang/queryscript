@@ -1744,8 +1744,13 @@ pub fn compile_sqlexpr(
                     // can't be pushed down either because of their types or because they must be
                     // run locally (e.g. `load`).
                     //
-                    let lift = !args.iter().any(|a| has_unbound_names(a.expr.clone()))
-                        && matches!(fn_kind, FnKind::Native);
+                    let can_lift = !args.iter().any(|a| has_unbound_names(a.expr.clone()));
+                    let should_lift = if compiler.allow_inlining() {
+                        matches!(fn_kind, FnKind::Native)
+                    } else {
+                        !matches!(fn_kind, FnKind::SQLBuiltin)
+                    };
+                    let lift = can_lift && should_lift;
 
                     if lift {
                         let args = args
@@ -1764,7 +1769,7 @@ pub fn compile_sqlexpr(
                         match (&fn_kind, fn_body) {
                             // If the function body is an expression, inline it.
                             //
-                            (FnKind::Expr, Some(fn_body)) => {
+                            (FnKind::Expr, Some(fn_body)) if compiler.allow_inlining() => {
                                 // Within a function body, arguments are represented as
                                 // Expr::ContextRef with the given name.  This first pass will
                                 // replace any context references with the actual argument bodies,

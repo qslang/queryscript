@@ -32,6 +32,9 @@ struct Cli {
 
     #[arg(short, long)]
     execute: Option<String>,
+
+    #[arg(long)]
+    no_inlining: bool,
 }
 
 enum Mode {
@@ -75,7 +78,10 @@ fn main_result() -> Result<(), QVMError> {
                 file: file.to_string(),
             })?;
 
-            let compiler = compile::Compiler::new()?;
+            let compiler = compile::Compiler::new_with_config(compile::CompilerConfig {
+                allow_inlining: !cli.no_inlining,
+                ..Default::default()
+            })?;
             match run_file(compiler.clone(), &rt, engine_type, &file, mode, cli.execute) {
                 Err(err) => {
                     let errs = if cli.verbose {

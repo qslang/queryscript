@@ -2,7 +2,7 @@ use lazy_static::lazy_static;
 use std::collections::BTreeMap;
 
 use crate::ast::{Ident, SourceLocation};
-use crate::compile::compile::Compiler;
+use crate::compile::compile::{Compiler, CompilerConfig};
 use crate::compile::inference::mkcref;
 use crate::compile::schema::{Decl, MType, Ref, Schema, SchemaEntry};
 use crate::types::{AtomicType, TimeUnit};
@@ -77,7 +77,14 @@ lazy_static! {
         let ret = Schema::new("<builtin>".to_string(), None);
         ret.write().unwrap().decls = BTreeMap::from_iter(BUILTIN_TYPE_DECLS.clone().into_iter());
 
-        let builtin_compiler = Compiler::new_with_builtins(ret.clone(), true).unwrap();
+        let builtin_compiler = Compiler::new_with_builtins(
+            ret.clone(),
+            CompilerConfig {
+                allow_native: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         builtin_compiler
             .compile_string(ret.clone(), BUILTIN_FUNCTIONS)
             .expect("Failed to compile builtin function defs");

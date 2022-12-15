@@ -95,20 +95,39 @@ pub struct CompilerData {
 }
 
 #[derive(Clone)]
+pub struct CompilerConfig {
+    pub allow_native: bool,
+    pub allow_inlining: bool,
+}
+
+impl Default for CompilerConfig {
+    fn default() -> CompilerConfig {
+        CompilerConfig {
+            allow_native: false,
+            allow_inlining: true,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct Compiler {
     runtime: Ref<tokio::runtime::Runtime>,
     data: Ref<CompilerData>,
     builtins: Ref<Schema>,
-    allow_native: bool,
+    config: CompilerConfig,
 }
 
 impl Compiler {
     pub fn new() -> Result<Compiler> {
-        lazy_static::initialize(&GLOBAL_SCHEMA);
-        Compiler::new_with_builtins(GLOBAL_SCHEMA.clone(), false)
+        Compiler::new_with_config(CompilerConfig::default())
     }
 
-    pub fn new_with_builtins(schema: Ref<Schema>, allow_native: bool) -> Result<Compiler> {
+    pub fn new_with_config(config: CompilerConfig) -> Result<Compiler> {
+        lazy_static::initialize(&GLOBAL_SCHEMA);
+        Compiler::new_with_builtins(GLOBAL_SCHEMA.clone(), config)
+    }
+
+    pub fn new_with_builtins(schema: Ref<Schema>, config: CompilerConfig) -> Result<Compiler> {
         // Create a watcher that will be signaled whenever the runtime attempts to park.  If
         // anything is awaiting this channel, then the runtime will not actually park, and will
         // instead yield control back to that coroutine.  This is useful because we don't know
@@ -138,7 +157,7 @@ impl Compiler {
                 files: BTreeMap::new(),
             }),
             builtins: schema.clone(),
-            allow_native,
+            config,
         };
 
         Ok(compiler)
@@ -149,7 +168,11 @@ impl Compiler {
     }
 
     pub fn allow_native(&self) -> bool {
-        self.allow_native
+        self.config.allow_native
+    }
+
+    pub fn allow_inlining(&self) -> bool {
+        self.config.allow_inlining
     }
 
     pub fn compile_string(&self, schema: Ref<Schema>, text: &str) -> CompileResult<()> {

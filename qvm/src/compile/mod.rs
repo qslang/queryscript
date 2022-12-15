@@ -10,6 +10,6 @@ pub mod sql;
 pub mod traverse;
 mod util;
 
-pub use compile::{lookup_path, lookup_schema, Compiler};
+pub use compile::{lookup_path, lookup_schema, Compiler, CompilerConfig};
 pub use error::{CompileError, Result};
 pub use sql::compile_reference;
