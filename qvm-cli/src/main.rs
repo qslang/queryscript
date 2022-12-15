@@ -153,6 +153,9 @@ fn run_file(
         // If a string was provided to execute against the schema, then clear out any other
         // expressions to replace them with the provided one.
         //
+        // XXX: If this fails, the error locations still point at the schema file, which makes the
+        // highlighted context incorrect.
+        //
         schema.write()?.exprs = vec![];
         compiler
             .compile_string(schema.clone(), execute.as_str())
