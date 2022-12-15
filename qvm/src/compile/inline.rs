@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use snafu::prelude::*;
 use sqlparser::ast as sqlast;
 
 use crate::compile::error::*;
@@ -40,7 +39,7 @@ pub async fn inline_context(
 }
 
 pub struct ParamInliner {
-    context: BTreeMap<String, sqlast::Expr>,
+    context: BTreeMap<String, SQLBody>,
 }
 
 impl SQLVisitor for ParamInliner {
@@ -58,9 +57,32 @@ impl SQLVisitor for ParamInliner {
         };
 
         if let Some(e) = self.context.get(&ident) {
-            Some(e.clone())
+            Some(e.as_expr().unwrap()) // XXX
         } else {
             None
+        }
+    }
+
+    fn visit_sqltable(&self, table: &sqlast::TableFactor) -> Option<sqlast::TableFactor> {
+        match table {
+            sqlast::TableFactor::Table {
+                name, alias, args, ..
+            } => {
+                if name.0.len() != 1 || args.is_some() {
+                    return None;
+                }
+
+                if let Some(e) = self.context.get(&name.0[0].value) {
+                    Some(sqlast::TableFactor::Derived {
+                        lateral: false,
+                        subquery: Box::new(e.as_query().unwrap()), // XXX
+                        alias: alias.clone(),
+                    })
+                } else {
+                    None
+                }
+            }
+            _ => None,
         }
     }
 }
@@ -84,12 +106,7 @@ impl Visitor<CRef<MType>> for ParamInliner {
                     match expr.as_ref() {
                         Expr::SQL(sql) => {
                             names.extend(sql.names.clone());
-                            context.insert(
-                                name.clone(),
-                                sql.body.as_expr().context(RuntimeSnafu {
-                                    loc: ErrorLocation::Unknown,
-                                })?,
-                            );
+                            context.insert(name.clone(), sql.body.clone());
                         }
                         _ => {
                             names.params.insert(

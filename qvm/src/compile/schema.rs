@@ -600,7 +600,7 @@ impl<T: Clone + fmt::Debug + Send + Sync> fmt::Debug for SQL<T> {
             SQLBody::Query(query) => query.to_string(),
         };
         f.debug_struct("SQL")
-            .field("params", &self.names)
+            .field("names", &self.names)
             .field("body", &body)
             .finish()
     }

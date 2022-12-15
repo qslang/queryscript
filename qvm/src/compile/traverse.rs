@@ -20,6 +20,10 @@ pub trait SQLVisitor {
     fn visit_sqlident(&self, _ident: &Ident) -> Option<Ident> {
         None
     }
+
+    fn visit_sqltable(&self, _table: &TableFactor) -> Option<TableFactor> {
+        None
+    }
 }
 
 #[async_trait]
@@ -496,6 +500,10 @@ impl<V: SQLVisitor> VisitSQL<V> for JoinConstraint {
 
 impl<V: SQLVisitor> VisitSQL<V> for TableFactor {
     fn visit_sql(&self, visitor: &V) -> Self {
+        if let Some(t) = visitor.visit_sqltable(self) {
+            return t;
+        }
+
         use TableFactor::*;
         match self {
             Table {
