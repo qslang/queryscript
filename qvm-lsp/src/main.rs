@@ -1,6 +1,8 @@
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::path::Path as FilePath;
 use std::sync::{Arc, RwLock};
+use tokio::task;
 
 use regex::Regex;
 use tower_lsp::jsonrpc::{Error, Result};
@@ -19,11 +21,10 @@ struct ExampleSettings {
     pub max_number_of_problems: u32,
 }
 
+// XXX Remove this or add real settings in
 const DEFAULT_SETTINGS: ExampleSettings = ExampleSettings {
     max_number_of_problems: 1000,
 };
-
-// NOTE: I skipped implementing globalSettings
 
 #[derive(Debug)]
 struct Backend {
@@ -31,6 +32,7 @@ struct Backend {
     configuration: Arc<RwLock<Configuration>>,
     settings: Arc<RwLock<BTreeMap<String, ExampleSettings>>>,
     documents: Arc<RwLock<BTreeMap<String, String>>>,
+    compiler: Arc<RwLock<Option<qvm::compile::Compiler>>>,
 }
 
 #[tower_lsp::async_trait]
@@ -122,6 +124,7 @@ impl LanguageServer for Backend {
         Ok(())
     }
 
+    // XXX REMOVE
     async fn did_change_configuration(&self, _params: DidChangeConfigurationParams) {
         if self
             .configuration
@@ -147,6 +150,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
+        eprintln!("FILE CONTENTS CHANGED");
         let uri = params.text_document.uri;
         let version = params.text_document.version;
 
@@ -157,7 +161,6 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        eprintln!("DID OPEN: {:?}", params);
         let uri = params.text_document.uri;
         let version = params.text_document.version;
         let text = params.text_document.text;
@@ -169,6 +172,7 @@ impl LanguageServer for Backend {
         eprintln!("We receved a file change event.");
     }
 
+    // TODO: Implement real completion logic
     async fn completion(&self, _params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let completions = vec![
             CompletionItem {
@@ -187,6 +191,7 @@ impl LanguageServer for Backend {
         Ok(Some(CompletionResponse::Array(completions)))
     }
 
+    // TODO: Implement real completion logic
     async fn completion_resolve(&self, item: CompletionItem) -> Result<CompletionItem> {
         if let Some(data) = &item.data {
             if let serde_json::Value::Number(n) = data {
@@ -213,8 +218,6 @@ impl LanguageServer for Backend {
     }
 
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
-        eprintln!("params: {:?}", params);
-
         let uri = params.text_document.uri;
         let documents = self.documents.read().unwrap();
 
@@ -267,24 +270,44 @@ impl Backend {
             config.has_diagnostic_related_information_capability
         };
 
-        let allowed_problems = {
-            let mut settings = self.settings.write().unwrap();
-            match settings.entry(uri.to_string()) {
-                Entry::Occupied(entry) => entry.get().max_number_of_problems,
-                Entry::Vacant(entry) => {
-                    entry.insert(ExampleSettings {
-                        max_number_of_problems: DEFAULT_SETTINGS.max_number_of_problems,
-                    });
-                    DEFAULT_SETTINGS.max_number_of_problems
-                }
+        let file = uri.path().to_string();
+
+        // XXX Refactor this into a separate function
+        let folder = FilePath::new(uri.path())
+            .parent()
+            .map(|p| p.to_str().unwrap())
+            .map(String::from);
+        let ast = match qvm::parser::parse_schema(&file, &text) {
+            Ok(ast) => ast,
+            Err(e) => {
+                eprintln!("ERROR (that should be sent as a diagnostic): {:?}", e);
+                return;
             }
         };
+
+        let schema = qvm::compile::schema::Schema::new(file, folder);
+        let compiler = self.compiler.clone();
+
+        eprintln!("GOING TO COMPILE");
+        task::spawn_blocking(move || {
+            eprintln!("IN COMPILER");
+            let compiler = maybe_init_compiler(compiler);
+            // let compiler = qvm::compile::Compiler::new().unwrap();
+            eprintln!("COMPILNG!");
+            let compile_result = compiler.compile_schema_ast(schema.clone(), &ast);
+            eprintln!("COMPILE RESULT: {:?}", compile_result);
+        })
+        .await
+        .expect("compiler thread failed");
+
+        // XXX send the compile errors as diagnostics up to the client
 
         let pattern = Regex::new(r"\b[A-Z]{2,}\b").unwrap();
 
         let mut problems = 0;
         let mut diagnostics = Vec::new();
 
+        let allowed_problems = 10;
         for m in pattern.find_iter(&text) {
             if problems >= allowed_problems {
                 break;
@@ -340,6 +363,26 @@ impl Backend {
     }
 }
 
+fn maybe_init_compiler(
+    compiler_ref: Arc<RwLock<Option<qvm::compile::Compiler>>>,
+) -> qvm::compile::Compiler {
+    {
+        let compiler_read = &*(compiler_ref.read().unwrap());
+        if let Some(compiler) = compiler_read {
+            return compiler.clone();
+        }
+    }
+
+    let mut locked_compiler = compiler_ref.write().unwrap();
+    if let Some(compiler) = &*locked_compiler {
+        return compiler.clone();
+    }
+
+    let compiler = qvm::compile::Compiler::new().unwrap();
+    locked_compiler.replace(compiler.clone());
+    compiler
+}
+
 fn position_of_index(text: &str, index: usize) -> Position {
     let mut line = 0;
     let mut column = 0;
@@ -374,6 +417,7 @@ async fn main() {
         })),
         settings: Arc::new(RwLock::new(BTreeMap::new())),
         documents: Arc::new(RwLock::new(BTreeMap::new())),
+        compiler: Arc::new(RwLock::new(None)),
     })
     .custom_method("qvm/runQuery", Backend::run_query)
     .finish();

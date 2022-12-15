@@ -2588,6 +2588,7 @@ dependencies = [
 name = "qvm-lsp"
 version = "0.1.0"
 dependencies = [
+ "qvm",
  "regex",
  "serde_json",
  "tokio",

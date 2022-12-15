@@ -13,6 +13,7 @@ use crate::compile::schema::*;
 use crate::compile::sql::*;
 use crate::{parser, parser::parse_schema};
 
+#[derive(Debug)]
 pub struct CompileResult<V> {
     pub result: V,
     pub errors: Vec<(Option<usize>, CompileError)>,
@@ -87,6 +88,7 @@ macro_rules! c_try {
     };
 }
 
+#[derive(Debug)]
 pub struct CompilerData {
     pub next_placeholder: usize,
     pub idle: Ref<tokio::sync::watch::Receiver<()>>,
@@ -94,7 +96,7 @@ pub struct CompilerData {
     pub files: BTreeMap<String, String>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct CompilerConfig {
     pub allow_native: bool,
     pub allow_inlining: bool,
@@ -109,7 +111,7 @@ impl Default for CompilerConfig {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Compiler {
     runtime: Ref<tokio::runtime::Runtime>,
     data: Ref<CompilerData>,
@@ -593,7 +595,7 @@ pub fn rebind_decl(_schema: SchemaInstance, decl: &Decl) -> Result<SchemaEntry> 
     }
 }
 
-pub fn compile_schema_from_file(
+fn compile_schema_from_file(
     compiler: Compiler,
     file_path: &FilePath,
 ) -> CompileResult<Option<Ref<Schema>>> {
@@ -610,7 +612,7 @@ pub fn compile_schema_from_file(
     result
 }
 
-pub fn compile_schema(
+fn compile_schema(
     compiler: Compiler,
     file: String,
     folder: Option<String>,
@@ -625,7 +627,7 @@ pub fn compile_schema(
     result
 }
 
-pub fn compile_schema_ast(
+fn compile_schema_ast(
     compiler: Compiler,
     schema: Ref<Schema>,
     ast: &ast::Schema,

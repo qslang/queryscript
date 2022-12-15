@@ -8,7 +8,7 @@
             "type": "lldb",
             "request": "launch",
             "name": "Debug",
-            "program": "${workspaceFolder}/src/target/debug/duckdb-test",
+            "program": "${workspaceFolder}/src/target/debug/qvm",
             "args": [],
         }
     ]
