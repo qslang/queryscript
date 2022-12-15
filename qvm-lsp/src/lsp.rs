@@ -1,9 +1,8 @@
-use regex::Regex;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::path::Path as FilePath;
 use std::sync::{Arc, Mutex, RwLock};
-use tokio::task;
+use tokio::{sync::Mutex as TokioMutex, task};
 
 use tower_lsp::jsonrpc::{Error, Result};
 use tower_lsp::{lsp_types::*, LspServiceBuilder};
@@ -48,7 +47,7 @@ pub struct Backend {
     client: Client,
     configuration: Arc<RwLock<Configuration>>,
     settings: Arc<RwLock<BTreeMap<String, ExampleSettings>>>,
-    documents: Arc<RwLock<BTreeMap<String, Document>>>,
+    documents: Arc<RwLock<BTreeMap<String, Arc<TokioMutex<Document>>>>>,
 
     // We use a mutex for the compiler, because we want to serialize compilation
     // (not sure if the compiler can interleave multiple compilations correctly,
@@ -277,6 +276,7 @@ impl LanguageServer for Backend {
         let text = documents
             .get(&uri.to_string())
             .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?
+            .blocking_lock()
             .text
             .clone();
 
@@ -321,10 +321,8 @@ impl Backend {
             .map(|p| p.to_str().unwrap())
             .map(String::from);
 
-        // XXX this is probably unecessary and too long to hold the write lock. We could
-        // either copy the document text into the map (and just use the original value + schema
-        // passed in), or hold a lock through parsing and release it right afterwards.
-        let (document, ast) = {
+        // Get the existing document or insert a new one, and lock it (while holding the write lock on documents).
+        let document = {
             let mut documents = self.documents.write().unwrap();
 
             let document = Document {
@@ -335,14 +333,25 @@ impl Backend {
             };
 
             let mut document_entry = documents.entry(document.uri.to_string());
-            let document = match document_entry {
-                Entry::Vacant(entry) => entry.insert(document),
-                Entry::Occupied(ref mut entry) => {
-                    let _old = std::mem::replace(entry.get_mut(), document);
-                    entry.get()
+            match document_entry {
+                Entry::Vacant(entry) => {
+                    let new_val = entry.insert(Arc::new(TokioMutex::new(document)));
+                    let new_val = new_val.clone();
+                    TokioMutex::blocking_lock_owned(new_val)
                 }
-            };
+                Entry::Occupied(ref mut entry) => {
+                    let mut existing = entry.get().clone().blocking_lock_owned();
+                    *existing = document;
+                    existing
+                }
+            }
+        };
 
+        // We need to hold the write lock throughout the whole compilation process, because we don't
+        // want others to read the (uninitialized) schema. There are surely better ways to do this, e.g.
+        // making each document itself an Arc<RwLock<Document>> and synchronizing the documents map with
+        // a simple mutex, but this was simpler (for now).
+        let (uri, compile_result) = {
             let ast = match parse_schema(&document.uri.path(), &document.text) {
                 Ok(ast) => ast,
                 Err(e) => {
@@ -352,36 +361,27 @@ impl Backend {
                 }
             };
 
-            // XXX This is a bad clone
-            (document.clone(), ast)
+            // XXX We actually should keep the write lock here, because we are changing the value of schema,
+            // so don't want others to read it.
+            let schema = document.schema.clone();
+            let compiler = self.compiler.clone();
+
+            let compile_result = task::spawn_blocking(move || {
+                let compiler = compiler.lock().expect("Failed to access compiler");
+                compiler.compile_schema_ast(schema.clone(), &ast)
+            })
+            .await
+            .expect("compiler thread failed");
+
+            (document.uri.clone(), compile_result)
         };
 
-        // XXX We actually should keep the write lock here, because we are changing the value of schema,
-        // so don't want others to read it.
-        let schema = document.schema.clone();
-        let compiler = self.compiler.clone();
+        // Now that the schema is updated, we no longer need a lock on the document
+        drop(document);
 
-        let compile_result = task::spawn_blocking(move || {
-            let compiler = compiler.lock().expect("Failed to access compiler");
-            compiler.compile_schema_ast(schema.clone(), &ast)
-        })
-        .await
-        .expect("compiler thread failed");
-
-        let has_diagnostic_related_information_capability = {
-            let config = self.configuration.read().unwrap();
-            config.has_diagnostic_related_information_capability
-        };
-
-        let mut problems = 0;
         let mut diagnostics = Vec::new();
-
-        let allowed_problems = 10;
         for (_idx, err) in compile_result.errors {
-            if problems >= allowed_problems {
-                break;
-            }
-
+            // The locations are 1-indexed, but LSP diagnostics are 0-indexed
             let (start_line, start_col, end_line, end_col) = match err.location().range() {
                 Some(loc) => loc,
                 None => continue, // In this case, we may want to send file-level diagnostics?
@@ -403,12 +403,10 @@ impl Backend {
                 source: Some("qvm".to_string()),
                 ..Default::default()
             });
-
-            problems += 1;
         }
 
         self.client
-            .publish_diagnostics(document.uri.clone(), diagnostics, version)
+            .publish_diagnostics(uri, diagnostics, version)
             .await
     }
 
