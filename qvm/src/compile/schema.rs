@@ -987,7 +987,7 @@ pub struct Schema {
     pub folder: Option<String>,
     pub parent_scope: Option<Ref<Schema>>,
     pub externs: BTreeMap<String, CRef<MType>>,
-    pub decls: BTreeMap<String, Decl>,
+    pub decls: BTreeMap<String, Located<Decl>>,
     pub imports: BTreeMap<Vec<String>, Ref<ImportedSchema>>,
     pub exprs: Vec<Located<CTypedExpr>>,
 }

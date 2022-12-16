@@ -1,3 +1,4 @@
+use serde_json::json;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::path::Path as FilePath;
@@ -283,16 +284,45 @@ impl LanguageServer for Backend {
         })?;
 
         let mut lenses = Vec::new();
-        for expr in schema.read().unwrap().exprs.iter() {
+        for expr in schema
+            .read()
+            .map_err(|_| Error::internal_error())?
+            .exprs
+            .iter()
+        {
             let range = match expr.location().normalize() {
                 Some(range) => range,
                 None => continue,
             };
 
             let command = Command {
-                title: "Run query".to_string(),
+                title: "Run".to_string(),
                 command: "qvm/runQuery".to_string(),
                 arguments: Some(vec![uri.to_string().into()]),
+            };
+
+            lenses.push(CodeLens {
+                range,
+                command: Some(command),
+                data: None,
+            });
+        }
+
+        for (name, decl) in schema
+            .read()
+            .map_err(|_| Error::internal_error())?
+            .decls
+            .iter()
+        {
+            let range = match decl.location().normalize() {
+                Some(range) => range,
+                None => continue,
+            };
+
+            let command = Command {
+                title: "Preview".to_string(),
+                command: "qvm/runExpr".to_string(),
+                arguments: Some(vec![json!(uri), json!(name)]),
             };
 
             lenses.push(CodeLens {
@@ -306,6 +336,7 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
+    // XXX Make this return a result instead of unwrapping/expecting
     async fn on_change(&self, uri: Url, text: String, version: Option<i32>) {
         let file = uri.path().to_string();
 

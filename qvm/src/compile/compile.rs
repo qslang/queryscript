@@ -375,7 +375,7 @@ pub fn lookup_path(
                 }
 
                 if i == path.len() - 1 && !resolve_last {
-                    return Ok((schema.clone(), Some(decl.clone()), vec![]));
+                    return Ok((schema.clone(), Some(decl.get().clone()), vec![]));
                 }
 
                 match &decl.value {
@@ -385,7 +385,13 @@ pub fn lookup_path(
                             .schema
                             .clone()
                     }
-                    _ => return Ok((schema.clone(), Some(decl.clone()), path[i + 1..].to_vec())),
+                    _ => {
+                        return Ok((
+                            schema.clone(),
+                            Some(decl.get().clone()),
+                            path[i + 1..].to_vec(),
+                        ))
+                    }
                 }
             }
             None => match &schema.read()?.parent_scope {
@@ -682,7 +688,10 @@ pub fn declare_schema_entry(
         ast::StmtBody::Import { path, list, .. } => {
             let imported = lookup_schema(compiler.clone(), schema.clone(), &path)?;
             if imported.read()?.args.is_some() {
-                return Err(CompileError::unimplemented(loc, "Importing with arguments"));
+                return Err(CompileError::unimplemented(
+                    loc.clone(),
+                    "Importing with arguments",
+                ));
             }
 
             // XXX Importing schemas with extern values is currently broken, because we don't
@@ -851,12 +860,15 @@ pub fn declare_schema_entry(
 
         schema.write()?.decls.insert(
             name.value.clone(),
-            Decl {
-                public: stmt.export,
-                extern_: *extern_,
-                name: name.clone(),
-                value: value.clone(),
-            },
+            Located::new(
+                Decl {
+                    public: stmt.export,
+                    extern_: *extern_,
+                    name: name.clone(),
+                    value: value.clone(),
+                },
+                loc.clone(),
+            ),
         );
     }
     Ok(())
@@ -970,12 +982,15 @@ pub fn compile_schema_entry(
             for generic in generics {
                 inner_schema.write()?.decls.insert(
                     generic.value.clone(),
-                    Decl {
-                        public: true,
-                        extern_: true,
-                        name: generic.clone(),
-                        value: SchemaEntry::Type(mkcref(MType::Name(generic.clone()))),
-                    },
+                    Located::new(
+                        Decl {
+                            public: true,
+                            extern_: true,
+                            name: generic.clone(),
+                            value: SchemaEntry::Type(mkcref(MType::Name(generic.clone()))),
+                        },
+                        loc.clone(),
+                    ),
                 );
             }
 
@@ -987,15 +1002,18 @@ pub fn compile_schema_entry(
                 let type_ = resolve_type(compiler.clone(), inner_schema.clone(), &arg.type_)?;
                 inner_schema.write()?.decls.insert(
                     arg.name.value.clone(),
-                    Decl {
-                        public: true,
-                        extern_: true,
-                        name: arg.name.clone(),
-                        value: SchemaEntry::Expr(STypedExpr {
-                            type_: SType::new_mono(type_.clone()),
-                            expr: mkcref(Expr::ContextRef(arg.name.value.clone())),
-                        }),
-                    },
+                    Located::new(
+                        Decl {
+                            public: true,
+                            extern_: true,
+                            name: arg.name.clone(),
+                            value: SchemaEntry::Expr(STypedExpr {
+                                type_: SType::new_mono(type_.clone()),
+                                expr: mkcref(Expr::ContextRef(arg.name.value.clone())),
+                            }),
+                        },
+                        loc.clone(),
+                    ),
                 );
                 inner_schema
                     .write()?
@@ -1008,7 +1026,7 @@ pub fn compile_schema_entry(
                 ast::FnBody::Native => {
                     if !compiler.allow_native() {
                         return Err(CompileError::internal(
-                            loc,
+                            loc.clone(),
                             "Cannot compile native functions",
                         ));
                     }

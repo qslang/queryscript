@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use crate::ast::{Ident, SourceLocation};
 use crate::compile::compile::{Compiler, CompilerConfig};
 use crate::compile::inference::mkcref;
-use crate::compile::schema::{Decl, MType, Ref, Schema, SchemaEntry};
+use crate::compile::schema::{Decl, Located, MType, Ref, Schema, SchemaEntry};
 use crate::types::{AtomicType, TimeUnit};
 
 // TODO: Add support for types with arguments
@@ -75,7 +75,12 @@ lazy_static! {
         .collect();
     pub static ref GLOBAL_SCHEMA: Ref<Schema> = {
         let ret = Schema::new("<builtin>".to_string(), None);
-        ret.write().unwrap().decls = BTreeMap::from_iter(BUILTIN_TYPE_DECLS.clone().into_iter());
+        ret.write().unwrap().decls = BTreeMap::from_iter(
+            BUILTIN_TYPE_DECLS
+                .clone()
+                .into_iter()
+                .map(|(name, decl)| (name, Located::new(decl, SourceLocation::Unknown))),
+        );
 
         let builtin_compiler = Compiler::new_with_builtins(
             ret.clone(),
