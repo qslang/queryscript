@@ -4,7 +4,7 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::path::Path as FilePath;
 use std::sync::{Arc, Mutex, RwLock};
-use tokio::{runtime::Handle, sync::Mutex as TokioMutex, task};
+use tokio::{sync::Mutex as TokioMutex, task};
 
 use tower_lsp::jsonrpc::{Error, Result};
 use tower_lsp::{lsp_types::*, LspServiceBuilder};
@@ -451,16 +451,9 @@ impl Backend {
 
         let ctx = runtime::build_context(&schema, runtime::SQLEngineType::DuckDB);
 
-        // I honestly don't understand why this is necessary. Without it (if you try to call runtime::eval directly),
-        // this method doesn't fit the type signature required for an LSP method (maybe because the return type of
-        // the Future is affected). I also tried using tokio::spawn, but Result<Value> doesn't appear to be Send.
-        let value: Result<_> = task::block_in_place(|| {
-            Ok(Handle::current().block_on(async move {
-                Ok(runtime::eval(&ctx, &expr)
-                    .await
-                    .map_err(|_| Error::internal_error())?)
-            })?)
-        });
+        let value = runtime::eval(&ctx, &expr)
+            .await
+            .map_err(|_| Error::internal_error())?;
         eprintln!("RESULT: {:#?}", value);
         Ok("success".to_string())
     }

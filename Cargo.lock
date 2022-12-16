@@ -2563,6 +2563,7 @@ dependencies = [
  "difference",
  "duckdb",
  "dyn-clone",
+ "futures",
  "half 2.1.0",
  "hashlink",
  "lazy_static",

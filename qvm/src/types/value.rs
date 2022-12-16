@@ -10,6 +10,7 @@ pub use arrow::{
 pub use arrow_buffer::i256;
 use async_trait::async_trait;
 use dyn_clone::{clone_trait_object, DynClone};
+use futures::future::BoxFuture;
 pub use std::any::Any;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -94,7 +95,7 @@ pub trait FnValue: fmt::Debug + DynClone + Send + Sync {
         &self,
         ctx: &crate::runtime::Context,
         args: Vec<Value>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::runtime::Result<Value>>>>;
+    ) -> BoxFuture<crate::runtime::Result<Value>>;
     fn fn_type(&self) -> FnType;
     fn as_any(&self) -> &dyn Any;
 }

@@ -80,6 +80,86 @@ impl DuckDBEngine {
     pub fn new() -> DuckDBEngine {
         DuckDBEngine()
     }
+
+    fn eval_in_place(
+        &self,
+        query: &sqlast::Query,
+        params: HashMap<String, SQLParam>,
+    ) -> Result<Arc<dyn Relation>> {
+        // The code below works by (globally within the connection) installing a replacement
+        // scan that accesses the relations referenced in the query parameters. I did some light
+        // benchmarking and the cost to create a connection seemed relatively low, but we could
+        // potentially pool or concurrently use these connections if necessary.
+        let conn = Connection::open_in_memory()?;
+
+        unsafe {
+            // This follows suggestion [B] outlined in
+            // https://blog.knoldus.com/safe-way-to-access-private-fields-in-rust/
+            // to access the fields inside of Connection.
+            let conn: &duckdb_repr::Connection = std::mem::transmute(&conn);
+
+            let db_wrapper = conn.db.borrow();
+            cppffi::init_arrow_scan(db_wrapper.con as *mut u32);
+        }
+
+        let mut scalar_params = Vec::new();
+        let mut relations = RelationMap::new();
+
+        for (key, param) in params.iter() {
+            match &param.value {
+                Value::Relation(r) => {
+                    relations.insert(
+                        key.clone(),
+                        ArrowRelation {
+                            relation: r.clone().as_arrow_recordbatch(),
+                            schema: Arc::new((&param.type_).try_into()?),
+                        },
+                    );
+                }
+                _ => {
+                    scalar_params.push(key.clone());
+                }
+            }
+        }
+
+        // This block installs a replacement scan (https://duckdb.org/docs/api/c/replacement_scans.html)
+        // that calls back into our code (replacement_scan_callback) when duckdb encounters a table name
+        // it does not know about (i.e. any of our __qvmrel_N relations). The replacement for these scans
+        // is a function call (arrow_scan_qvm) that scans arrow data. This technique is the same method
+        // that duckdb uses internally to automatically query python variables (backed by Arrow, Pandas, etc.).
+        unsafe {
+            // This follows suggestion [B] outlined in
+            // https://blog.knoldus.com/safe-way-to-access-private-fields-in-rust/
+            // to access the fields inside of Connection.
+            let conn: &duckdb_repr::Connection = std::mem::transmute(&conn);
+
+            let db_wrapper = conn.db.borrow();
+            cffi::duckdb_add_replacement_scan(
+                db_wrapper.db,
+                Some(replacement_scan_callback),
+                &mut relations as *mut _ as *mut c_void,
+                None,
+            );
+        }
+
+        scalar_params.sort();
+
+        let normalizer = DuckDBNormalizer::new(&scalar_params);
+        let query = normalizer.normalize(&query);
+        let query_string = format!("{}", query);
+
+        let duckdb_params: Vec<&dyn duckdb::ToSql> = scalar_params
+            .iter()
+            .map(|k| &params.get(k).unwrap().value as &dyn duckdb::ToSql)
+            .collect();
+
+        let mut stmt = conn.prepare(&query_string)?;
+        let rbs = Arc::new(
+            stmt.query_arrow(duckdb_params.as_slice())?
+                .collect::<Vec<RecordBatch>>(),
+        ) as Arc<dyn Relation>;
+        Ok(rbs)
+    }
 }
 
 #[async_trait::async_trait]
@@ -93,81 +173,11 @@ impl SQLEngine for DuckDBEngine {
         // and it's not hooked into the async coroutines that the runtime uses (and therefore cannot
         // yield work). block_in_place() tells Tokio to expect this thread to spend a while working on
         // this stuff and use other threads for other work.
-        tokio::task::block_in_place(|| {
-            // The code below works by (globally within the connection) installing a replacement
-            // scan that accesses the relations referenced in the query parameters. I did some light
-            // benchmarking and the cost to create a connection seemed relatively low, but we could
-            // potentially pool or concurrently use these connections if necessary.
-            let conn = Connection::open_in_memory()?;
-
-            unsafe {
-                // This follows suggestion [B] outlined in
-                // https://blog.knoldus.com/safe-way-to-access-private-fields-in-rust/
-                // to access the fields inside of Connection.
-                let conn: &duckdb_repr::Connection = std::mem::transmute(&conn);
-
-                let db_wrapper = conn.db.borrow();
-                cppffi::init_arrow_scan(db_wrapper.con as *mut u32);
-            }
-
-            let mut scalar_params = Vec::new();
-            let mut relations = RelationMap::new();
-
-            for (key, param) in params.iter() {
-                match &param.value {
-                    Value::Relation(r) => {
-                        relations.insert(
-                            key.clone(),
-                            ArrowRelation {
-                                relation: r.clone().as_arrow_recordbatch(),
-                                schema: Arc::new((&param.type_).try_into()?),
-                            },
-                        );
-                    }
-                    _ => {
-                        scalar_params.push(key.clone());
-                    }
-                }
-            }
-
-            // This block installs a replacement scan (https://duckdb.org/docs/api/c/replacement_scans.html)
-            // that calls back into our code (replacement_scan_callback) when duckdb encounters a table name
-            // it does not know about (i.e. any of our __qvmrel_N relations). The replacement for these scans
-            // is a function call (arrow_scan_qvm) that scans arrow data. This technique is the same method
-            // that duckdb uses internally to automatically query python variables (backed by Arrow, Pandas, etc.).
-            unsafe {
-                // This follows suggestion [B] outlined in
-                // https://blog.knoldus.com/safe-way-to-access-private-fields-in-rust/
-                // to access the fields inside of Connection.
-                let conn: &duckdb_repr::Connection = std::mem::transmute(&conn);
-
-                let db_wrapper = conn.db.borrow();
-                cffi::duckdb_add_replacement_scan(
-                    db_wrapper.db,
-                    Some(replacement_scan_callback),
-                    &mut relations as *mut _ as *mut c_void,
-                    None,
-                );
-            }
-
-            scalar_params.sort();
-
-            let normalizer = DuckDBNormalizer::new(&scalar_params);
-            let query = normalizer.normalize(&query);
-            let query_string = format!("{}", query);
-
-            let duckdb_params: Vec<&dyn duckdb::ToSql> = scalar_params
-                .iter()
-                .map(|k| &params.get(k).unwrap().value as &dyn duckdb::ToSql)
-                .collect();
-
-            let mut stmt = conn.prepare(&query_string)?;
-            let rbs = Arc::new(
-                stmt.query_arrow(duckdb_params.as_slice())?
-                    .collect::<Vec<RecordBatch>>(),
-            ) as Arc<dyn Relation>;
-            Ok(rbs)
-        })
+        if cfg!(feature = "multi-thread") {
+            tokio::task::block_in_place(|| self.eval_in_place(query, params))
+        } else {
+            self.eval_in_place(query, params)
+        }
     }
 }
 

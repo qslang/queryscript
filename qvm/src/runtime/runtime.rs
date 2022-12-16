@@ -1,3 +1,4 @@
+use futures::future::{BoxFuture, FutureExt};
 use std::collections::{BTreeMap, HashMap};
 
 use crate::compile::schema;
@@ -46,18 +47,24 @@ pub fn build_context(schema: &schema::SchemaRef, engine_type: SQLEngineType) -> 
 pub fn eval<'a>(
     ctx: &'a Context,
     typed_expr: &'a schema::TypedExpr<TypeRef>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>> + 'a>> {
-    Box::pin(async move {
+) -> BoxFuture<'a, crate::runtime::Result<crate::types::Value>> {
+    async move {
         match &*typed_expr.expr.as_ref() {
             schema::Expr::Unknown => {
                 return Err(RuntimeError::new("unresolved extern"));
             }
             schema::Expr::SchemaEntry(schema::STypedExpr { expr, .. }) => {
+                let rt_expr = {
+                    let expr = expr.must()?;
+                    let expr = expr.read()?;
+                    Arc::new(expr.to_runtime_type()?)
+                };
+
                 eval(
                     ctx,
                     &schema::TypedExpr {
                         type_: typed_expr.type_.clone(),
-                        expr: Arc::new(expr.must()?.read()?.to_runtime_type()?),
+                        expr: rt_expr,
                     },
                 )
                 .await
@@ -134,5 +141,6 @@ pub fn eval<'a>(
                 }
             }
         }
-    })
+    }
+    .boxed()
 }

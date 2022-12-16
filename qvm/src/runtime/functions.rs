@@ -14,6 +14,7 @@ use datafusion::execution::context::{SessionConfig, SessionContext};
 use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::physical_plan::collect;
 use datafusion::physical_plan::file_format::FileScanConfig;
+use futures::future::{BoxFuture, FutureExt};
 use object_store::path::Path;
 use object_store::ObjectMeta;
 use std::path::{Path as FilePath, PathBuf as FilePathBuf};
@@ -57,15 +58,11 @@ impl QVMFn {
 
 #[async_trait]
 impl FnValue for QVMFn {
-    fn execute(
-        &self,
-        ctx: &Context,
-        args: Vec<Value>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>>>> {
+    fn execute(&self, ctx: &Context, args: Vec<Value>) -> BoxFuture<Result<Value>> {
         let new_ctx = ctx.clone();
         let type_ = self.type_.clone();
         let body = self.body.clone();
-        Box::pin(async move {
+        async move {
             let mut new_ctx = new_ctx.clone();
             if args.len() != type_.args.len() {
                 return fail!("Wrong number of arguments to function");
@@ -80,7 +77,8 @@ impl FnValue for QVMFn {
             }
 
             runtime::eval(&new_ctx, &body).await
-        })
+        }
+        .boxed()
     }
 
     fn fn_type(&self) -> types::FnType {
@@ -191,14 +189,10 @@ impl LoadFileFn {
 
 #[async_trait]
 impl FnValue for LoadFileFn {
-    fn execute(
-        &self,
-        ctx: &Context,
-        args: Vec<Value>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>>>> {
+    fn execute(&self, ctx: &Context, args: Vec<Value>) -> BoxFuture<Result<Value>> {
         let us = self.clone();
         let folder = ctx.folder.clone();
-        Box::pin(async move {
+        async move {
             if args.len() != 2 {
                 return fail!("load expects exactly 2 arguments");
             }
@@ -220,7 +214,8 @@ impl FnValue for LoadFileFn {
             };
 
             us.load(&*path_buf, format).await
-        })
+        }
+        .boxed()
     }
 
     fn fn_type(&self) -> types::FnType {

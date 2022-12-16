@@ -11,7 +11,7 @@ use async_trait::async_trait;
 // connections), or pass them in. Either way, engines are expected to manage
 // interior mutability, since concurrency properties may differ across them.
 #[async_trait]
-pub trait SQLEngine: std::fmt::Debug {
+pub trait SQLEngine: std::fmt::Debug + Send + Sync {
     async fn eval(
         &self,
         query: &sqlast::Query,

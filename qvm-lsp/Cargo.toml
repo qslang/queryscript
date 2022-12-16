@@ -12,9 +12,10 @@ tokio = { version = "^1.22", features = [
 	"io-std",
 	"macros",
 	"rt-multi-thread",
+	"fs",
 ] }
 regex = "1"
 serde_json = "1"
 serde = { version = "*" }
 
-qvm = { path = "../qvm" }
+qvm = { path = "../qvm", features = ["multi-thread"] }
