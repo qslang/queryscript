@@ -141,7 +141,7 @@ impl Value {
                 DECIMAL128_MAX_PRECISION,
                 DECIMAL128_MAX_SCALE,
             )),
-            Self::Decimal256(_) => Type::Atom(AtomicType::Decimal128(
+            Self::Decimal256(_) => Type::Atom(AtomicType::Decimal256(
                 DECIMAL256_MAX_PRECISION,
                 DECIMAL256_MAX_SCALE,
             )),

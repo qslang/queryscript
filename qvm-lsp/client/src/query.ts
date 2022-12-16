@@ -3,5 +3,6 @@ export function runQuery(client) {
 		console.log("runQuery");
 		console.log(uri, idx);
 		const foo = await client.sendRequest("qvm/runQuery", { uri, idx });
+		console.log(foo);
 	};
 }

@@ -14,6 +14,7 @@ use qvm::{
     compile::{Compiler, Schema, SchemaRef},
     parser::{error::PrettyError, parse_schema},
     runtime,
+    types::Value as QVMValue,
 };
 
 // XXX Do we need any of these settings? If not, we can probably remove them.
@@ -432,7 +433,7 @@ impl Backend {
         Ok(schema)
     }
 
-    async fn run_query(&self, params: RunQueryParams) -> Result<String> {
+    async fn run_query(&self, params: RunQueryParams) -> Result<QVMValue> {
         let uri = Url::parse(&params.uri)
             .map_err(|_| Error::invalid_params("Invalid URI".to_string()))?;
         let schema = self.get_schema(&uri)?;
@@ -454,8 +455,7 @@ impl Backend {
         let value = runtime::eval(&ctx, &expr)
             .await
             .map_err(|_| Error::internal_error())?;
-        eprintln!("RESULT: {:#?}", value);
-        Ok("success".to_string())
+        Ok(value)
     }
 }
 

@@ -1560,6 +1560,7 @@ checksum = "ad6a9459c9c30b177b925162351f97e7d967c7ea8bab3b8352805327daf45554"
 dependencies = [
  "crunchy",
  "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -2568,6 +2569,7 @@ dependencies = [
  "hashlink",
  "lazy_static",
  "object_store",
+ "serde",
  "snafu",
  "sqlparser",
  "tabled",
