@@ -14,6 +14,8 @@ import {
 	TransportKind
 } from 'vscode-languageclient/node';
 
+import { runQuery } from './query';
+
 let client: LanguageClient;
 
 export function activate(context: ExtensionContext) {
@@ -52,11 +54,7 @@ export function activate(context: ExtensionContext) {
 	);
 
 	context.subscriptions.push(
-		commands.registerCommand('runQuery.start', async () => {
-			console.log(client);
-			const foo = await client.sendRequest("qvm/runQuery", {});
-			console.log(foo);
-		})
+		commands.registerCommand('runQuery.start', runQuery(client))
 	);
 
 

@@ -1,9 +1,10 @@
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::path::Path as FilePath;
 use std::sync::{Arc, Mutex, RwLock};
-use tokio::{sync::Mutex as TokioMutex, task};
+use tokio::{runtime::Handle, sync::Mutex as TokioMutex, task};
 
 use tower_lsp::jsonrpc::{Error, Result};
 use tower_lsp::{lsp_types::*, LspServiceBuilder};
@@ -12,6 +13,7 @@ use tower_lsp::{Client, LanguageServer};
 use qvm::{
     compile::{Compiler, Schema, SchemaRef},
     parser::{error::PrettyError, parse_schema},
+    runtime,
 };
 
 // XXX Do we need any of these settings? If not, we can probably remove them.
@@ -82,7 +84,7 @@ impl Backend {
     }
 
     pub fn add_custom_methods(service: LspServiceBuilder<Backend>) -> LspServiceBuilder<Backend> {
-        service.custom_method("qvm/runQueryBackend", Backend::run_query)
+        service.custom_method("qvm/runQuery", Backend::run_query)
     }
 }
 
@@ -272,23 +274,15 @@ impl LanguageServer for Backend {
 
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
         let uri = params.text_document.uri;
-        let documents = self.documents.read().unwrap();
-
-        let schema = task::block_in_place(|| {
-            Ok(documents
-                .get(&uri.to_string())
-                .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?
-                .blocking_lock()
-                .schema
-                .clone())
-        })?;
+        let schema = self.get_schema(&uri)?;
 
         let mut lenses = Vec::new();
-        for expr in schema
+        for (idx, expr) in schema
             .read()
             .map_err(|_| Error::internal_error())?
             .exprs
             .iter()
+            .enumerate()
         {
             let range = match expr.location().normalize() {
                 Some(range) => range,
@@ -297,8 +291,8 @@ impl LanguageServer for Backend {
 
             let command = Command {
                 title: "Run".to_string(),
-                command: "qvm/runQuery".to_string(),
-                arguments: Some(vec![uri.to_string().into()]),
+                command: "runQuery.start".to_string(),
+                arguments: Some(vec![json!(uri.to_string()), json!(idx)]),
             };
 
             lenses.push(CodeLens {
@@ -423,10 +417,59 @@ impl Backend {
             .await
     }
 
-    async fn run_query(&self, params: serde_json::Value) -> Result<String> {
-        eprintln!("PARAMS: {:?}", params);
-        Ok("foo".to_string())
+    fn get_schema(&self, uri: &Url) -> Result<SchemaRef> {
+        let schema = task::block_in_place(|| {
+            Ok(self
+                .documents
+                .read()
+                .map_err(|_| Error::internal_error())?
+                .get(&uri.to_string())
+                .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?
+                .blocking_lock()
+                .schema
+                .clone())
+        })?;
+        Ok(schema)
     }
+
+    async fn run_query(&self, params: RunQueryParams) -> Result<String> {
+        let uri = Url::parse(&params.uri)
+            .map_err(|_| Error::invalid_params("Invalid URI".to_string()))?;
+        let schema = self.get_schema(&uri)?;
+
+        let compiled = schema
+            .read()
+            .map_err(|_| Error::internal_error())?
+            .exprs
+            .get(params.idx)
+            .ok_or_else(|| Error::invalid_params(format!("Invalid query index: {}", params.idx)))?
+            .clone();
+
+        let expr = compiled
+            .to_runtime_type()
+            .map_err(|_| Error::internal_error())?;
+
+        let ctx = runtime::build_context(&schema, runtime::SQLEngineType::DuckDB);
+
+        // I honestly don't understand why this is necessary. Without it (if you try to call runtime::eval directly),
+        // this method doesn't fit the type signature required for an LSP method (maybe because the return type of
+        // the Future is affected). I also tried using tokio::spawn, but Result<Value> doesn't appear to be Send.
+        let value: Result<_> = task::block_in_place(|| {
+            Ok(Handle::current().block_on(async move {
+                Ok(runtime::eval(&ctx, &expr)
+                    .await
+                    .map_err(|_| Error::internal_error())?)
+            })?)
+        });
+        eprintln!("RESULT: {:#?}", value);
+        Ok("success".to_string())
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
+struct RunQueryParams {
+    uri: String,
+    idx: usize,
 }
 
 trait NormalizeRange {

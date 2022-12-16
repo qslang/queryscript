@@ -2590,6 +2590,7 @@ version = "0.1.0"
 dependencies = [
  "qvm",
  "regex",
+ "serde",
  "serde_json",
  "tokio",
  "tower-lsp",
