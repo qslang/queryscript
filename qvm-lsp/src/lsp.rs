@@ -81,7 +81,7 @@ impl Backend {
     }
 
     pub fn add_custom_methods(service: LspServiceBuilder<Backend>) -> LspServiceBuilder<Backend> {
-        service.custom_method("qvm/runQuery", Backend::run_query)
+        service.custom_method("qvm/runQueryBackend", Backend::run_query)
     }
 }
 
@@ -273,35 +273,28 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         let documents = self.documents.read().unwrap();
 
-        let text = documents
-            .get(&uri.to_string())
-            .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?
-            .blocking_lock()
-            .text
-            .clone();
+        let schema = task::block_in_place(|| {
+            Ok(documents
+                .get(&uri.to_string())
+                .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?
+                .blocking_lock()
+                .schema
+                .clone())
+        })?;
 
         let mut lenses = Vec::new();
-        for (i, line) in text.lines().enumerate() {
-            let range = Range {
-                start: Position {
-                    line: i as u32,
-                    character: 0,
-                },
-                end: Position {
-                    line: i as u32,
-                    character: line.len() as u32,
-                },
+        for expr in schema.read().unwrap().exprs.iter() {
+            let range = match expr.location().normalize() {
+                Some(range) => range,
+                None => continue,
             };
-            let command = Command {
-                title: "Show references".to_string(),
-                command: "showReferences".to_string(),
 
-                // TODO: I think we'll want to turn the arguments into a struct
-                // of some sort
-                arguments: Some(vec![
-                    uri.to_string().into(), /* , range.clone().into() */
-                ]),
+            let command = Command {
+                title: "Run query".to_string(),
+                command: "qvm/runQuery".to_string(),
+                arguments: Some(vec![uri.to_string().into()]),
             };
+
             lenses.push(CodeLens {
                 range,
                 command: Some(command),
@@ -337,10 +330,11 @@ impl Backend {
                 Entry::Vacant(entry) => {
                     let new_val = entry.insert(Arc::new(TokioMutex::new(document)));
                     let new_val = new_val.clone();
-                    TokioMutex::blocking_lock_owned(new_val)
+                    task::block_in_place(|| TokioMutex::blocking_lock_owned(new_val))
                 }
                 Entry::Occupied(ref mut entry) => {
-                    let mut existing = entry.get().clone().blocking_lock_owned();
+                    let mut existing =
+                        task::block_in_place(|| entry.get().clone().blocking_lock_owned());
                     *existing = document;
                     existing
                 }
@@ -361,8 +355,6 @@ impl Backend {
                 }
             };
 
-            // XXX We actually should keep the write lock here, because we are changing the value of schema,
-            // so don't want others to read it.
             let schema = document.schema.clone();
             let compiler = self.compiler.clone();
 
@@ -381,24 +373,14 @@ impl Backend {
 
         let mut diagnostics = Vec::new();
         for (_idx, err) in compile_result.errors {
-            // The locations are 1-indexed, but LSP diagnostics are 0-indexed
-            let (start_line, start_col, end_line, end_col) = match err.location().range() {
-                Some(loc) => loc,
-                None => continue, // In this case, we may want to send file-level diagnostics?
+            let range = match err.location().normalize() {
+                Some(range) => range,
+                None => continue,
             };
 
             diagnostics.push(Diagnostic {
                 severity: Some(DiagnosticSeverity::ERROR),
-                range: Range {
-                    start: Position {
-                        line: (start_line - 1) as u32,
-                        character: (start_col - 1) as u32,
-                    },
-                    end: Position {
-                        line: (end_line - 1) as u32,
-                        character: (end_col - 1) as u32,
-                    },
-                },
+                range,
                 message: err.pretty(),
                 source: Some("qvm".to_string()),
                 ..Default::default()
@@ -413,5 +395,29 @@ impl Backend {
     async fn run_query(&self, params: serde_json::Value) -> Result<String> {
         eprintln!("PARAMS: {:?}", params);
         Ok("foo".to_string())
+    }
+}
+
+trait NormalizeRange {
+    fn normalize(&self) -> Option<Range>;
+}
+
+impl NormalizeRange for qvm::ast::SourceLocation {
+    fn normalize(&self) -> Option<Range> {
+        let (start_line, start_col, end_line, end_col) = match self.range() {
+            Some(loc) => loc,
+            None => return None, // In this case, we may want to send file-level diagnostics?
+        };
+        // The locations are 1-indexed, but LSP diagnostics are 0-indexed
+        Some(Range {
+            start: Position {
+                line: (start_line - 1) as u32,
+                character: (start_col - 1) as u32,
+            },
+            end: Position {
+                line: (end_line - 1) as u32,
+                character: (end_col - 1) as u32,
+            },
+        })
     }
 }

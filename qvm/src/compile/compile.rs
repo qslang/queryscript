@@ -949,7 +949,7 @@ pub fn compile_schema_entry(
         ast::StmtBody::Noop => {}
         ast::StmtBody::Expr(expr) => {
             let compiled = compile_expr(compiler.clone(), schema.clone(), expr)?;
-            schema.write()?.exprs.push(compiled);
+            schema.write()?.exprs.push(Located::new(compiled, loc));
         }
         ast::StmtBody::Import { .. } => {}
         ast::StmtBody::TypeDef(nt) => {

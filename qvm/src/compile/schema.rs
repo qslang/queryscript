@@ -4,7 +4,7 @@ use colored::*;
 use snafu::prelude::*;
 use sqlparser::ast as sqlast;
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
+use std::fmt::{self, Debug};
 use std::sync::{Arc, RwLock};
 
 use crate::ast;
@@ -924,8 +924,63 @@ pub struct ImportedSchema {
     pub schema: SchemaRef,
 }
 
-// XXX We should implement a cheaper Eq / PartialEq over Schema, because it's
-// currently used to check if two types are equal.
+pub struct Located<T> {
+    value: T,
+    location: SourceLocation,
+}
+
+impl<T> std::fmt::Debug for Located<T>
+where
+    T: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Located")
+            .field("value", &self.value)
+            .field("location", &self.location)
+            .finish()
+    }
+}
+
+impl<T> Clone for Located<T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Located {
+            value: self.value.clone(),
+            location: self.location.clone(),
+        }
+    }
+}
+
+impl<T> Located<T> {
+    pub fn new(value: T, location: SourceLocation) -> Located<T> {
+        Located { value, location }
+    }
+
+    pub fn location(&self) -> &SourceLocation {
+        &self.location
+    }
+
+    pub fn get(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T> Pretty for Located<T> {
+    fn pretty(&self) -> String {
+        self.location.pretty()
+    }
+}
+
+impl<T> std::ops::Deref for Located<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Schema {
     pub file: String,
@@ -934,7 +989,7 @@ pub struct Schema {
     pub externs: BTreeMap<String, CRef<MType>>,
     pub decls: BTreeMap<String, Decl>,
     pub imports: BTreeMap<Vec<String>, Ref<ImportedSchema>>,
-    pub exprs: Vec<CTypedExpr>,
+    pub exprs: Vec<Located<CTypedExpr>>,
 }
 
 impl Schema {
