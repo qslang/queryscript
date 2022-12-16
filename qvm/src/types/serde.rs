@@ -21,7 +21,10 @@ impl Serialize for Value {
             Self::Float32(x) => x.serialize(serializer),
             Self::Float64(x) => x.serialize(serializer),
             Self::Decimal128(x) => x.serialize(serializer),
+
+            // Most systems will parse this automatically as number if it fits
             Self::Decimal256(x) => x.to_string().serialize(serializer),
+
             Self::Utf8(x) => x.serialize(serializer),
             Self::LargeUtf8(x) => x.serialize(serializer),
             Self::Binary(x) => x.serialize(serializer),

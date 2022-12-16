@@ -1,7 +1,7 @@
 use arrow::datatypes::DataType as ArrowDataType;
 use sqlparser::ast::BinaryOperator;
 
-use crate::types::{AtomicType, Type, DECIMAL128_MAX_PRECISION, DECIMAL128_MAX_SCALE};
+use crate::types::{AtomicType, TimeUnit, Type, DECIMAL128_MAX_PRECISION, DECIMAL128_MAX_SCALE};
 
 macro_rules! must {
     ($val: expr) => {
@@ -495,7 +495,6 @@ fn like_coercion(lhs_type: &Type, rhs_type: &Type) -> Option<Type> {
 /// Coercion rules for Temporal columns: the type that both lhs and rhs can be
 /// casted to for the purpose of a date computation
 fn temporal_coercion(lhs_type: &Type, rhs_type: &Type) -> Option<Type> {
-    use arrow::datatypes::TimeUnit;
     use AtomicType::*;
     match (must_atomic!(lhs_type), must_atomic!(rhs_type)) {
         (Date64, Date32) => Some(Date64),

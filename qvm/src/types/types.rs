@@ -1,5 +1,6 @@
 pub use arrow::datatypes::{
-    DataType as ArrowDataType, Field as ArrowField, IntervalUnit, Schema as ArrowSchema, TimeUnit,
+    DataType as ArrowDataType, Field as ArrowField, IntervalUnit as ArrowIntervalUnit,
+    Schema as ArrowSchema, TimeUnit as ArrowTimeUnit,
 };
 use sqlparser::ast::{
     DataType as ParserDataType, ExactNumberInfo as ParserNumberInfo, TimezoneInfo as ParserTz,
@@ -8,6 +9,8 @@ use sqlparser::ast::{
 use super::error::{ts_fail, ts_unimplemented, Result};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Type {
     Atom(AtomicType),
     Record(Vec<Field>),
@@ -16,6 +19,8 @@ pub enum Type {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct FnType {
     pub args: Vec<Field>,
     pub ret: Box<Type>,
@@ -27,6 +32,8 @@ pub struct FnType {
 
 // From arrow-schema/src/field.rs
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Field {
     pub name: String,
     pub type_: Type,
@@ -45,6 +52,8 @@ impl Field {
 
 // From arrow-schema/src/datatype.rs
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum AtomicType {
     /// Null type
     Null,
@@ -236,6 +245,68 @@ pub enum AtomicType {
     */
 }
 
+// TimeUnit and IntervalUnit are copied from Arrow
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum TimeUnit {
+    Second,
+    Millisecond,
+    Microsecond,
+    Nanosecond,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum IntervalUnit {
+    YearMonth,
+    DayTime,
+    MonthDayNano,
+}
+
+impl From<&ArrowTimeUnit> for TimeUnit {
+    fn from(t: &ArrowTimeUnit) -> Self {
+        match t {
+            ArrowTimeUnit::Second => TimeUnit::Second,
+            ArrowTimeUnit::Millisecond => TimeUnit::Millisecond,
+            ArrowTimeUnit::Microsecond => TimeUnit::Microsecond,
+            ArrowTimeUnit::Nanosecond => TimeUnit::Nanosecond,
+        }
+    }
+}
+
+impl Into<ArrowTimeUnit> for &TimeUnit {
+    fn into(self) -> ArrowTimeUnit {
+        match self {
+            TimeUnit::Second => ArrowTimeUnit::Second,
+            TimeUnit::Millisecond => ArrowTimeUnit::Millisecond,
+            TimeUnit::Microsecond => ArrowTimeUnit::Microsecond,
+            TimeUnit::Nanosecond => ArrowTimeUnit::Nanosecond,
+        }
+    }
+}
+
+impl From<&ArrowIntervalUnit> for IntervalUnit {
+    fn from(t: &ArrowIntervalUnit) -> Self {
+        match t {
+            ArrowIntervalUnit::YearMonth => IntervalUnit::YearMonth,
+            ArrowIntervalUnit::DayTime => IntervalUnit::DayTime,
+            ArrowIntervalUnit::MonthDayNano => IntervalUnit::MonthDayNano,
+        }
+    }
+}
+
+impl Into<ArrowIntervalUnit> for &IntervalUnit {
+    fn into(self) -> ArrowIntervalUnit {
+        match self {
+            IntervalUnit::YearMonth => ArrowIntervalUnit::YearMonth,
+            IntervalUnit::DayTime => ArrowIntervalUnit::DayTime,
+            IntervalUnit::MonthDayNano => ArrowIntervalUnit::MonthDayNano,
+        }
+    }
+}
+
 impl TryFrom<&ArrowDataType> for Type {
     type Error = super::error::TypesystemError;
 
@@ -255,11 +326,11 @@ impl TryFrom<&ArrowDataType> for Type {
             Float16 => Type::Atom(AtomicType::Float16),
             Float32 => Type::Atom(AtomicType::Float32),
             Float64 => Type::Atom(AtomicType::Float64),
-            Timestamp(u, s) => Type::Atom(AtomicType::Timestamp(u.clone(), s.clone())),
+            Timestamp(u, s) => Type::Atom(AtomicType::Timestamp(u.into(), s.clone())),
             Date32 => Type::Atom(AtomicType::Date32),
             Date64 => Type::Atom(AtomicType::Date64),
-            Time64(u) => Type::Atom(AtomicType::Time64(u.clone())),
-            Interval(u) => Type::Atom(AtomicType::Interval(u.clone())),
+            Time64(u) => Type::Atom(AtomicType::Time64(u.into())),
+            Interval(u) => Type::Atom(AtomicType::Interval(u.into())),
             Binary => Type::Atom(AtomicType::Binary),
             FixedSizeBinary(l) => Type::Atom(AtomicType::FixedSizeBinary(*l)),
             LargeBinary => Type::Atom(AtomicType::LargeBinary),
@@ -298,12 +369,12 @@ impl TryInto<ArrowDataType> for &Type {
             Atom(Float16) => ArrowDataType::Float16,
             Atom(Float32) => ArrowDataType::Float32,
             Atom(Float64) => ArrowDataType::Float64,
-            Atom(Timestamp(tu, tz)) => ArrowDataType::Timestamp(tu.clone(), tz.clone()),
+            Atom(Timestamp(tu, tz)) => ArrowDataType::Timestamp(tu.into(), tz.clone()),
             Atom(Date32) => ArrowDataType::Date32,
             Atom(Date64) => ArrowDataType::Date64,
-            Atom(Time32(tu)) => ArrowDataType::Time32(tu.clone()),
-            Atom(Time64(tu)) => ArrowDataType::Time64(tu.clone()),
-            Atom(Interval(iu)) => ArrowDataType::Interval(iu.clone()),
+            Atom(Time32(tu)) => ArrowDataType::Time32(tu.into()),
+            Atom(Time64(tu)) => ArrowDataType::Time64(tu.into()),
+            Atom(Interval(iu)) => ArrowDataType::Interval(iu.into()),
             Atom(Binary) => ArrowDataType::Binary,
             Atom(FixedSizeBinary(len)) => ArrowDataType::FixedSizeBinary(*len),
             Atom(LargeBinary) => ArrowDataType::LargeBinary,

@@ -14,7 +14,7 @@ use qvm::{
     compile::{Compiler, Schema, SchemaRef},
     parser::{error::PrettyError, parse_schema},
     runtime,
-    types::Value as QVMValue,
+    types::{Type as QVMType, Value as QVMValue},
 };
 
 // XXX Do we need any of these settings? If not, we can probably remove them.
@@ -330,6 +330,18 @@ impl LanguageServer for Backend {
     }
 }
 
+#[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
+struct RunQueryParams {
+    uri: String,
+    idx: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RunQueryResult {
+    value: QVMValue,
+    r#type: QVMType,
+}
+
 impl Backend {
     // XXX Make this return a result instead of unwrapping/expecting
     async fn on_change(&self, uri: Url, text: String, version: Option<i32>) {
@@ -433,7 +445,7 @@ impl Backend {
         Ok(schema)
     }
 
-    async fn run_query(&self, params: RunQueryParams) -> Result<QVMValue> {
+    async fn run_query(&self, params: RunQueryParams) -> Result<RunQueryResult> {
         let uri = Url::parse(&params.uri)
             .map_err(|_| Error::invalid_params("Invalid URI".to_string()))?;
         let schema = self.get_schema(&uri)?;
@@ -455,14 +467,15 @@ impl Backend {
         let value = runtime::eval(&ctx, &expr)
             .await
             .map_err(|_| Error::internal_error())?;
-        Ok(value)
-    }
-}
 
-#[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
-struct RunQueryParams {
-    uri: String,
-    idx: usize,
+        let r#type = expr
+            .type_
+            .read()
+            .map_err(|_| Error::internal_error())?
+            .clone();
+
+        Ok(RunQueryResult { value, r#type })
+    }
 }
 
 trait NormalizeRange {

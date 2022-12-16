@@ -17,6 +17,26 @@
 			}
 		},
 		{
+			"type": "cargo",
+			"command": "test",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"label": "rust: build ts defs",
+			"options": {
+				"cwd": "${workspaceFolder}/qvm/src"
+			},
+			"args": [
+				"--features",
+				"ts",
+				"export_bindings"
+			]
+		},
+		{
 			"type": "npm",
 			"script": "compile",
 			"group": "build",
@@ -27,8 +47,11 @@
 			"problemMatcher": [
 				"$tsc"
 			],
-			"dependsOn": "rust: cargo build",
-            "label": "npm: build extension",
+			"dependsOn": [
+				"rust: cargo build",
+				"rust: build ts defs"
+			],
+			"label": "npm: build extension",
 			"options": {
 				"cwd": "${workspaceFolder}/qvm-lsp"
 			}
