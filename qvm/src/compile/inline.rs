@@ -73,11 +73,7 @@ impl SQLVisitor for ParamInliner {
                 }
 
                 if let Some(e) = self.context.get(&name.0[0].value) {
-                    Some(sqlast::TableFactor::Derived {
-                        lateral: false,
-                        subquery: Box::new(e.as_query()),
-                        alias: alias.clone(),
-                    })
+                    Some(e.as_table(alias.clone()))
                 } else {
                     None
                 }
@@ -121,10 +117,7 @@ impl Visitor<CRef<MType>> for ParamInliner {
                 }
 
                 let visitor = ParamInliner { context };
-                let body = match body {
-                    SQLBody::Expr(e) => SQLBody::Expr(e.visit_sql(&visitor)),
-                    SQLBody::Query(q) => SQLBody::Query(q.visit_sql(&visitor)),
-                };
+                let body = body.visit_sql(&visitor);
                 Some(Expr::SQL(Arc::new(SQL { names, body })))
             }
             _ => None,

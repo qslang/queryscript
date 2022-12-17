@@ -664,6 +664,16 @@ impl<V: SQLVisitor, T: VisitSQL<V>> VisitSQL<V> for Box<T> {
     }
 }
 
+impl<V: SQLVisitor> VisitSQL<V> for schema::SQLBody {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        match self {
+            schema::SQLBody::Expr(e) => schema::SQLBody::Expr(e.visit_sql(visitor)),
+            schema::SQLBody::Query(q) => schema::SQLBody::Query(q.visit_sql(visitor)),
+            schema::SQLBody::Table(t) => schema::SQLBody::Table(t.visit_sql(visitor)),
+        }
+    }
+}
+
 #[async_trait]
 impl<V: Visitor<schema::CRef<schema::MType>> + Sync> Visit<V, schema::CRef<schema::MType>>
     for schema::Expr<schema::CRef<schema::MType>>
@@ -690,6 +700,7 @@ impl<V: Visitor<schema::CRef<schema::MType>> + Sync> Visit<V, schema::CRef<schem
                     body: match body {
                         SQLBody::Expr(expr) => SQLBody::Expr(expr.visit_sql(visitor)),
                         SQLBody::Query(query) => SQLBody::Query(query.visit_sql(visitor)),
+                        SQLBody::Table(table) => SQLBody::Table(table.visit_sql(visitor)),
                     },
                 }))
             }

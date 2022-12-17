@@ -137,7 +137,9 @@ pub fn eval<'a>(
                         let row = &rows.batch(0).records()[0];
                         Ok(row.column(0).clone())
                     }
-                    schema::SQLBody::Query(_) => Ok(Value::Relation(rows)),
+                    schema::SQLBody::Query(_) | schema::SQLBody::Table(_) => {
+                        Ok(Value::Relation(rows))
+                    }
                 }
             }
         }

@@ -81,6 +81,74 @@ pub fn ident(value: String) -> sqlast::Ident {
     }
 }
 
+pub fn select_from(
+    projection: Vec<sqlast::SelectItem>,
+    from: Vec<sqlast::TableWithJoins>,
+) -> sqlast::Query {
+    sqlast::Query {
+        with: None,
+        body: Box::new(sqlast::SetExpr::Select(Box::new(sqlast::Select {
+            distinct: false,
+            top: None,
+            projection,
+            into: None,
+            from,
+            lateral_views: Vec::new(),
+            selection: None,
+            group_by: Vec::new(),
+            cluster_by: Vec::new(),
+            distribute_by: Vec::new(),
+            sort_by: Vec::new(),
+            having: None,
+            qualify: None,
+        }))),
+        order_by: Vec::new(),
+        limit: None,
+        offset: None,
+        fetch: None,
+        lock: None,
+    }
+}
+
+pub fn select_no_from(expr: sqlast::Expr) -> sqlast::Query {
+    select_from(
+        vec![sqlast::SelectItem::ExprWithAlias {
+            expr,
+            alias: sqlast::Ident {
+                value: "value".to_string(),
+                quote_style: None,
+            },
+        }],
+        Vec::new(),
+    )
+}
+
+pub fn select_star_from(relation: sqlast::TableFactor) -> sqlast::Query {
+    select_from(
+        vec![sqlast::SelectItem::Wildcard],
+        vec![sqlast::TableWithJoins {
+            relation,
+            joins: Vec::new(),
+        }],
+    )
+}
+
+pub fn with_table_alias(
+    table: &sqlast::TableFactor,
+    alias: Option<sqlast::TableAlias>,
+) -> sqlast::TableFactor {
+    let mut table = table.clone();
+    let alias_ref: &mut Option<sqlast::TableAlias> = match &mut table {
+        sqlast::TableFactor::Table { alias, .. } => alias,
+        sqlast::TableFactor::Derived { alias, .. } => alias,
+        sqlast::TableFactor::TableFunction { alias, .. } => alias,
+        sqlast::TableFactor::UNNEST { alias, .. } => alias,
+        sqlast::TableFactor::NestedJoin { alias, .. } => alias,
+    };
+    *alias_ref = alias;
+    table
+}
+
 pub fn compile_sqlreference(
     compiler: Compiler,
     schema: Ref<Schema>,
