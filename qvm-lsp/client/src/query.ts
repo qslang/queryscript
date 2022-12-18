@@ -108,13 +108,13 @@ class ReactPanel {
 	}
 
 	private _getHtmlForWebview() {
-		const mainScript = 'bundle.js'; // path.join(this._extensionPath, 'main.js');
-		const mainStyle = path.join(this._extensionPath, 'main.css');
+		const mainScript = path.join(this._extensionPath, 'webview', 'out', 'bundle.js');
+		const mainStyle = path.join(this._extensionPath, 'webview', 'out', 'bundle.css');
 
-		const scriptPathOnDisk = vscode.Uri.file(path.join(this._extensionPath, 'webview', 'out', mainScript));
+		const scriptPathOnDisk = vscode.Uri.file(mainScript);
 		const scriptUri = this._panel.webview.asWebviewUri(scriptPathOnDisk);
-		const stylePathOnDisk = vscode.Uri.file(path.join(this._extensionPath, 'build', mainStyle));
-		const styleUri = stylePathOnDisk.with({ scheme: 'vscode-resource' });
+		const stylePathOnDisk = vscode.Uri.file(mainStyle);
+		const styleUri = this._panel.webview.asWebviewUri(stylePathOnDisk);
 
 		// Use a nonce to whitelist which scripts can be run
 		const nonce = getNonce();
@@ -123,12 +123,10 @@ class ReactPanel {
 			<html lang="en">
 			<head>
 				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
-				<meta name="theme-color" content="#000000">
-				<title>React App</title>
+				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+				<title>QueryVM Results</title>
 				<link rel="stylesheet" type="text/css" href="${styleUri}">
 				<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src vscode-resource: https:; script-src 'nonce-${nonce}';style-src vscode-resource: 'unsafe-inline' http: https: data:;">
-				<base href="${vscode.Uri.file(path.join(this._extensionPath, 'build')).with({ scheme: 'vscode-resource' })}/">
 			</head>
 			<body>
 				<noscript>You need to enable JavaScript to run this app.</noscript>
