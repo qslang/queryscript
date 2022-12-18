@@ -1,0 +1,17 @@
+{
+  "name": "qvm-lsp-webview",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "dependencies": {
+    "@types/react": "^18.0.26",
+    "@types/react-dom": "^18.0.9",
+    "esbuild": "0.16.9",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^4.9.4"
+  },
+  "scripts": {
+    "compile": "esbuild src/app.tsx --bundle --minify --sourcemap --outfile=out/bundle.js"
+  }
+}

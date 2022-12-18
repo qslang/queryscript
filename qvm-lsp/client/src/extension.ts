@@ -54,7 +54,7 @@ export function activate(context: ExtensionContext) {
 	);
 
 	context.subscriptions.push(
-		commands.registerCommand('runQuery.start', runQuery(client))
+		commands.registerCommand('runQuery.start', runQuery(context, client))
 	);
 
 

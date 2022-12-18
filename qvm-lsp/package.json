@@ -76,7 +76,7 @@
 	},
 	"scripts": {
 		"vscode:prepublish": "yarn run compile",
-		"compile": "tsc -b",
+		"compile": "tsc -b && cd webview && yarn run compile && cd ..",
 		"watch": "tsc -b -w",
 		"lint": "eslint ./client/src --ext .ts,.tsx",
 		"postinstall": "cd client && yarn install && cd ..",
