@@ -1,10 +1,13 @@
 import React from "react";
-import { useTable } from "react-table";
+import { VSCodeDataGrid, VSCodeDataGridRow, VSCodeDataGridCell } from "@vscode/webview-ui-toolkit/react";
 
 import { Type } from "qvm/Type";
 
 interface TableProps {
 	data: any;
+
+	// XXX TODO We should make this take the list's type as input, or assert that we
+	// have a list here up front
 	schema: Type;
 }
 
@@ -41,59 +44,16 @@ export const Table = ({ data: input_data, schema }: TableProps) => {
 		[]
 	);
 
-	const {
-		getTableProps,
-		getTableBodyProps,
-		headerGroups,
-		rows,
-		prepareRow,
-	} = useTable({ columns, data });
-
 	return (
-		<table {...getTableProps()} style={{ border: "solid 1px blue" }}>
-			<thead>
-				{headerGroups.map(headerGroup => (
-					<tr {...headerGroup.getHeaderGroupProps()}>
-						{headerGroup.headers.map(column => (
-							<th
-								{...column.getHeaderProps()}
-								style={{
-									borderBottom: "solid 3px red",
-									background: "aliceblue",
-									color: "black",
-									fontWeight: "bold",
-								}}
-							>
-								{column.render("Header")}
-							</th>
-						))}
-					</tr>
-				))}
-			</thead>
-			<tbody {...getTableBodyProps()}>
-				{rows.map(row => {
-					prepareRow(row);
-					return (
-						<tr {...row.getRowProps()}>
-							{row.cells.map(cell => {
-								return (
-									<td
-										{...cell.getCellProps()}
-										style={{
-											padding: "10px",
-											border: "solid 1px gray",
-											background: "papayawhip",
-										}}
-									>
-										{cell.render("Cell")}
-									</td>
-								);
-							})}
-						</tr>
-					);
-				})}
-			</tbody>
-		</table>
+		<>
+			<VSCodeDataGrid aria-label="Results">
+				<VSCodeDataGridRow row-type="header">
+					{columns.map((col, idx) => (
+						<VSCodeDataGridCell cell-type="columnheader" grid-column={idx + 1}>{col.Header}</VSCodeDataGridCell>
+					))}
+				</VSCodeDataGridRow>
+			</VSCodeDataGrid>
+		</>
 	);
 
 };
