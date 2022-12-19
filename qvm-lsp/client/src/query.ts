@@ -10,7 +10,7 @@ export function runQuery(context: vscode.ExtensionContext, client: LanguageClien
 		console.log(uri, idx);
 		const foo = await client.sendRequest("qvm/runQuery", { uri, idx }) as RunQueryResult;
 
-		const panel = ReactPanel.createOrShow(context.extensionPath, vscode.ViewColumn.Two);
+		const panel = ReactPanel.createOrShow(context.extensionPath, vscode.ViewColumn.Beside);
 		panel.sendMessage(foo);
 	};
 }
@@ -31,29 +31,32 @@ class ReactPanel {
 	private readonly _extensionPath: string;
 	private _disposables: vscode.Disposable[] = [];
 
-	public static createOrShow(extensionPath: string, column?: vscode.ViewColumn): ReactPanel {
+	public static createOrShow(extensionPath: string, viewColumn?: vscode.ViewColumn): ReactPanel {
 		// If we already have a panel, show it.
 		// Otherwise, create a new panel.
 		if (ReactPanel.currentPanel) {
-			ReactPanel.currentPanel._panel.reveal(column);
+			ReactPanel.currentPanel._panel.reveal(viewColumn, true /*preserveFocus*/);
 		} else {
-			ReactPanel.currentPanel = new ReactPanel(extensionPath, column || vscode.ViewColumn.One);
+			ReactPanel.currentPanel = new ReactPanel(extensionPath, viewColumn || vscode.ViewColumn.One);
 		}
 		return ReactPanel.currentPanel;
 	}
 
-	private constructor(extensionPath: string, column: vscode.ViewColumn) {
+	private constructor(extensionPath: string, viewColumn: vscode.ViewColumn) {
 		this._extensionPath = extensionPath;
 
 		// Create and show a new webview panel
-		this._panel = vscode.window.createWebviewPanel(ReactPanel.viewType, "React", column, {
+		this._panel = vscode.window.createWebviewPanel(ReactPanel.viewType, "React", {
+			viewColumn,
+			preserveFocus: true,
+		}, {
 			// Enable javascript in the webview
 			enableScripts: true,
 
 			// And restrict the webview to only loading content from our extension's `media` directory.
 			localResourceRoots: [
 				vscode.Uri.file(path.join(this._extensionPath, "webview", "out"))
-			]
+			],
 		});
 
 		// Set the webview's initial html content 
