@@ -11,7 +11,7 @@ use tower_lsp::{lsp_types::*, LspServiceBuilder};
 use tower_lsp::{Client, LanguageServer};
 
 use qvm::{
-    compile::{Compiler, Schema, SchemaRef},
+    compile::{schema::SchemaEntry, Compiler, Schema, SchemaRef},
     parser::{error::PrettyError, parse_schema},
     runtime,
     types::{Type as QVMType, Value as QVMValue},
@@ -85,7 +85,7 @@ impl Backend {
     }
 
     pub fn add_custom_methods(service: LspServiceBuilder<Backend>) -> LspServiceBuilder<Backend> {
-        service.custom_method("qvm/runQuery", Backend::run_query)
+        service.custom_method("qvm/runExpr", Backend::run_expr)
     }
 }
 
@@ -213,7 +213,7 @@ impl LanguageServer for Backend {
         // NOTE: If we change this to INCREMENTAL we'll need to recompute the new document text
         let text = params.content_changes.swap_remove(0).text;
 
-        self.on_change(uri, text, Some(version)).await
+        let _ = self.on_change(uri, text, Some(version)).await;
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
@@ -221,7 +221,7 @@ impl LanguageServer for Backend {
         let version = params.text_document.version;
         let text = params.text_document.text;
 
-        self.on_change(uri, text, Some(version)).await
+        let _ = self.on_change(uri, text, Some(version)).await;
     }
 
     async fn did_change_watched_files(&self, _params: DidChangeWatchedFilesParams) {
@@ -292,8 +292,8 @@ impl LanguageServer for Backend {
 
             let command = Command {
                 title: "Run".to_string(),
-                command: "runQuery.start".to_string(),
-                arguments: Some(vec![json!(uri.to_string()), json!(idx)]),
+                command: "runExpr.start".to_string(),
+                arguments: Some(vec![json!(uri.to_string()), json!(RunExprType::Query(idx))]),
             };
 
             lenses.push(CodeLens {
@@ -309,6 +309,11 @@ impl LanguageServer for Backend {
             .decls
             .iter()
         {
+            match decl.value {
+                SchemaEntry::Schema(_) | SchemaEntry::Type(_) => continue,
+                SchemaEntry::Expr(_) => {}
+            }
+
             let range = match decl.location().normalize() {
                 Some(range) => range,
                 None => continue,
@@ -316,8 +321,8 @@ impl LanguageServer for Backend {
 
             let command = Command {
                 title: "Preview".to_string(),
-                command: "qvm/runExpr".to_string(),
-                arguments: Some(vec![json!(uri), json!(name)]),
+                command: "runExpr.start".to_string(),
+                arguments: Some(vec![json!(uri), json!(RunExprType::Expr(name.clone()))]),
             };
 
             lenses.push(CodeLens {
@@ -331,20 +336,25 @@ impl LanguageServer for Backend {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
-struct RunQueryParams {
+enum RunExprType {
+    Query(usize),
+    Expr(String),
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
+struct RunExprParams {
     uri: String,
-    idx: usize,
+    expr: RunExprType,
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct RunQueryResult {
+struct RunExprResult {
     value: QVMValue,
     r#type: QVMType,
 }
 
 impl Backend {
-    // XXX Make this return a result instead of unwrapping/expecting
-    async fn on_change(&self, uri: Url, text: String, version: Option<i32>) {
+    async fn on_change(&self, uri: Url, text: String, version: Option<i32>) -> Result<()> {
         let file = uri.path().to_string();
 
         let folder = FilePath::new(uri.path())
@@ -354,7 +364,10 @@ impl Backend {
 
         // Get the existing document or insert a new one, and lock it (while holding the write lock on documents).
         let document = {
-            let mut documents = self.documents.write().unwrap();
+            let mut documents = self
+                .documents
+                .write()
+                .map_err(|_| Error::internal_error())?;
 
             let document = Document {
                 uri,
@@ -389,7 +402,7 @@ impl Backend {
                 Err(e) => {
                     // XXX Fix this to send the error as a diagnostic (w/ the location)
                     eprintln!("ERROR (that should be sent as a diagnostic): {:?}", e);
-                    return;
+                    return Ok(());
                 }
             };
 
@@ -397,11 +410,11 @@ impl Backend {
             let compiler = self.compiler.clone();
 
             let compile_result = task::spawn_blocking(move || {
-                let compiler = compiler.lock().expect("Failed to access compiler");
-                compiler.compile_schema_ast(schema.clone(), &ast)
+                let compiler = compiler.lock().map_err(|_| Error::internal_error())?;
+                Ok(compiler.compile_schema_ast(schema.clone(), &ast))
             })
             .await
-            .expect("compiler thread failed");
+            .map_err(|_| Error::internal_error())??;
 
             (document.uri.clone(), compile_result)
         };
@@ -427,7 +440,9 @@ impl Backend {
 
         self.client
             .publish_diagnostics(uri, diagnostics, version)
-            .await
+            .await;
+
+        Ok(())
     }
 
     fn get_schema(&self, uri: &Url) -> Result<SchemaRef> {
@@ -445,24 +460,54 @@ impl Backend {
         Ok(schema)
     }
 
-    async fn run_query(&self, params: RunQueryParams) -> Result<RunQueryResult> {
+    async fn run_expr(&self, params: RunExprParams) -> Result<RunExprResult> {
         let uri = Url::parse(&params.uri)
             .map_err(|_| Error::invalid_params("Invalid URI".to_string()))?;
-        let schema = self.get_schema(&uri)?;
+        let schema_ref = self.get_schema(&uri)?;
 
-        let compiled = schema
-            .read()
-            .map_err(|_| Error::internal_error())?
-            .exprs
-            .get(params.idx)
-            .ok_or_else(|| Error::invalid_params(format!("Invalid query index: {}", params.idx)))?
-            .clone();
+        let expr = {
+            // We have to stuff "schema" into this block, because it cannot be held across an await point.
+            let schema = schema_ref.read().map_err(|_| Error::internal_error())?;
+            match params.expr {
+                RunExprType::Expr(expr) => {
+                    let decl = &schema
+                        .decls
+                        .get(&expr)
+                        .ok_or_else(|| {
+                            Error::invalid_params(format!(
+                                "Invalid expression (not found): {}",
+                                expr
+                            ))
+                        })?
+                        .value;
+                    let s_expr = match decl {
+                        SchemaEntry::Expr(ref expr) => expr.clone(),
+                        _ => {
+                            return Err(Error::invalid_params(format!(
+                                "Invalid expression (wrong kind of decl): {}",
+                                expr
+                            )))
+                        }
+                    };
+                    s_expr.to_runtime_type().map_err(|e| {
+                        eprintln!("Failed to convert expression to runtime type: {:?}", e);
+                        Error::internal_error()
+                    })?
+                }
+                RunExprType::Query(idx) => schema
+                    .exprs
+                    .get(idx)
+                    .ok_or_else(|| Error::invalid_params(format!("Invalid query index: {}", idx)))?
+                    .clone()
+                    .to_runtime_type()
+                    .map_err(|e| {
+                        eprintln!("Failed to convert query to runtime type: {:?}", e);
+                        Error::internal_error()
+                    })?,
+            }
+        };
 
-        let expr = compiled
-            .to_runtime_type()
-            .map_err(|_| Error::internal_error())?;
-
-        let ctx = runtime::build_context(&schema, runtime::SQLEngineType::DuckDB);
+        let ctx = runtime::build_context(&schema_ref, runtime::SQLEngineType::DuckDB);
 
         let value = runtime::eval(&ctx, &expr)
             .await
@@ -474,7 +519,7 @@ impl Backend {
             .map_err(|_| Error::internal_error())?
             .clone();
 
-        Ok(RunQueryResult { value, r#type })
+        Ok(RunExprResult { value, r#type })
     }
 }
 

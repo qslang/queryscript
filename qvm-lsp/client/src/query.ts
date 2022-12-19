@@ -2,13 +2,11 @@ import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/node";
 import * as path from "path";
 
-import { RunQueryResult } from "./api";
+import { RunExprType, RunExprResult } from "./api";
 
-export function runQuery(context: vscode.ExtensionContext, client: LanguageClient) {
-	return async (uri: string, idx: number) => {
-		console.log("runQuery");
-		console.log(uri, idx);
-		const foo = await client.sendRequest("qvm/runQuery", { uri, idx }) as RunQueryResult;
+export function runExpr(context: vscode.ExtensionContext, client: LanguageClient) {
+	return async (uri: string, expr: RunExprType) => {
+		const foo = await client.sendRequest("qvm/runExpr", { uri, expr }) as RunExprResult;
 
 		const panel = ReactPanel.createOrShow(context.extensionPath, vscode.ViewColumn.Beside);
 		panel.sendMessage(foo);

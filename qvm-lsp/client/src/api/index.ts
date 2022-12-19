@@ -1,6 +1,7 @@
 import { Type } from "qvm/Type";
 
-export interface RunQueryResult {
+export type RunExprType = { Query: number } | { Expr: string };
+export interface RunExprResult {
 	value: any;
 	type: Type;
 }

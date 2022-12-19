@@ -14,7 +14,7 @@ import {
 	TransportKind
 } from "vscode-languageclient/node";
 
-import { runQuery } from "./query";
+import { runExpr } from "./query";
 
 let client: LanguageClient;
 
@@ -54,7 +54,7 @@ export function activate(context: ExtensionContext) {
 	);
 
 	context.subscriptions.push(
-		commands.registerCommand("runQuery.start", runQuery(context, client))
+		commands.registerCommand("runExpr.start", runExpr(context, client))
 	);
 
 
