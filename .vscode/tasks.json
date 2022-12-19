@@ -74,6 +74,25 @@
 			"options": {
 				"cwd": "${workspaceFolder}/qvm-lsp"
 			}
+		},
+		{
+			"type": "npm",
+			"script": "watch-webview",
+			"isBackground": true,
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "never"
+			},
+			"problemMatcher": [
+				"$tsc-watch"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/qvm-lsp"
+			}
 		}
 	]
 }

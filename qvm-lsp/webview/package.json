@@ -12,6 +12,7 @@
     "typescript": "^4.9.4"
   },
   "scripts": {
-    "compile": "esbuild src/app.tsx --bundle --minify --sourcemap --outfile=out/bundle.js"
+    "compile": "esbuild src/app.tsx --bundle --minify --sourcemap --outfile=out/bundle.js",
+    "watch": "esbuild src/app.tsx --bundle --minify --sourcemap --outfile=out/bundle.js --watch"
   }
 }
