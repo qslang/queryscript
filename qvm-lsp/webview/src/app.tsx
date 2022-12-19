@@ -1,6 +1,11 @@
 import React, { useCallback, useState, useEffect } from "react";
 import ReactDOM from "react-dom";
 
+import { Type } from "qvm/Type";
+import { RunQueryResult } from "api";
+
+import Table from "./visualizations/table";
+
 import "./app.css";
 
 const App = (props: { message: string }) => {
@@ -9,9 +14,9 @@ const App = (props: { message: string }) => {
         setCount(count => count + 1);
     }, [count]);
 
-    const [data, setData] = useState(null);
+    const [data, setData] = useState<RunQueryResult>({ value: null, type: { Atom: "Null" } });
     useEffect(() => {
-        const onMessage = (event: MessageEvent<any>) => {
+        const onMessage = (event: MessageEvent<RunQueryResult>) => {
             console.log("EVENT");
             console.log(event);
             console.log(event.data);
@@ -25,9 +30,7 @@ const App = (props: { message: string }) => {
 
 
     return (<>
-        <h1>{props.message}</h1>
-        <h2>Count: {count}</h2>
-        <button onClick={increment}>Increment</button>
+        {data.value !== null ? <Table data={data.value} schema={data.type} /> : null}
         <pre>{JSON.stringify(data, null, 2)}</pre>
     </>);
 };

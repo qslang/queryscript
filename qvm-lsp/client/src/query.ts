@@ -2,13 +2,7 @@ import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/node";
 import * as path from "path";
 
-import { Type } from "qvm/Type";
-
-
-interface RunQueryResult {
-	value: any;
-	type: Type;
-}
+import { RunQueryResult } from "./api";
 
 export function runQuery(context: vscode.ExtensionContext, client: LanguageClient) {
 	return async (uri: string, idx: number) => {
@@ -18,16 +12,6 @@ export function runQuery(context: vscode.ExtensionContext, client: LanguageClien
 
 		const panel = ReactPanel.createOrShow(context.extensionPath, vscode.ViewColumn.Two);
 		panel.sendMessage(foo);
-		/*
-		const panel = vscode.window.createWebviewPanel(
-			'queryResult',
-			'Query Result',
-			vscode.ViewColumn.Two,
-			{}
-		);
-
-		panel.webview.html = '<pre>' + JSON.stringify(foo, null, 2) + '</pre>';
-		*/
 	};
 }
 
