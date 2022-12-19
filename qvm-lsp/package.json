@@ -78,7 +78,7 @@
 		"vscode:prepublish": "yarn run compile",
 		"compile": "tsc -b && cd webview && yarn run compile && cd ..",
 		"watch": "tsc -b -w",
-		"lint": "eslint ./client/src --ext .ts,.tsx",
+		"lint": "eslint ./client/src ./webview/src --ext .ts,.tsx",
 		"postinstall": "cd client && yarn install && cd ..",
 		"test": "sh ./scripts/e2e.sh"
 	},

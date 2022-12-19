@@ -16,7 +16,8 @@ export function runQuery(context: vscode.ExtensionContext, client: LanguageClien
 		console.log(uri, idx);
 		const foo = await client.sendRequest("qvm/runQuery", { uri, idx }) as RunQueryResult;
 
-		ReactPanel.createOrShow(context.extensionPath, vscode.ViewColumn.Two);
+		const panel = ReactPanel.createOrShow(context.extensionPath, vscode.ViewColumn.Two);
+		panel.sendMessage(foo);
 		/*
 		const panel = vscode.window.createWebviewPanel(
 			'queryResult',
@@ -30,7 +31,7 @@ export function runQuery(context: vscode.ExtensionContext, client: LanguageClien
 	};
 }
 
-// This originates from https://github.com/rebornix/vscode-webview-react
+// This is modified from https://github.com/rebornix/vscode-webview-react
 /**
  * Manages react webview panels
  */
@@ -46,7 +47,7 @@ class ReactPanel {
 	private readonly _extensionPath: string;
 	private _disposables: vscode.Disposable[] = [];
 
-	public static createOrShow(extensionPath: string, column?: vscode.ViewColumn) {
+	public static createOrShow(extensionPath: string, column?: vscode.ViewColumn): ReactPanel {
 		// If we already have a panel, show it.
 		// Otherwise, create a new panel.
 		if (ReactPanel.currentPanel) {
@@ -54,6 +55,7 @@ class ReactPanel {
 		} else {
 			ReactPanel.currentPanel = new ReactPanel(extensionPath, column || vscode.ViewColumn.One);
 		}
+		return ReactPanel.currentPanel;
 	}
 
 	private constructor(extensionPath: string, column: vscode.ViewColumn) {
@@ -87,10 +89,10 @@ class ReactPanel {
 		}, null, this._disposables);
 	}
 
-	public doRefactor() {
+	public sendMessage(message: any) {
 		// Send a message to the webview webview.
 		// You can send any JSON serializable data.
-		this._panel.webview.postMessage({ command: 'refactor' });
+		this._panel.webview.postMessage(message);
 	}
 
 	public dispose() {
