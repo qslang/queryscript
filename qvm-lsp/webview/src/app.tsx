@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useEffect } from "react";
 import ReactDOM from "react-dom";
 
-import './app.css';
+import "./app.css";
 
 const App = (props: { message: string }) => {
     const [count, setCount] = useState(0);
@@ -18,8 +18,8 @@ const App = (props: { message: string }) => {
             setData(event.data);
         };
 
-        window.addEventListener('message', onMessage);
-        return () => window.removeEventListener('message', onMessage);
+        window.addEventListener("message", onMessage);
+        return () => window.removeEventListener("message", onMessage);
     }
     );
 
@@ -34,5 +34,5 @@ const App = (props: { message: string }) => {
 
 ReactDOM.render(
     <App message="Hello World! Simple Counter App built on ESBuild + React + Typescript" />,
-    document.getElementById('root')
+    document.getElementById("root")
 );

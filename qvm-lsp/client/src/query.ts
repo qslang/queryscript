@@ -1,6 +1,6 @@
-import * as vscode from 'vscode';
-import { LanguageClient } from 'vscode-languageclient/node';
-import * as path from 'path';
+import * as vscode from "vscode";
+import { LanguageClient } from "vscode-languageclient/node";
+import * as path from "path";
 
 import { Type } from "qvm/Type";
 
@@ -41,7 +41,7 @@ class ReactPanel {
 	 */
 	public static currentPanel: ReactPanel | undefined;
 
-	private static readonly viewType = 'react';
+	private static readonly viewType = "react";
 
 	private readonly _panel: vscode.WebviewPanel;
 	private readonly _extensionPath: string;
@@ -68,7 +68,7 @@ class ReactPanel {
 
 			// And restrict the webview to only loading content from our extension's `media` directory.
 			localResourceRoots: [
-				vscode.Uri.file(path.join(this._extensionPath, 'webview', 'out'))
+				vscode.Uri.file(path.join(this._extensionPath, "webview", "out"))
 			]
 		});
 
@@ -82,7 +82,7 @@ class ReactPanel {
 		// Handle messages from the webview
 		this._panel.webview.onDidReceiveMessage(message => {
 			switch (message.command) {
-				case 'alert':
+				case "alert":
 					vscode.window.showErrorMessage(message.text);
 					return;
 			}
@@ -110,8 +110,8 @@ class ReactPanel {
 	}
 
 	private _getHtmlForWebview() {
-		const mainScript = path.join(this._extensionPath, 'webview', 'out', 'bundle.js');
-		const mainStyle = path.join(this._extensionPath, 'webview', 'out', 'bundle.css');
+		const mainScript = path.join(this._extensionPath, "webview", "out", "bundle.js");
+		const mainStyle = path.join(this._extensionPath, "webview", "out", "bundle.css");
 
 		const scriptPathOnDisk = vscode.Uri.file(mainScript);
 		const scriptUri = this._panel.webview.asWebviewUri(scriptPathOnDisk);
