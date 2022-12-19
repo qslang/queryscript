@@ -1,5 +1,8 @@
-use super::value::{Record, Value};
+use arrow::datatypes::{Date32Type as ArrowDate32Type, Date64Type as ArrowDate64Type};
+use chrono::{TimeZone, Utc};
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
+
+use super::value::{Record, Value};
 
 impl Serialize for Value {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -55,13 +58,35 @@ impl Serialize for Value {
 
             Self::Record(r) => r.as_ref().serialize(serializer),
 
-            Self::TimestampSecond(..)
-            | Self::TimestampMillisecond(..)
-            | Self::TimestampMicrosecond(..)
-            | Self::TimestampNanosecond(..)
-            | Self::Date32(..)
-            | Self::Date64(..)
-            | Self::Time32Second(..)
+            // NOTE: When we add timezone support, we'll probably want to use FixedOffset here.
+            // NOTE: We should probably throw an error somewhere here (or earlier in the pipeline) if the timestamp
+            // is invalid
+            Self::TimestampSecond(x, _tz)
+            | Self::TimestampMillisecond(x, _tz)
+            | Self::TimestampMicrosecond(x, _tz)
+            | Self::TimestampNanosecond(x, _tz) => {
+                let (seconds, nanos) = match &self {
+                    Self::TimestampSecond(..) => (*x, 0),
+                    Self::TimestampMillisecond(..) => (*x / 1000, (*x % 1000) * 1_000_000),
+                    Self::TimestampMicrosecond(..) => (*x / 1_000_000, (*x % 1_000_000) * 1_000),
+                    Self::TimestampNanosecond(..) => (*x / 1_000_000_000, *x % 1_000_000_000),
+                    _ => panic!("unreachable"),
+                };
+                Utc.timestamp_opt(seconds, nanos as u32)
+                    .unwrap()
+                    .to_rfc3339()
+                    .serialize(serializer)
+            }
+            Self::Date32(x) => ArrowDate32Type::to_naive_date(*x)
+                .format("%Y-%m-%d")
+                .to_string()
+                .serialize(serializer),
+            Self::Date64(x) => ArrowDate64Type::to_naive_date(*x)
+                .format("%Y-%m-%d")
+                .to_string()
+                .serialize(serializer),
+
+            Self::Time32Second(..)
             | Self::Time32Millisecond(..)
             | Self::Time64Microsecond(..)
             | Self::Time64Nanosecond(..)
