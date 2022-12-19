@@ -2,13 +2,14 @@ pub use arrow::{
     array::Array as ArrowArray,
     array::ArrayRef as ArrowArrayRef,
     datatypes::{
-        DECIMAL128_MAX_PRECISION, DECIMAL128_MAX_SCALE, DECIMAL256_MAX_PRECISION,
-        DECIMAL256_MAX_SCALE,
+        Date32Type as ArrowDate32Type, Date64Type as ArrowDate64Type, DECIMAL128_MAX_PRECISION,
+        DECIMAL128_MAX_SCALE, DECIMAL256_MAX_PRECISION, DECIMAL256_MAX_SCALE,
     },
     record_batch::RecordBatch as ArrowRecordBatch,
 };
 pub use arrow_buffer::i256;
 use async_trait::async_trait;
+use chrono::{TimeZone, Utc};
 use dyn_clone::{clone_trait_object, DynClone};
 use futures::future::BoxFuture;
 pub use std::any::Any;
@@ -261,19 +262,45 @@ impl fmt::Display for Value {
             Self::FixedSizeBinary(_len, buf) => write!(f, "{:?}", buf),
             Self::LargeBinary(x) => write!(f, "{:?}", x),
 
-            // TODO times/dates are printed as their "debug" version (for now)
-            Self::TimestampSecond(x, tz) => write!(f, "Timestamp(s) {:?} ({:?})", x, tz),
-            Self::TimestampMillisecond(x, tz) => write!(f, "Timestamp(ms) {:?} ({:?})", x, tz),
-            Self::TimestampMicrosecond(x, tz) => write!(f, "Timestamp(μs) {:?} ({:?})", x, tz),
-            Self::TimestampNanosecond(x, tz) => write!(f, "Timestamp(ns) {:?} ({:?})", x, tz),
+            Self::TimestampSecond(x, _tz)
+            | Self::TimestampMillisecond(x, _tz)
+            | Self::TimestampMicrosecond(x, _tz)
+            | Self::TimestampNanosecond(x, _tz) => {
+                let (seconds, nanos) = match &self {
+                    Self::TimestampSecond(..) => (*x, 0),
+                    Self::TimestampMillisecond(..) => (*x / 1000, (*x % 1000) * 1_000_000),
+                    Self::TimestampMicrosecond(..) => (*x / 1_000_000, (*x % 1_000_000) * 1_000),
+                    Self::TimestampNanosecond(..) => (*x / 1_000_000_000, *x % 1_000_000_000),
+                    _ => panic!("unreachable"),
+                };
+                write!(
+                    f,
+                    "{}",
+                    Utc.timestamp_opt(seconds, nanos as u32)
+                        .unwrap()
+                        .to_rfc3339()
+                )
+            }
+
+            Self::Date32(x) => write!(
+                f,
+                "{}",
+                ArrowDate32Type::to_naive_date(*x)
+                    .format("%Y-%m-%d")
+                    .to_string()
+            ),
+            Self::Date64(x) => write!(
+                f,
+                "{}",
+                ArrowDate64Type::to_naive_date(*x)
+                    .format("%Y-%m-%d")
+                    .to_string()
+            ),
 
             Self::Time32Second(x) => write!(f, "Time(s) {:?}", x),
             Self::Time32Millisecond(x) => write!(f, "Time(ms) {:?}", x),
             Self::Time64Microsecond(x) => write!(f, "Time(μs) {:?}", x),
             Self::Time64Nanosecond(x) => write!(f, "Time(ns) {:?}", x),
-
-            Self::Date32(x) => write!(f, "Date {:?}", x),
-            Self::Date64(x) => write!(f, "DateTime {:?}", x),
 
             Self::IntervalYearMonth(x) => write!(f, "YearMonth {:?}", x),
             Self::IntervalDayTime(x) => write!(f, "DayTime {:?}", x),
