@@ -5,11 +5,14 @@ import * as path from "path";
 import { RunExprType, RunExprResult } from "./api";
 
 export function runExpr(context: vscode.ExtensionContext, client: LanguageClient) {
-	return async (uri: string, expr: RunExprType) => {
-		const foo = await client.sendRequest("qvm/runExpr", { uri, expr }) as RunExprResult;
+	return async (arg_uri?: string, arg_expr?: RunExprType) => {
+		const uri = arg_uri || vscode.window.activeTextEditor?.document.uri.toString();
+		const expr: RunExprType = arg_expr || { Position: vscode.window.activeTextEditor?.selection.active };
+
+		const resp = await client.sendRequest("qvm/runExpr", { uri, expr }) as RunExprResult;
 
 		const panel = ReactPanel.createOrShow(context.extensionPath, vscode.ViewColumn.Beside);
-		panel.sendMessage(foo);
+		panel.sendMessage(resp);
 	};
 }
 

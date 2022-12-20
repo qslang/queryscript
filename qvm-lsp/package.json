@@ -45,9 +45,17 @@
 		],
 		"commands": [
 			{
-				"command": "runQuery.start",
-				"title": "Run a query",
+				"command": "runExpr.start",
+				"title": "Run a query or expression",
 				"category": "QueryVM"
+			}
+		],
+		"keybindings": [
+			{
+				"command": "runExpr.start",
+				"key": "ctrl+shift+enter",
+				"mac": "cmd+shift+enter",
+				"when": "editorTextFocus"
 			}
 		],
 		"configuration": {

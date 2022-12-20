@@ -11,6 +11,7 @@ use tower_lsp::{lsp_types::*, LspServiceBuilder};
 use tower_lsp::{Client, LanguageServer};
 
 use qvm::{
+    ast::SourceLocation,
     compile::{schema::SchemaEntry, Compiler, Schema, SchemaRef},
     parser::{error::PrettyError, parse_schema},
     runtime,
@@ -309,15 +310,8 @@ impl LanguageServer for Backend {
         }
 
         for (name, decl) in schema.read().map_err(log_internal_error)?.decls.iter() {
-            match &decl.value {
-                SchemaEntry::Schema(_) | SchemaEntry::Type(_) => continue,
-                SchemaEntry::Expr(e) => match e.to_runtime_type() {
-                    Ok(e) => match *(e.type_.read().map_err(log_internal_error)?) {
-                        QVMType::Fn(_) => continue,
-                        _ => (),
-                    },
-                    Err(_) => continue,
-                },
+            if !is_runnable_decl(&decl.value)? {
+                continue;
             }
 
             let range = match decl.location().normalize() {
@@ -341,10 +335,69 @@ impl LanguageServer for Backend {
     }
 }
 
+fn is_runnable_decl(decl: &SchemaEntry) -> Result<bool> {
+    Ok(match decl {
+        SchemaEntry::Schema(_) | SchemaEntry::Type(_) => false,
+        SchemaEntry::Expr(e) => match e.to_runtime_type() {
+            Ok(e) => match *(e.type_.read().map_err(log_internal_error)?) {
+                QVMType::Fn(_) => false,
+                _ => true,
+            },
+            Err(_) => false,
+        },
+    })
+}
+
+fn get_runnable_expr_from_decl(
+    decl: &SchemaEntry,
+) -> Result<qvm::compile::schema::TypedExpr<qvm::compile::schema::Ref<QVMType>>> {
+    let s_expr = match decl {
+        SchemaEntry::Expr(ref expr) => expr.clone(),
+        _ => {
+            return Err(Error::invalid_params(format!(
+                "Invalid expression (wrong kind of decl): {:?}",
+                decl
+            )))
+        }
+    };
+    Ok(s_expr.to_runtime_type().map_err(|e| {
+        eprintln!("Failed to convert expression to runtime type: {:?}", e);
+        Error::internal_error()
+    })?)
+}
+
+fn find_expr_by_location(
+    schema: &Schema,
+    loc: &qvm::ast::Location,
+) -> Result<Option<qvm::compile::schema::TypedExpr<qvm::compile::schema::Ref<QVMType>>>> {
+    if let Some(expr) = schema.exprs.iter().find(|expr| {
+        let expr_loc = expr.location();
+        expr_loc.contains(loc)
+    }) {
+        return Ok(Some(expr.clone().to_runtime_type().map_err(|e| {
+            eprintln!("Failed to convert query to runtime type: {:?}", e);
+            Error::internal_error()
+        })?));
+    }
+
+    if let Some((_name, decl)) = schema.decls.iter().find(|(_name, decl)| {
+        let runnable = match is_runnable_decl(&decl.value) {
+            Ok(b) => b,
+            Err(_) => false,
+        };
+        runnable && decl.location().contains(loc)
+    }) {
+        return Ok(Some(get_runnable_expr_from_decl(&decl.value)?));
+    }
+
+    Ok(None)
+}
+
 #[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
 enum RunExprType {
     Query(usize),
     Expr(String),
+    Position { line: u64, character: u64 },
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
@@ -483,19 +536,7 @@ impl Backend {
                             ))
                         })?
                         .value;
-                    let s_expr = match decl {
-                        SchemaEntry::Expr(ref expr) => expr.clone(),
-                        _ => {
-                            return Err(Error::invalid_params(format!(
-                                "Invalid expression (wrong kind of decl): {}",
-                                expr
-                            )))
-                        }
-                    };
-                    s_expr.to_runtime_type().map_err(|e| {
-                        eprintln!("Failed to convert expression to runtime type: {:?}", e);
-                        Error::internal_error()
-                    })?
+                    get_runnable_expr_from_decl(&decl)?
                 }
                 RunExprType::Query(idx) => schema
                     .exprs
@@ -507,6 +548,22 @@ impl Backend {
                         eprintln!("Failed to convert query to runtime type: {:?}", e);
                         Error::internal_error()
                     })?,
+                RunExprType::Position { line, character } => {
+                    let loc = qvm::ast::Location {
+                        line: line + 1,
+                        column: character + 1,
+                    };
+
+                    match find_expr_by_location(&schema, &loc)? {
+                        Some(expr) => expr,
+                        None => {
+                            return Err(Error::invalid_params(format!(
+                                "No runnable expression at location: {:?}",
+                                loc
+                            )));
+                        }
+                    }
+                }
             }
         };
 
@@ -526,7 +583,7 @@ trait NormalizeRange {
     fn normalize(&self) -> Option<Range>;
 }
 
-impl NormalizeRange for qvm::ast::SourceLocation {
+impl NormalizeRange for SourceLocation {
     fn normalize(&self) -> Option<Range> {
         let (start_line, start_col, end_line, end_col) = match self.range() {
             Some(loc) => loc,

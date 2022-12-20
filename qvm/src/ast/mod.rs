@@ -16,6 +16,7 @@ pub enum SourceLocation {
 }
 
 impl SourceLocation {
+    // XXX can we delete this function?
     pub fn range(&self) -> Option<(u64, u64, u64, u64)> {
         Some(match self {
             SourceLocation::Unknown | SourceLocation::File(_) => return None,
@@ -23,6 +24,20 @@ impl SourceLocation {
             SourceLocation::Range(_, s, e) => (s.line, s.column, e.line, e.column),
         })
     }
+
+    pub fn contains(&self, loc: &Location) -> bool {
+        match self {
+            SourceLocation::Unknown | SourceLocation::File(_) => false,
+            SourceLocation::Single(_, l) => l == loc,
+            SourceLocation::Range(_, s, e) => {
+                loc.line >= s.line
+                    && loc.line <= e.line
+                    && loc.column >= s.column
+                    && loc.column <= e.column
+            }
+        }
+    }
+
     pub fn annotate(&self, code: &str) -> Option<String> {
         let lines = code.lines().collect::<Vec<_>>();
         let line_digits = (lines.len() as f64).log10().floor() as usize + 1;
