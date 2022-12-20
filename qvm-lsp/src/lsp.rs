@@ -89,6 +89,11 @@ impl Backend {
     }
 }
 
+fn log_internal_error<E: std::fmt::Debug>(e: E) -> Error {
+    eprintln!("Internal error: {:?}", e);
+    Error::internal_error()
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
@@ -280,7 +285,7 @@ impl LanguageServer for Backend {
         let mut lenses = Vec::new();
         for (idx, expr) in schema
             .read()
-            .map_err(|_| Error::internal_error())?
+            .map_err(log_internal_error)?
             .exprs
             .iter()
             .enumerate()
@@ -303,15 +308,16 @@ impl LanguageServer for Backend {
             });
         }
 
-        for (name, decl) in schema
-            .read()
-            .map_err(|_| Error::internal_error())?
-            .decls
-            .iter()
-        {
-            match decl.value {
+        for (name, decl) in schema.read().map_err(log_internal_error)?.decls.iter() {
+            match &decl.value {
                 SchemaEntry::Schema(_) | SchemaEntry::Type(_) => continue,
-                SchemaEntry::Expr(_) => {}
+                SchemaEntry::Expr(e) => match e.to_runtime_type() {
+                    Ok(e) => match *(e.type_.read().map_err(log_internal_error)?) {
+                        QVMType::Fn(_) => continue,
+                        _ => (),
+                    },
+                    Err(_) => continue,
+                },
             }
 
             let range = match decl.location().normalize() {
@@ -364,10 +370,7 @@ impl Backend {
 
         // Get the existing document or insert a new one, and lock it (while holding the write lock on documents).
         let document = {
-            let mut documents = self
-                .documents
-                .write()
-                .map_err(|_| Error::internal_error())?;
+            let mut documents = self.documents.write().map_err(log_internal_error)?;
 
             let document = Document {
                 uri,
@@ -410,11 +413,11 @@ impl Backend {
             let compiler = self.compiler.clone();
 
             let compile_result = task::spawn_blocking(move || {
-                let compiler = compiler.lock().map_err(|_| Error::internal_error())?;
+                let compiler = compiler.lock().map_err(log_internal_error)?;
                 Ok(compiler.compile_schema_ast(schema.clone(), &ast))
             })
             .await
-            .map_err(|_| Error::internal_error())??;
+            .map_err(log_internal_error)??;
 
             (document.uri.clone(), compile_result)
         };
@@ -450,7 +453,7 @@ impl Backend {
             Ok(self
                 .documents
                 .read()
-                .map_err(|_| Error::internal_error())?
+                .map_err(log_internal_error)?
                 .get(&uri.to_string())
                 .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?
                 .blocking_lock()
@@ -467,7 +470,7 @@ impl Backend {
 
         let expr = {
             // We have to stuff "schema" into this block, because it cannot be held across an await point.
-            let schema = schema_ref.read().map_err(|_| Error::internal_error())?;
+            let schema = schema_ref.read().map_err(log_internal_error)?;
             match params.expr {
                 RunExprType::Expr(expr) => {
                     let decl = &schema
@@ -511,13 +514,9 @@ impl Backend {
 
         let value = runtime::eval(&ctx, &expr)
             .await
-            .map_err(|_| Error::internal_error())?;
+            .map_err(log_internal_error)?;
 
-        let r#type = expr
-            .type_
-            .read()
-            .map_err(|_| Error::internal_error())?
-            .clone();
+        let r#type = expr.type_.read().map_err(log_internal_error)?.clone();
 
         Ok(RunExprResult { value, r#type })
     }
