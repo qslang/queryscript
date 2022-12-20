@@ -8,6 +8,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use crate::compile;
+    use crate::parser;
     use crate::runtime;
     use crate::types;
 
@@ -138,6 +139,37 @@ mod tests {
         {
             let entry = entry.expect(format!("Could not read {}", tests.display()).as_str());
             test_directory(&rt, &entry.path());
+        }
+    }
+
+    #[test]
+    fn test_double_schemas() {
+        let prefix = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/jaffle/");
+
+        let compiler = compile::Compiler::new().expect("Failed to create compiler");
+
+        for fname in ["staging.tql", "queries.tql"].iter() {
+            let fpath = prefix.join(fname);
+            let schema = compile::Schema::new(
+                String::from(fpath.to_str().unwrap()),
+                Some(String::from(prefix.to_str().unwrap())),
+            );
+
+            // Read contents of file at f1 into c1
+            let text = fs::read_to_string(&fpath).expect("Failed to read file");
+            let ast = parser::parse_schema(fpath.to_str().unwrap(), &text).unwrap();
+            compiler
+                .compile_schema_ast(schema.clone(), &ast)
+                .as_result()
+                .expect("Compiled first file");
+
+            {
+                for expr in schema.read().unwrap().exprs.iter() {
+                    let _ = expr
+                        .to_runtime_type()
+                        .expect("Failed to convert to runtime type");
+                }
+            }
         }
     }
 }

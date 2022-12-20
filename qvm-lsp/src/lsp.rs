@@ -383,7 +383,10 @@ fn find_expr_by_location(
     if let Some((_name, decl)) = schema.decls.iter().find(|(_name, decl)| {
         let runnable = match is_runnable_decl(&decl.value) {
             Ok(b) => b,
-            Err(_) => false,
+            Err(e) => {
+                eprintln!("Failed to determine runnability: {:?}", e);
+                false
+            }
         };
         runnable && decl.location().contains(loc)
     }) {

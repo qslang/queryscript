@@ -301,8 +301,6 @@ impl Compiler {
     }
 
     pub fn file_contents(&self) -> Result<std::sync::RwLockReadGuard<'_, CompilerData>> {
-        // TODO: Avoid this clone somehow
-        //
         Ok(self.data.read()?)
     }
 }

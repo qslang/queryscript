@@ -32,8 +32,8 @@ impl SourceLocation {
             SourceLocation::Range(_, s, e) => {
                 loc.line >= s.line
                     && loc.line <= e.line
-                    && loc.column >= s.column
-                    && loc.column <= e.column
+                    && (loc.column >= s.column || loc.line > s.line)
+                    && (loc.column <= e.column || loc.line < e.line)
             }
         }
     }
