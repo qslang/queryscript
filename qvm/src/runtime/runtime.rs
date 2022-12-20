@@ -16,7 +16,12 @@ type TypeRef = schema::Ref<types::Type>;
 pub type Runtime = tokio::runtime::Runtime;
 
 pub fn build() -> Result<Runtime> {
-    Ok(tokio::runtime::Builder::new_current_thread().build()?)
+    Ok(if cfg!(feature = "multi-thread") {
+        tokio::runtime::Builder::new_multi_thread()
+    } else {
+        tokio::runtime::Builder::new_current_thread()
+    }
+    .build()?)
 }
 
 pub async fn eval_params<'a>(

@@ -3,6 +3,7 @@ import { VSCodeDataGrid, VSCodeDataGridRow, VSCodeDataGridCell } from "@vscode/w
 import { match, P } from "ts-pattern";
 
 import { Type } from "qvm/Type";
+import { normalize } from "path";
 
 interface TableProps {
 	data: any;
@@ -44,7 +45,7 @@ export const Table = ({ data, schema }: TableProps) => {
 					(data as any[]).map((row) => (
 						<VSCodeDataGridRow>
 							{fields.map((field, idx) => (
-								<VSCodeDataGridCell grid-column={idx + 1}>{row[field.name]}</VSCodeDataGridCell>
+								<VSCodeDataGridCell grid-column={idx + 1}>{normalizeForDisplay(row[field.name])}</VSCodeDataGridCell>
 							))}
 						</VSCodeDataGridRow>
 					))
@@ -54,5 +55,25 @@ export const Table = ({ data, schema }: TableProps) => {
 	);
 
 };
+
+function normalizeForDisplay(x: any): string {
+	if (x === null) {
+		return "null";
+	} else if (x === undefined) {
+		return "undefined";
+	} else if (typeof x === "string") {
+		return x;
+	} else if (typeof x === "number") {
+		return x.toString();
+	} else if (typeof x === "boolean") {
+		return x.toString();
+	} else if (Array.isArray(x)) {
+		return x.map(normalizeForDisplay).join(", ");
+	} else if (typeof x === "object") {
+		return JSON.stringify(x);
+	} else {
+		return x.toString();
+	}
+}
 
 export default Table;
