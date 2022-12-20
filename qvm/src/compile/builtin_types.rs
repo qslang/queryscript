@@ -37,7 +37,7 @@ const BUILTIN_TYPES: &'static [BuiltinType] = &[
     //
     ("date", AtomicType::Date32),
     ("time", AtomicType::Time64(TimeUnit::Microsecond)),
-    ("datetime", AtomicType::Date64),
+    ("datetime", AtomicType::Timestamp(TimeUnit::Second, None)),
     (
         "timestamp",
         AtomicType::Timestamp(TimeUnit::Microsecond, None),
