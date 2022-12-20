@@ -33,6 +33,9 @@ ts-rs = { version = "6.2", optional = true }
 # to be propagated through to it.
 arrow-schema = { version = "*" }
 
+# This comes via arrow, but we need to access it directly.
+parquet = { version = "*" }
+
 # -- ENGINES ---
 
 # TODO: We should put each database dependency runtime behind a feature flag

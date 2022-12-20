@@ -127,7 +127,7 @@ pub fn eval<'a>(
                 let query = body.as_query();
 
                 // TODO: This ownership model implies some necessary copying (below).
-                let rows = { ctx.sql_engine.eval(&query, sql_params).await? };
+                let rows = { ctx.sql_engine.eval(ctx, &query, sql_params).await? };
 
                 match body {
                     schema::SQLBody::Expr(_) => {

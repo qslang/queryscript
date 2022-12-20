@@ -58,6 +58,7 @@ impl MField {
     }
 }
 
+// XXX We should change these to use Located<>
 #[derive(Clone)]
 pub enum MType {
     Atom(SourceLocation, AtomicType),
@@ -65,6 +66,7 @@ pub enum MType {
     List(MListType),
     Fn(MFnType),
     Name(Ident),
+    External(SourceLocation, CRef<MType>),
 }
 
 impl MType {
@@ -106,6 +108,7 @@ impl MType {
             MType::Name { .. } => {
                 runtime::error::fail!("Unresolved type name cannot exist at runtime: {:?}", self)
             }
+            MType::External(_loc, inner_type) => inner_type.must()?.read()?.to_runtime_type(),
         }
     }
 
@@ -184,6 +187,10 @@ impl MType {
                 .get(&n.value)
                 .ok_or_else(|| CompileError::no_such_entry(vec![n.clone()]))?
                 .clone(),
+
+            MType::External(loc, e) => {
+                mkcref(MType::External(loc.clone(), e.substitute(variables)?))
+            }
         };
 
         Ok(type_)
@@ -196,6 +203,7 @@ impl MType {
             MType::List(t) => t.loc.clone(),
             MType::Fn(t) => t.loc.clone(),
             MType::Name(t) => t.loc.clone(),
+            MType::External(loc, _) => loc.clone(),
         }
     }
 }
@@ -280,6 +288,11 @@ impl fmt::Debug for MType {
                 ret.fmt(f)?;
             }
             MType::Name(n) => n.value.fmt(f)?,
+            MType::External(_, t) => {
+                f.write_str("External<")?;
+                t.fmt(f)?;
+                f.write_str(">")?;
+            }
         }
         Ok(())
     }
@@ -287,6 +300,11 @@ impl fmt::Debug for MType {
 
 impl Constrainable for MType {
     fn unify(&self, other: &MType) -> Result<()> {
+        if !matches!(self, MType::External(..)) && matches!(other, MType::External(..)) {
+            // If there is an external type, ensure it's on the LHS
+            return other.unify(self);
+        }
+
         match self {
             MType::Atom(_, la) => match other {
                 MType::Atom(_, ra) => {
@@ -332,6 +350,14 @@ impl Constrainable for MType {
                     format!("Encountered free type variable: {}", name.value).as_str(),
                 ))
             }
+            MType::External(_loc, le) => match other {
+                MType::External(_, re) => {
+                    le.unify(re)?;
+                }
+                other => {
+                    le.unify(&mkcref(other.clone()))?;
+                }
+            },
         }
 
         Ok(())

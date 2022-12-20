@@ -11,3 +11,18 @@ pub struct Context {
     pub values: BTreeMap<String, Value>,
     pub sql_engine: Arc<dyn SQLEngine>,
 }
+
+impl Context {
+    pub fn expensive<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        if tokio::runtime::Handle::current().runtime_flavor()
+            == tokio::runtime::RuntimeFlavor::MultiThread
+        {
+            tokio::task::block_in_place(f)
+        } else {
+            f()
+        }
+    }
+}

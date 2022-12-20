@@ -16,6 +16,7 @@ use crate::runtime::{
     error::Result,
     normalize::Normalizer,
     sql::{SQLEngine, SQLParam},
+    Context,
 };
 
 #[cxx::bridge]
@@ -166,6 +167,7 @@ impl DuckDBEngine {
 impl SQLEngine for DuckDBEngine {
     async fn eval(
         &self,
+        ctx: &Context,
         query: &sqlast::Query,
         params: HashMap<String, SQLParam>,
     ) -> Result<Arc<dyn Relation>> {
@@ -173,11 +175,7 @@ impl SQLEngine for DuckDBEngine {
         // and it's not hooked into the async coroutines that the runtime uses (and therefore cannot
         // yield work). block_in_place() tells Tokio to expect this thread to spend a while working on
         // this stuff and use other threads for other work.
-        if cfg!(feature = "multi-thread") {
-            tokio::task::block_in_place(|| self.eval_in_place(query, params))
-        } else {
-            self.eval_in_place(query, params)
-        }
+        ctx.expensive(|| self.eval_in_place(query, params))
     }
 }
 

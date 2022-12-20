@@ -63,12 +63,13 @@ impl Constrainable for CTypedSQL {}
 impl Constrainable for CTypedExpr {}
 
 pub fn get_rowtype(compiler: Compiler, relation: CRef<MType>) -> Result<CRef<MType>> {
-    Ok(compiler.async_cref(async move {
+    Ok(compiler.clone().async_cref(async move {
         let r = &relation;
         let reltype = r.await?;
         let locked = reltype.read()?;
         match &*locked {
             MType::List(MListType { inner, .. }) => Ok(inner.clone()),
+            MType::External(_loc, inner_type) => get_rowtype(compiler, inner_type.clone()),
             _ => Ok(relation.clone()),
         }
     })?)
@@ -1307,6 +1308,38 @@ pub fn has_unbound_names(expr: Arc<Expr<CRef<MType>>>) -> bool {
     }
 }
 
+pub fn schema_infer_load_fn(
+    schema: SchemaRef,
+    args: Vec<TypedNameAndExpr<CRef<MType>>>,
+    inner_type: CRef<MType>,
+) -> impl std::future::Future<Output = Result<()>> + Send + 'static {
+    async move {
+        let ctx = crate::runtime::build_context(&schema, crate::runtime::SQLEngineType::DuckDB);
+        let mut runtime_args = Vec::new();
+        for e in args {
+            let runtime_expr = e.to_typed_expr().to_runtime_type().context(RuntimeSnafu {
+                loc: SourceLocation::Unknown,
+            })?;
+            let eval_expr = crate::runtime::eval(&ctx, &runtime_expr).await.context({
+                RuntimeSnafu {
+                    loc: SourceLocation::Unknown,
+                }
+            })?;
+            runtime_args.push(eval_expr);
+        }
+        let inferred_type = crate::runtime::functions::LoadFileFn::infer(&ctx, runtime_args)
+            .await
+            .context(RuntimeSnafu {
+                loc: SourceLocation::Unknown,
+            })?;
+
+        let inferred_mtype = mkcref(MType::from_runtime_type(&inferred_type)?);
+
+        inner_type.unify(&inferred_mtype)?;
+        Ok(())
+    }
+}
+
 pub fn compile_sqlexpr(
     compiler: Compiler,
     schema: Ref<Schema>,
@@ -1694,8 +1727,10 @@ pub fn compile_sqlexpr(
 
             let expr = compiler.async_cref({
                 let compiler = compiler.clone();
+                let schema = schema.clone();
                 let loc = loc.clone();
                 let name = name.clone();
+                let type_ = type_.clone();
                 async move {
                     let arg_exprs = arg_exprs
                         .into_iter()
@@ -1715,6 +1750,34 @@ pub fn compile_sqlexpr(
                         .iter()
                         .map(|e| Ok(e.read()?.clone()))
                         .collect::<Result<Vec<_>>>()?;
+
+                    if type_.is_known()? {
+                        match &*type_
+                            .must()
+                            .context(RuntimeSnafu { loc: loc.clone() })?
+                            .read()?
+                        {
+                            MType::External(_loc, inner_type) => {
+                                // TODO We should place some metadata on the function, or have a whitelist
+                                // of functions that work this way, but for now, we simply special case the
+                                // load function
+                                if func_name.as_slice()[0].value != "load" {
+                                    return Err(CompileError::unimplemented(
+                                        loc.clone(),
+                                        "external types for non-load functions",
+                                    ));
+                                }
+
+                                let resolve = schema_infer_load_fn(
+                                    schema.clone(),
+                                    args.clone(),
+                                    inner_type.clone(),
+                                );
+                                compiler.add_external_type(resolve, inner_type.clone())?;
+                            }
+                            _ => {}
+                        }
+                    }
 
                     let func_expr = func.expr.unwrap_schema_entry().await?;
 

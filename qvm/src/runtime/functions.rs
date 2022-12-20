@@ -93,7 +93,7 @@ impl FnValue for QVMFn {
 #[derive(Clone, Debug)]
 enum Format {
     Json,
-    CSV,
+    Csv,
     Parquet,
 }
 
@@ -129,26 +129,31 @@ impl LoadFileFn {
         Ok(LoadFileFn { schema })
     }
 
-    pub async fn load(&self, file: &FilePath, format: Option<String>) -> Result<Value> {
-        let format_lower = format.map(|s| s.to_lowercase());
+    fn derive_format(file: &FilePath, format: &Option<String>) -> Format {
+        let format_lower = format.as_ref().map(|s| s.to_lowercase());
         let format_name = match format_lower.as_deref() {
             None => file.extension().and_then(|s| s.to_str()),
             Some(fmt) => Some(fmt),
         };
 
-        let format_type = match format_name {
-            Some("csv") => Format::CSV,
+        match format_name {
+            Some("csv") => Format::Csv,
             Some("parquet") => Format::Parquet,
             Some("json") | _ => Format::Json,
-        };
+        }
+    }
+
+    // XXX We should change this to use arrow directly
+    pub async fn load(&self, file: &FilePath, format: Option<String>) -> Result<Value> {
+        let format_type = Self::derive_format(file, &format);
+
         let format: Box<dyn FileFormat> = match format_type {
             Format::Json => Box::new(JsonFormat::default().with_schema_infer_max_rec(Some(0)))
                 as Box<dyn FileFormat>,
-            Format::CSV => Box::new(CsvFormat::default().with_schema_infer_max_rec(Some(0)))
+            Format::Csv => Box::new(CsvFormat::default().with_schema_infer_max_rec(Some(0)))
                 as Box<dyn FileFormat>,
             Format::Parquet => Box::new(ParquetFormat::default()) as Box<dyn FileFormat>,
         };
-
         let location = Path::from_filesystem_path(&file)?;
         let fmeta = std::fs::metadata(&file)?;
         let ometa = ObjectMeta {
@@ -185,34 +190,77 @@ impl LoadFileFn {
 
         Ok(Value::Relation(records))
     }
+
+    fn parse_args(ctx: &Context, args: Vec<Value>) -> Result<(FilePathBuf, Option<String>)> {
+        if args.len() != 2 {
+            return fail!("load expects exactly 2 arguments");
+        }
+
+        let mut path_buf = FilePathBuf::new();
+        if let Some(folder) = &ctx.folder {
+            path_buf.push(folder.clone());
+        }
+
+        match &args[0] {
+            Value::Utf8(s) => path_buf.push(s),
+            _ => return fail!("load expects its first argument to be a string"),
+        };
+
+        let format = match &args[1] {
+            Value::Utf8(s) => Some(s.clone()),
+            Value::Null => None,
+            _ => return fail!("load expects a string or null as the second argument"),
+        };
+
+        Ok((path_buf, format))
+    }
+
+    pub async fn infer(
+        ctx: &Context,
+        args: Vec<Value>,
+    ) -> crate::runtime::Result<crate::types::Type> {
+        let (file_path, format) = Self::parse_args(ctx, args)?;
+        let file_path = &*file_path;
+        let format_type = Self::derive_format(file_path, &format);
+
+        ctx.expensive(move || {
+            let fd = std::fs::File::open(file_path)?;
+
+            Ok(crate::types::Type::List(Box::new(match format_type {
+                Format::Csv => {
+                    let reader = arrow::csv::ReaderBuilder::new()
+                        .infer_schema(Some(100))
+                        .has_header(true)
+                        .build(fd)?;
+
+                    let schema = reader.schema();
+                    schema.as_ref().try_into()?
+                }
+                Format::Json => {
+                    let reader = arrow::json::ReaderBuilder::new()
+                        .infer_schema(Some(100))
+                        .build(fd)?;
+
+                    let schema = reader.schema();
+                    schema.as_ref().try_into()?
+                }
+                Format::Parquet => {
+                    let reader =
+                        parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(fd)?;
+                    let schema = reader.schema();
+                    schema.as_ref().try_into()?
+                }
+            })))
+        })
+    }
 }
 
 #[async_trait]
 impl FnValue for LoadFileFn {
-    fn execute(&self, ctx: &Context, args: Vec<Value>) -> BoxFuture<Result<Value>> {
+    fn execute<'a>(&'a self, ctx: &'a Context, args: Vec<Value>) -> BoxFuture<'a, Result<Value>> {
         let us = self.clone();
-        let folder = ctx.folder.clone();
         async move {
-            if args.len() != 2 {
-                return fail!("load expects exactly 2 arguments");
-            }
-
-            let mut path_buf = FilePathBuf::new();
-            if let Some(folder) = &folder {
-                path_buf.push(folder);
-            }
-
-            match &args[0] {
-                Value::Utf8(s) => path_buf.push(s),
-                _ => return fail!("load expects its first argument to be a string"),
-            };
-
-            let format = match &args[1] {
-                Value::Utf8(s) => Some(s.clone()),
-                Value::Null => None,
-                _ => return fail!("load expects its second argument to be a string"),
-            };
-
+            let (path_buf, format) = Self::parse_args(ctx, args)?;
             us.load(&*path_buf, format).await
         }
         .boxed()

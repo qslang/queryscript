@@ -13,8 +13,11 @@ use datafusion::sql::planner::SqlToRel;
 use sqlparser::ast as sqlast;
 use std::{any::Any, collections::HashMap, sync::Arc};
 
-use super::error::Result;
-use super::sql::{SQLEngine, SQLParam};
+use super::{
+    error::Result,
+    sql::{SQLEngine, SQLParam},
+    Context,
+};
 use crate::types::{Relation, Value};
 
 pub mod value;
@@ -32,6 +35,7 @@ impl DataFusionEngine {
 impl SQLEngine for DataFusionEngine {
     async fn eval(
         &self,
+        _ctx: &Context,
         query: &sqlast::Query,
         params: HashMap<String, SQLParam>,
     ) -> Result<Arc<dyn Relation>> {
@@ -56,7 +60,6 @@ impl SQLEngine for DataFusionEngine {
 }
 
 impl SQLParam {
-    // XXX Can we remove or rename this function?
     pub fn register(&self, ctx: &mut SessionContext) -> DFResult<()> {
         let schema: Arc<ArrowSchema> = match (&self.type_).try_into() {
             Ok(schema) => Arc::new(schema),

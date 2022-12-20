@@ -9,7 +9,7 @@ use colored::*;
 use snafu::{Backtrace, Snafu};
 use std::io;
 
-pub type Result<T> = std::result::Result<T, CompileError>;
+pub type Result<T, E = CompileError> = std::result::Result<T, E>;
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
@@ -253,6 +253,12 @@ impl<Guard> From<std::sync::PoisonError<Guard>> for CompileError {
 
 impl From<tokio::task::JoinError> for CompileError {
     fn from(e: tokio::task::JoinError) -> CompileError {
+        CompileError::external(format!("{}", e).as_str())
+    }
+}
+
+impl From<tokio::sync::oneshot::error::RecvError> for CompileError {
+    fn from(e: tokio::sync::oneshot::error::RecvError) -> CompileError {
         CompileError::external(format!("{}", e).as_str())
     }
 }

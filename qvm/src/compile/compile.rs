@@ -1,3 +1,4 @@
+use snafu::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, LinkedList};
 use std::fs;
 use std::path::Path as FilePath;
@@ -89,10 +90,18 @@ macro_rules! c_try {
 }
 
 #[derive(Debug)]
+pub struct ExternalTypeHandle {
+    pub handle: tokio::task::JoinHandle<Result<()>>,
+    pub inner_type: CRef<MType>,
+    pub tx: tokio::sync::oneshot::Sender<bool>,
+}
+
+#[derive(Debug)]
 pub struct CompilerData {
     pub next_placeholder: usize,
     pub idle: Ref<tokio::sync::watch::Receiver<()>>,
     pub handles: LinkedList<tokio::task::JoinHandle<Result<()>>>,
+    pub external_types: LinkedList<ExternalTypeHandle>,
     pub files: BTreeMap<String, String>,
 }
 
@@ -156,6 +165,7 @@ impl Compiler {
                 next_placeholder: 1,
                 idle: mkref(idle_rx),
                 handles: LinkedList::new(),
+                external_types: LinkedList::new(),
                 files: BTreeMap::new(),
             }),
             builtins: schema.clone(),
@@ -228,6 +238,58 @@ impl Compiler {
 
             c_try!(result, idle.changed().await);
 
+            // Claim the set external types we've accrued within the compiler to reset things.
+            //
+            let mut external_types = LinkedList::new();
+            std::mem::swap(
+                &mut c_try!(result, self.data.write()).external_types,
+                &mut external_types,
+            );
+
+            let mut unresolved = 0;
+            for external_type in external_types {
+                // Check whether the type can be converted to a runtime type. If it errors
+                // out, then we know that the type is still unresolved.
+                if matches!(
+                    c_try!(
+                        result,
+                        c_try!(
+                            result,
+                            external_type.inner_type.must().context(RuntimeSnafu {
+                                loc: SourceLocation::Unknown
+                            })
+                        )
+                        .read()
+                    )
+                    .to_runtime_type(),
+                    Err(_)
+                ) {
+                    unresolved += 1;
+                    match external_type.tx.send(true) {
+                        Ok(()) => {}
+                        Err(_) => {
+                            // The oneshot channel sends the value itself back (i.e. the boolean true) in
+                            // the event of an error, so we handle it manually to create this error message.
+                            result.add_error(
+                                None,
+                                CompileError::external("Failed to trigger external type callback"),
+                            );
+                            continue;
+                        }
+                    };
+
+                    // There are two errors that can be thrown here: one from joining the task and the other
+                    // from the task itself.
+                    c_try!(result, c_try!(result, external_type.handle.await));
+                }
+            }
+
+            if unresolved > 0 {
+                // If there were any unresolved types, then loop around again (knowing that the thread will
+                // park at least once after the requisite work is done).
+                continue;
+            }
+
             // Claim the set of handles we've accrued within the compiler to reset things.
             //
             let mut handles = LinkedList::new();
@@ -281,6 +343,31 @@ impl Compiler {
         Ok(ret)
     }
 
+    pub fn add_external_type(
+        &self,
+        f: impl std::future::Future<Output = Result<()>> + Send + 'static,
+        inner_type: CRef<MType>,
+    ) -> Result<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        let mut data = self.data.write()?;
+        let cb = self.runtime.read()?.spawn(async move {
+            let should_run = rx.await?;
+            if should_run {
+                f.await?;
+            }
+            Ok(())
+        });
+
+        let handle = ExternalTypeHandle {
+            handle: cb,
+            inner_type,
+            tx,
+        };
+        data.external_types.push_back(handle);
+        Ok(())
+    }
+
     pub fn open_file(&self, file_path: &FilePath) -> Result<(String, Option<String>, ast::Schema)> {
         let parsed_path = FilePath::new(file_path);
         let file = parsed_path.to_str().unwrap().to_string();
@@ -330,7 +417,6 @@ pub fn lookup_schema(
         for p in path {
             file_path_buf.push(FilePath::new(&p.value));
         }
-        // XXX support .tql
         for extension in SCHEMA_EXTENSIONS.iter() {
             file_path_buf.set_extension(extension);
             if file_path_buf.as_path().exists() {
@@ -496,6 +582,10 @@ pub fn resolve_type(
         ast::TypeBody::Exclude { .. } => {
             return Err(CompileError::unimplemented(loc, "Struct exclusions"));
         }
+        ast::TypeBody::External(inner) => Ok(mkcref(MType::External(
+            loc,
+            resolve_type(compiler, schema, inner.as_ref())?,
+        ))),
     }
 }
 

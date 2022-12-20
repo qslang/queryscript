@@ -203,13 +203,6 @@ impl<T: 'static + Constrainable> CRef<T> {
         }
     }
 
-    pub fn constrain<F: 'static + Clone + Send + Sync + FnMut(Ref<T>) -> Result<()>>(
-        &self,
-        constraint: F,
-    ) -> Result<()> {
-        self.add_constraint(mkref(constraint.clone()))
-    }
-
     pub fn then<R: 'static + Constrainable, F: 'static + Clone + Send + Sync + Then<T, R>>(
         &self,
         mut callback: F,
@@ -256,6 +249,14 @@ impl<T: 'static + Constrainable> CRef<T> {
 
     // Private methods
     //
+
+    fn constrain<F: 'static + Clone + Send + Sync + FnMut(Ref<T>) -> Result<()>>(
+        &self,
+        constraint: F,
+    ) -> Result<()> {
+        self.add_constraint(mkref(constraint.clone()))
+    }
+
     fn add_constraint(&self, constraint: Ref<dyn Constraint<T>>) -> Result<()> {
         match &mut *self.find()?.write()? {
             Constrained::Known(t) => {

@@ -1,7 +1,7 @@
 use sqlparser::ast as sqlast;
 use std::{collections::HashMap, sync::Arc};
 
-use super::error::Result;
+use super::{error::Result, Context};
 use crate::types::{Relation, Type, Value};
 
 use async_trait::async_trait;
@@ -14,6 +14,7 @@ use async_trait::async_trait;
 pub trait SQLEngine: std::fmt::Debug + Send + Sync {
     async fn eval(
         &self,
+        ctx: &Context,
         query: &sqlast::Query,
         params: HashMap<String, SQLParam>,
     ) -> Result<Arc<dyn Relation>>;

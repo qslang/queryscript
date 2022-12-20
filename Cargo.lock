@@ -2579,6 +2579,7 @@ dependencies = [
  "hashlink",
  "lazy_static",
  "object_store",
+ "parquet",
  "serde",
  "snafu",
  "sqlparser",

@@ -27,6 +27,20 @@ pub enum RuntimeError {
     },
 
     #[snafu(context(false))]
+    ArrowErrror {
+        source: arrow::error::ArrowError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(context(false))]
+    ParquetError {
+        source: parquet::errors::ParquetError,
+        backtrace: Option<Backtrace>,
+    },
+
+    // NOTE: We should eventually make these feature-dependent errors
+    // (e.g. DataFusionError only needs to exist if the datafusion feature is on)
+    #[snafu(context(false))]
     DataFusionError {
         source: Arc<datafusion::common::DataFusionError>,
         backtrace: Option<Backtrace>,

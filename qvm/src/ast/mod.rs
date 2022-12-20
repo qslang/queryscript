@@ -235,6 +235,7 @@ pub enum TypeBody {
         inner: Box<Type>,
         excluded: Vec<Ident>,
     },
+    External(Box<Type>),
 }
 
 #[derive(Clone, Debug)]
