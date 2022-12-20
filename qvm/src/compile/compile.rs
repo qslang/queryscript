@@ -212,35 +212,46 @@ impl Compiler {
     async fn drive(&self) -> CompileResult<()> {
         let mut result = CompileResult::new(());
 
-        // This channel will be signaled by our `on_park` callback when the runtime attempts to
-        // park.  By blocking on it, we are ensured that control will be returned to this coroutine
-        // only when all other work has been exhausted, meaning we've completed all of the
-        // inference we possibly can.
-        //
-        // NOTE: Be careful not to hold the lock on `self.data` while we await this signal.  It's
-        // okay to hold the lock on the signal receiver itself, since only one instance of `drive`
-        // may be called concurrently.  To ensure this, use `try_write` instead of `write` and fail
-        // quickly if there is contention.
-        //
-        let idle = c_try!(result, self.data.read()).idle.clone();
-        let mut idle = c_try!(result, idle.try_write());
-        c_try!(result, idle.changed().await);
+        loop {
+            // This channel will be signaled by our `on_park` callback when the runtime attempts to
+            // park.  By blocking on it, we are ensured that control will be returned to this coroutine
+            // only when all other work has been exhausted, meaning we've completed all of the
+            // inference we possibly can.
+            //
+            // NOTE: Be careful not to hold the lock on `self.data` while we await this signal.  It's
+            // okay to hold the lock on the signal receiver itself, since only one instance of `drive`
+            // may be called concurrently.  To ensure this, use `try_write` instead of `write` and fail
+            // quickly if there is contention.
+            //
+            let idle = c_try!(result, self.data.read()).idle.clone();
+            let mut idle = c_try!(result, idle.try_write());
 
-        // Claim the set of handles we've accrued within the compiler to reset things.
-        //
-        let mut handles = LinkedList::new();
-        std::mem::swap(&mut c_try!(result, self.data.write()).handles, &mut handles);
+            c_try!(result, idle.changed().await);
 
-        // Each handle must either be checked for errors if completed, or aborted if not.
-        //
-        for handle in handles {
-            if handle.is_finished() {
-                match c_try!(result, handle.await) {
-                    Ok(_) => {}
-                    Err(e) => result.add_error(None, e.into()),
+            // Claim the set of handles we've accrued within the compiler to reset things.
+            //
+            let mut handles = LinkedList::new();
+            std::mem::swap(&mut c_try!(result, self.data.write()).handles, &mut handles);
+
+            // Each handle must either be checked for errors if completed, or aborted if not.
+            //
+            for handle in handles {
+                if handle.is_finished() {
+                    match c_try!(result, handle.await) {
+                        Ok(_) => {}
+                        Err(e) => result.add_error(None, e.into()),
+                    }
+                } else {
+                    handle.abort();
                 }
-            } else {
-                handle.abort();
+            }
+
+            // Between the above wait for idle and looping through the handles, the on_park() signal
+            // may have fired again. If so, then we need to loop around and check the handles again. Since
+            // we swap out the handles each time, we'll only check the handles that were added since the
+            // the last time we checked idle, which should be zero in the expected case.
+            if !c_try!(result, idle.has_changed()) {
+                break;
             }
         }
 

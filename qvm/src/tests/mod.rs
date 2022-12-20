@@ -163,12 +163,10 @@ mod tests {
                 .as_result()
                 .expect("Compiled first file");
 
-            {
-                for expr in schema.read().unwrap().exprs.iter() {
-                    let _ = expr
-                        .to_runtime_type()
-                        .expect("Failed to convert to runtime type");
-                }
+            for expr in schema.read().unwrap().exprs.iter() {
+                let _ = expr
+                    .to_runtime_type()
+                    .expect("Failed to convert to runtime type");
             }
         }
     }
