@@ -110,14 +110,11 @@ pub fn select_from(
     }
 }
 
-pub fn select_no_from(expr: sqlast::Expr) -> sqlast::Query {
+pub fn select_no_from(expr: sqlast::Expr, alias: Option<sqlast::Ident>) -> sqlast::Query {
     select_from(
-        vec![sqlast::SelectItem::ExprWithAlias {
-            expr,
-            alias: sqlast::Ident {
-                value: "value".to_string(),
-                quote_style: None,
-            },
+        vec![match alias {
+            Some(alias) => sqlast::SelectItem::ExprWithAlias { expr, alias },
+            None => sqlast::SelectItem::UnnamedExpr(expr),
         }],
         Vec::new(),
     )

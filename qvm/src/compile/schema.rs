@@ -13,7 +13,7 @@ use crate::compile::{
     coerce::{coerce_types, CoerceOp},
     error::*,
     inference::{mkcref, Constrainable, Constrained},
-    sql::{ident, select_no_from, select_star_from, with_table_alias},
+    sql::{ident, select_from, select_no_from, select_star_from, with_table_alias},
 };
 use crate::runtime;
 use crate::types::{AtomicType, Field, FnType, Type};
@@ -548,7 +548,7 @@ impl SQLBody {
     //
     pub fn as_query(&self) -> sqlast::Query {
         match self {
-            SQLBody::Expr(expr) => select_no_from(expr.clone()),
+            SQLBody::Expr(expr) => select_no_from(expr.clone(), None),
             SQLBody::Query(query) => query.clone(),
             SQLBody::Table(table) => select_star_from(table.clone()),
         }
@@ -558,12 +558,38 @@ impl SQLBody {
     //
     pub fn as_table(&self, alias: Option<sqlast::TableAlias>) -> sqlast::TableFactor {
         match self {
-            SQLBody::Expr(expr) => sqlast::TableFactor::UNNEST {
-                alias,
-                array_expr: Box::new(expr.clone()),
-                with_offset: false,
-                with_offset_alias: None,
-            },
+            SQLBody::Expr(expr) => SQLBody::Query(select_from(
+                // The result of the inner subquery is a relation of rows, each with a record field
+                // called "value".  This extra subquery splats the fields of "value" onto the top
+                // level of the query.
+                vec![sqlast::SelectItem::QualifiedWildcard(sqlast::ObjectName(
+                    vec![ident("value".to_string())],
+                ))],
+                vec![sqlast::TableWithJoins {
+                    // In order to get around a binder bug in duckdb, we have to put the unnest
+                    // call in a project list instead of as a table factor.  This results in a set
+                    // of rows, each with a single record field.
+                    //
+                    relation: SQLBody::Query(select_no_from(
+                        sqlast::Expr::Function(sqlast::Function {
+                            name: sqlast::ObjectName(vec![ident("unnest".to_string())]),
+                            args: vec![sqlast::FunctionArg::Unnamed(
+                                sqlast::FunctionArgExpr::Expr(expr.clone()),
+                            )],
+                            over: None,
+                            distinct: false,
+                            special: false,
+                        }),
+                        Some(ident("value".to_string())),
+                    ))
+                    .as_table(Some(sqlast::TableAlias {
+                        name: ident("unnest".to_string()),
+                        columns: Vec::new(),
+                    })),
+                    joins: Vec::new(),
+                }],
+            ))
+            .as_table(alias),
             SQLBody::Query(query) => sqlast::TableFactor::Derived {
                 lateral: false,
                 subquery: Box::new(query.clone()),
