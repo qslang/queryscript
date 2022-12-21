@@ -40,7 +40,7 @@
 			{
 				"language": "tql",
 				"scopeName": "source.sql",
-				"path": "./syntaxes/SQL.plist"
+				"path": "./syntaxes/TQL.plist"
 			}
 		],
 		"commands": [
