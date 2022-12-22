@@ -573,19 +573,19 @@ pub fn resolve_type(
                 }
             }
 
-            Ok(mkcref(MType::Record(MRecordType { loc, fields })))
+            Ok(mkcref(MType::Record(Located::new(fields, loc))))
         }
-        ast::TypeBody::List(inner) => Ok(mkcref(MType::List(MListType {
+        ast::TypeBody::List(inner) => Ok(mkcref(MType::List(Located::new(
+            resolve_type(compiler, schema, inner.as_ref())?,
             loc,
-            inner: resolve_type(compiler, schema, inner.as_ref())?,
-        }))),
+        )))),
         ast::TypeBody::Exclude { .. } => {
             return Err(CompileError::unimplemented(loc, "Struct exclusions"));
         }
-        ast::TypeBody::External(inner) => Ok(mkcref(MType::External(
-            loc,
+        ast::TypeBody::External(inner) => Ok(mkcref(MType::External(Located::new(
             resolve_type(compiler, schema, inner.as_ref())?,
-        ))),
+            loc,
+        )))),
     }
 }
 
@@ -634,31 +634,31 @@ pub fn typecheck_path(type_: CRef<MType>, path: &[Ident]) -> Result<CRef<MType>>
     let remainder = path[1..].to_vec();
 
     type_.then(move |type_: Ref<MType>| match &*type_.read()? {
-        MType::Record(MRecordType { loc, fields }) => {
-            if let Some(field) = find_field(&fields, name.value.as_str()) {
+        MType::Record(fields) => {
+            if let Some(field) = find_field(fields.get(), name.value.as_str()) {
                 typecheck_path(field.type_.clone(), remainder.as_slice())
             } else {
                 return Err(CompileError::wrong_type(
-                    &MType::Record(MRecordType {
-                        loc: loc.clone(),
-                        fields: vec![MField::new_nullable(
+                    &MType::Record(Located::new(
+                        vec![MField::new_nullable(
                             name.clone(),
                             MType::new_unknown("field"),
                         )],
-                    }),
+                        fields.location().clone(),
+                    )),
                     &*type_.read()?,
                 ));
             }
         }
         t => {
             return Err(CompileError::wrong_type(
-                &MType::Record(MRecordType {
-                    loc: t.location(),
-                    fields: vec![MField::new_nullable(
+                &MType::Record(Located::new(
+                    vec![MField::new_nullable(
                         name.clone(),
                         MType::new_unknown("field"),
                     )],
-                }),
+                    t.location().clone(),
+                )),
                 &*type_.read()?,
             ))
         }
@@ -1086,7 +1086,10 @@ pub fn compile_schema_entry(
                             public: true,
                             extern_: true,
                             name: generic.clone(),
-                            value: SchemaEntry::Type(mkcref(MType::Name(generic.clone()))),
+                            value: SchemaEntry::Type(mkcref(MType::Name(Located::new(
+                                generic.clone(),
+                                loc.clone(),
+                            )))),
                         },
                         loc.clone(),
                     ),
@@ -1156,11 +1159,13 @@ pub fn compile_schema_entry(
             }
 
             let fn_type = SType::new_poly(
-                mkcref(MType::Fn(MFnType {
-                    loc: loc.clone(),
-                    args: compiled_args,
-                    ret: compiled.type_.clone(),
-                })),
+                mkcref(MType::Fn(Located::new(
+                    MFnType {
+                        args: compiled_args,
+                        ret: compiled.type_.clone(),
+                    },
+                    loc,
+                ))),
                 BTreeSet::from_iter(generics.to_strings().into_iter()),
             );
 

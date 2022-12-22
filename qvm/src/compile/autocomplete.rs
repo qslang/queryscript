@@ -166,7 +166,7 @@ fn get_record_fields(
         .clone();
 
     match type_ {
-        schema::MType::Record(schema::MRecordType { fields, .. }) => {
+        schema::MType::Record(fields) => {
             return Ok(fields.iter().map(|f| f.name.value.clone()).collect());
         }
         _ => {}

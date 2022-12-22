@@ -68,8 +68,8 @@ pub fn get_rowtype(compiler: Compiler, relation: CRef<MType>) -> Result<CRef<MTy
         let reltype = r.await?;
         let locked = reltype.read()?;
         match &*locked {
-            MType::List(MListType { inner, .. }) => Ok(inner.clone()),
-            MType::External(_loc, inner_type) => get_rowtype(compiler, inner_type.clone()),
+            MType::List(inner) => Ok(inner.get().clone()),
+            MType::External(inner_type) => get_rowtype(compiler, inner_type.get().clone()),
             _ => Ok(relation.clone()),
         }
     })?)
@@ -441,7 +441,7 @@ impl SQLScope {
                         move |rowtype: Ref<MType>| {
                             let rowtype = rowtype.read()?.clone();
                             match &rowtype {
-                                MType::Record(MRecordType { fields, .. }) => Ok(mkcref(
+                                MType::Record(fields) => Ok(mkcref(
                                     fields
                                         .iter()
                                         .map(|field| FieldMatch {
@@ -491,8 +491,8 @@ impl SQLScope {
                     names.unbound.remove(&vec![relation.clone()]);
                     let rowtype = get_rowtype(compiler.clone(), expr.type_.clone())?.await?;
                     match &*rowtype.read()? {
-                        MType::Record(MRecordType { fields, .. }) => {
-                            for field in fields {
+                        MType::Record(fields) => {
+                            for field in fields.iter() {
                                 names
                                     .unbound
                                     .remove(&vec![relation.clone(), field.name.value.clone()]);
@@ -541,10 +541,10 @@ pub fn compile_relation(
             //
             let relation = compile_reference(compiler.clone(), schema.clone(), &name.to_path(loc))?;
 
-            let list_type = mkcref(MType::List(MListType {
-                loc: loc.clone(),
-                inner: MType::new_unknown(format!("FROM {}", name.to_string()).as_str()),
-            }));
+            let list_type = mkcref(MType::List(Located::new(
+                MType::new_unknown(format!("FROM {}", name.to_string()).as_str()),
+                loc.clone(),
+            )));
             list_type.unify(&relation.type_)?;
 
             let name = match alias {
@@ -944,13 +944,10 @@ pub fn compile_select(
                 }
             }
 
-            Ok(mkcref(MType::List(MListType {
-                loc: loc.clone(),
-                inner: mkcref(MType::Record(MRecordType {
-                    loc: loc.clone(),
-                    fields,
-                })),
-            })))
+            Ok(mkcref(MType::List(Located::new(
+                mkcref(MType::Record(Located::new(fields, loc.clone()))),
+                loc.clone(),
+            ))))
         }
     })?;
 
@@ -1353,10 +1350,10 @@ pub fn compile_sqlexpr(
     let ret = match expr {
         sqlast::Expr::Value(v) => match v {
             sqlast::Value::Number(n, _) => CTypedExpr {
-                type_: mkcref(MType::Atom(
-                    loc.clone(),
+                type_: mkcref(MType::Atom(Located::new(
                     parse_numeric_type(n).context(TypesystemSnafu { loc: loc.clone() })?,
-                )),
+                    loc.clone(),
+                ))),
                 expr: mkcref(Expr::SQL(Arc::new(SQL {
                     names: CSQLNames::new(),
                     body: SQLBody::Expr(expr.clone()),
@@ -1400,7 +1397,7 @@ pub fn compile_sqlexpr(
                 }
                 first.type_.clone()
             } else {
-                mkcref(MType::Atom(loc.clone(), AtomicType::Null))
+                mkcref(MType::Atom(Located::new(AtomicType::Null, loc.clone())))
             };
 
             CTypedExpr {
@@ -1636,11 +1633,13 @@ pub fn compile_sqlexpr(
                 MType::Fn(f) => f,
                 _ => {
                     return Err(CompileError::wrong_type(
-                        &MType::Fn(MFnType {
-                            loc: loc.clone(),
-                            args: Vec::new(),
-                            ret: MType::new_unknown("ret"),
-                        }),
+                        &MType::Fn(Located::new(
+                            MFnType {
+                                args: Vec::new(),
+                                ret: MType::new_unknown("ret"),
+                            },
+                            loc.clone(),
+                        )),
                         &*func
                             .type_
                             .must()
@@ -1757,7 +1756,7 @@ pub fn compile_sqlexpr(
                             .context(RuntimeSnafu { loc: loc.clone() })?
                             .read()?
                         {
-                            MType::External(_loc, inner_type) => {
+                            MType::External(inner_type) => {
                                 // TODO We should place some metadata on the function, or have a whitelist
                                 // of functions that work this way, but for now, we simply special case the
                                 // load function
@@ -1771,9 +1770,9 @@ pub fn compile_sqlexpr(
                                 let resolve = schema_infer_load_fn(
                                     schema.clone(),
                                     args.clone(),
-                                    inner_type.clone(),
+                                    inner_type.get().clone(),
                                 );
-                                compiler.add_external_type(resolve, inner_type.clone())?;
+                                compiler.add_external_type(resolve, inner_type.get().clone())?;
                             }
                             _ => {}
                         }
