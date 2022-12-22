@@ -281,7 +281,7 @@ impl LanguageServer for Backend {
 
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
         let uri = params.text_document.uri;
-        let schema = self.get_schema(&uri)?;
+        let schema = self.get_schema(&uri).await?;
 
         let mut lenses = Vec::new();
         for (idx, expr) in schema
@@ -504,25 +504,24 @@ impl Backend {
         Ok(())
     }
 
-    fn get_schema(&self, uri: &Url) -> Result<SchemaRef> {
-        let schema = task::block_in_place(|| {
-            Ok(self
-                .documents
+    async fn get_schema(&self, uri: &Url) -> Result<SchemaRef> {
+        let entry = {
+            self.documents
                 .read()
                 .map_err(log_internal_error)?
                 .get(&uri.to_string())
                 .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?
-                .blocking_lock()
-                .schema
-                .clone())
-        })?;
+                .clone()
+        };
+
+        let schema = entry.lock().await.schema.clone();
         Ok(schema)
     }
 
     async fn run_expr(&self, params: RunExprParams) -> Result<RunExprResult> {
         let uri = Url::parse(&params.uri)
             .map_err(|_| Error::invalid_params("Invalid URI".to_string()))?;
-        let schema_ref = self.get_schema(&uri)?;
+        let schema_ref = self.get_schema(&uri).await?;
 
         let expr = {
             // We have to stuff "schema" into this block, because it cannot be held across an await point.
