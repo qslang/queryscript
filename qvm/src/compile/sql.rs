@@ -1474,6 +1474,25 @@ pub fn compile_sqlexpr(
                     (cleft, cright) = (casted[0].clone(), casted[1].clone());
                     resolve_global_atom(compiler.clone(), "bool")?
                 }
+
+                And | Or | Xor | BitwiseOr | BitwiseAnd | BitwiseXor | PGBitwiseXor
+                | PGBitwiseShiftLeft | PGBitwiseShiftRight => {
+                    let bool_val = CTypedSQL {
+                        type_: resolve_global_atom(compiler.clone(), "bool")?,
+                        sql: mkcref(SQL {
+                            names: CSQLNames::new(),
+                            body: SQLBody::Expr(sqlast::Expr::Value(sqlast::Value::Null)),
+                        }),
+                    };
+                    let (_, casted) = coerce_all(
+                        &compiler,
+                        &op,
+                        vec![cleft, cright, bool_val],
+                        format!("{:?}", op).as_str(),
+                    )?;
+                    (cleft, cright) = (casted[0].clone(), casted[1].clone());
+                    resolve_global_atom(compiler.clone(), "bool")?
+                }
                 _ => {
                     return Err(CompileError::unimplemented(
                         loc.clone(),
