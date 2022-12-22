@@ -4,7 +4,7 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::path::Path as FilePath;
 use std::sync::{Arc, Mutex, RwLock};
-use tokio::{sync::Mutex as TokioMutex, task};
+use tokio::{sync::Mutex as TokioMutex, sync::RwLock as TokioRwLock, task};
 
 use tower_lsp::jsonrpc::{Error, Result};
 use tower_lsp::{lsp_types::*, LspServiceBuilder};
@@ -52,7 +52,7 @@ pub struct Backend {
     client: Client,
     configuration: Arc<RwLock<Configuration>>,
     settings: Arc<RwLock<BTreeMap<String, ExampleSettings>>>,
-    documents: Arc<RwLock<BTreeMap<String, Arc<TokioMutex<Document>>>>>,
+    documents: Arc<TokioRwLock<BTreeMap<String, Arc<TokioMutex<Document>>>>>,
 
     // We use a mutex for the compiler, because we want to serialize compilation
     // (not sure if the compiler can interleave multiple compilations correctly,
@@ -80,7 +80,7 @@ impl Backend {
                 has_diagnostic_related_information_capability: false,
             })),
             settings: Arc::new(RwLock::new(BTreeMap::new())),
-            documents: Arc::new(RwLock::new(BTreeMap::new())),
+            documents: Arc::new(TokioRwLock::new(BTreeMap::new())),
             compiler,
         }
     }
@@ -212,14 +212,17 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
-        eprintln!("FILE CONTENTS CHANGED");
         let uri = params.text_document.uri;
         let version = params.text_document.version;
 
         // NOTE: If we change this to INCREMENTAL we'll need to recompute the new document text
         let text = params.content_changes.swap_remove(0).text;
 
+        let uri_s = uri.to_string();
+
+        eprintln!("CHANGED {:?}!", uri_s);
         let _ = self.on_change(uri, text, Some(version)).await;
+        eprintln!("DONE COMPILING CHANGE {:?}!", uri_s);
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
@@ -227,7 +230,11 @@ impl LanguageServer for Backend {
         let version = params.text_document.version;
         let text = params.text_document.text;
 
+        let uri_s = uri.to_string();
+
+        eprintln!("OPENED {:?}!", uri_s);
         let _ = self.on_change(uri, text, Some(version)).await;
+        eprintln!("DONE COMPILING OPEN {:?}!", uri_s);
     }
 
     async fn did_change_watched_files(&self, _params: DidChangeWatchedFilesParams) {
@@ -281,6 +288,7 @@ impl LanguageServer for Backend {
 
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
         let uri = params.text_document.uri;
+        eprintln!("code lens {:?}!", uri.to_string());
         let schema = self.get_schema(&uri).await?;
 
         let mut lenses = Vec::new();
@@ -425,63 +433,76 @@ impl Backend {
             .map(String::from);
 
         // Get the existing document or insert a new one, and lock it (while holding the write lock on documents).
-        let document = {
-            let mut documents = self.documents.write().map_err(log_internal_error)?;
+        let mut documents = self.documents.write().await;
 
-            let document = Document {
-                uri,
-                version,
-                text,
-                schema: Schema::new(file.clone(), folder),
-            };
-
-            let mut document_entry = documents.entry(document.uri.to_string());
-            match document_entry {
-                Entry::Vacant(entry) => {
-                    let new_val = entry.insert(Arc::new(TokioMutex::new(document)));
-                    let new_val = new_val.clone();
-                    task::block_in_place(|| TokioMutex::blocking_lock_owned(new_val))
-                }
-                Entry::Occupied(ref mut entry) => {
-                    let mut existing =
-                        task::block_in_place(|| entry.get().clone().blocking_lock_owned());
-                    *existing = document;
-                    existing
-                }
-            }
+        let document = Document {
+            uri,
+            version,
+            text,
+            schema: Schema::new(file.clone(), folder),
         };
 
         // We need to hold the write lock throughout the whole compilation process, because we don't
-        // want others to read the (uninitialized) schema. There are surely better ways to do this, e.g.
-        // making each document itself an Arc<RwLock<Document>> and synchronizing the documents map with
-        // a simple mutex, but this was simpler (for now).
-        let (uri, compile_result) = {
-            let ast = match parse_schema(&document.uri.path(), &document.text) {
-                Ok(ast) => ast,
-                Err(e) => {
-                    // XXX Fix this to send the error as a diagnostic (w/ the location)
-                    eprintln!("ERROR (that should be sent as a diagnostic): {:?}", e);
-                    return Ok(());
-                }
-            };
-
-            let schema = document.schema.clone();
-            let compiler = self.compiler.clone();
-
-            let compile_result = task::spawn_blocking(move || {
-                let compiler = compiler.lock().map_err(log_internal_error)?;
-                Ok(compiler.compile_schema_ast(schema.clone(), &ast))
-            })
-            .await
-            .map_err(log_internal_error)??;
-
-            (document.uri.clone(), compile_result)
+        // want others to read the (uninitialized) schema. We do this by keeping the write lock on
+        // documents while locking the entry, and then release that lock before processing the document.
+        let mut document_entry = documents.entry(document.uri.to_string());
+        let document = match document_entry {
+            Entry::Vacant(entry) => {
+                let new_val = entry.insert(Arc::new(TokioMutex::new(document)));
+                let new_val = new_val.clone();
+                new_val.lock_owned().await
+            }
+            Entry::Occupied(ref mut entry) => {
+                let inner_entry = entry.get().clone();
+                let mut existing = inner_entry.lock_owned().await;
+                *existing = document;
+                existing
+            }
         };
 
-        // Now that the schema is updated, we no longer need a lock on the document
+        // Release the write lock on the documents map while we compile the document.
+        drop(documents);
+
+        let diagnostics = self.compile_document(&document).await?;
+        let uri = document.uri.clone();
         drop(document);
 
+        self.client
+            .publish_diagnostics(uri, diagnostics, version)
+            .await;
+
+        Ok(())
+    }
+
+    async fn compile_document(&self, document: &Document) -> Result<Vec<Diagnostic>> {
         let mut diagnostics = Vec::new();
+        let ast = match parse_schema(&document.uri.path(), &document.text) {
+            Ok(ast) => ast,
+            Err(err) => {
+                // XXX Fix this to send the error as a diagnostic (w/ the location)
+                if let Some(range) = err.location().normalize() {
+                    diagnostics.push(Diagnostic {
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        range,
+                        message: err.pretty(),
+                        source: Some("qvm".to_string()),
+                        ..Default::default()
+                    });
+                }
+                return Ok(diagnostics);
+            }
+        };
+
+        let schema = document.schema.clone();
+        let compiler = self.compiler.clone();
+
+        let compile_result = task::spawn_blocking(move || {
+            let compiler = compiler.lock().map_err(log_internal_error)?;
+            Ok(compiler.compile_schema_ast(schema.clone(), &ast))
+        })
+        .await
+        .map_err(log_internal_error)??;
+
         for (_idx, err) in compile_result.errors {
             let range = match err.location().normalize() {
                 Some(range) => range,
@@ -497,18 +518,14 @@ impl Backend {
             });
         }
 
-        self.client
-            .publish_diagnostics(uri, diagnostics, version)
-            .await;
-
-        Ok(())
+        Ok(diagnostics)
     }
 
     async fn get_schema(&self, uri: &Url) -> Result<SchemaRef> {
         let entry = {
             self.documents
                 .read()
-                .map_err(log_internal_error)?
+                .await
                 .get(&uri.to_string())
                 .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?
                 .clone()
