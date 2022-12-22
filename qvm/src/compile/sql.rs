@@ -1605,14 +1605,11 @@ pub fn compile_sqlexpr(
             args,
             over,
             distinct,
-            ..
+            special,
         }) => {
-            if *distinct {
-                return Err(CompileError::unimplemented(
-                    loc.clone(),
-                    format!("Function calls with DISTINCT").as_str(),
-                ));
-            }
+            let distinct = *distinct;
+            let special = *special;
+            let over = over.clone();
 
             if over.is_some() {
                 return Err(CompileError::unimplemented(
@@ -1892,11 +1889,9 @@ pub fn compile_sqlexpr(
                                         name,
                                         args,
 
-                                        // TODO: We may want to forward these fields from the
-                                        // expr (but doing that blindly causes ownership errors)
-                                        over: None,
-                                        distinct: false,
-                                        special: false,
+                                        over,
+                                        distinct,
+                                        special,
                                     })),
                                 }))))
                             }
