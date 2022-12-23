@@ -12,82 +12,9 @@ use crate::compile::error::*;
 use crate::compile::inference::*;
 use crate::compile::schema::*;
 use crate::compile::sql::*;
-use crate::{parser, parser::parse_schema};
+use crate::{c_try, error::MultiResult, parser, parser::parse_schema};
 
-#[derive(Debug)]
-pub struct CompileResult<V> {
-    pub result: V,
-    pub errors: Vec<(Option<usize>, CompileError)>,
-}
-
-impl<V> CompileResult<V> {
-    pub fn new(result: V) -> CompileResult<V> {
-        CompileResult {
-            result,
-            errors: Vec::new(),
-        }
-    }
-
-    pub fn map<U, F>(self, f: F) -> CompileResult<U>
-    where
-        F: FnOnce(V) -> U,
-    {
-        CompileResult {
-            result: f(self.result),
-            errors: self.errors,
-        }
-    }
-
-    pub fn add_error(&mut self, idx: Option<usize>, error: CompileError) {
-        match error {
-            CompileError::Multiple { sources } => {
-                for source in sources {
-                    self.add_error(idx, source);
-                }
-            }
-            _ => self.errors.push((idx, error)),
-        }
-    }
-
-    pub fn absorb<U>(&mut self, other: CompileResult<U>) -> U {
-        self.errors.extend(other.errors);
-        other.result
-    }
-
-    pub fn replace(&mut self, other: CompileResult<V>) {
-        self.result = other.result;
-        self.errors.extend(other.errors);
-    }
-
-    pub fn expect(self, debug: &str) -> V {
-        if self.errors.len() == 0 {
-            self.result
-        } else {
-            panic!("{:?}: {:?}", debug, self.errors);
-        }
-    }
-
-    pub fn as_result(mut self) -> Result<V> {
-        match self.errors.len() {
-            0 => Ok(self.result),
-            _ => Err(CompileError::Multiple {
-                sources: self.errors.drain(..).map(|e| e.1).collect(),
-            }),
-        }
-    }
-}
-
-macro_rules! c_try {
-    ($result: expr, $expr: expr) => {
-        match $expr {
-            Ok(v) => v,
-            Err(e) => {
-                $result.add_error(None, e.into());
-                return $result;
-            }
-        }
-    };
-}
+type CompileResult<T> = MultiResult<T, CompileError>;
 
 #[derive(Debug)]
 pub struct ExternalTypeHandle {

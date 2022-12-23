@@ -1,6 +1,7 @@
 use crate::ast;
 use crate::ast::Pretty;
 use crate::compile::schema::{Decl, MType};
+use crate::error::MultiError;
 pub use crate::parser::error::ErrorLocation;
 use crate::parser::error::{ParserError, PrettyError};
 use crate::runtime::error::RuntimeError;
@@ -285,5 +286,19 @@ impl From<tokio::sync::watch::error::RecvError> for CompileError {
 impl From<std::io::Error> for CompileError {
     fn from(e: std::io::Error) -> CompileError {
         CompileError::external(format!("{}", e).as_str())
+    }
+}
+
+impl MultiError for CompileError {
+    fn new_multi_error(errs: Vec<Self>) -> Self {
+        CompileError::Multiple { sources: errs }
+    }
+    fn into_errors(self) -> Vec<Self> {
+        match self {
+            CompileError::Multiple { sources } => {
+                sources.into_iter().flat_map(|e| e.into_errors()).collect()
+            }
+            _ => vec![self],
+        }
     }
 }

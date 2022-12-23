@@ -1,5 +1,6 @@
 use crate::parser::error::{ErrorLocation, FormattedError, PrettyError};
 use snafu::{Backtrace, ErrorCompat, Snafu};
+use std::fmt;
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
@@ -104,4 +105,80 @@ impl From<crate::compile::error::CompileError> for QVMError {
             _ => QVMError::CompileError { source: e },
         }
     }
+}
+
+pub trait MultiError: fmt::Debug + Sized {
+    fn new_multi_error(errs: Vec<Self>) -> Self;
+    fn into_errors(self) -> Vec<Self>;
+}
+
+#[derive(Debug)]
+pub struct MultiResult<V, E: MultiError> {
+    pub result: V,
+    pub errors: Vec<(Option<usize>, E)>,
+}
+
+impl<V, E: MultiError> MultiResult<V, E> {
+    pub fn new(result: V) -> MultiResult<V, E> {
+        MultiResult {
+            result,
+            errors: Vec::new(),
+        }
+    }
+
+    pub fn map<U, F>(self, f: F) -> MultiResult<U, E>
+    where
+        F: FnOnce(V) -> U,
+    {
+        MultiResult {
+            result: f(self.result),
+            errors: self.errors,
+        }
+    }
+
+    pub fn add_error(&mut self, idx: Option<usize>, error: E) {
+        for err in error.into_errors() {
+            self.errors.push((idx, err))
+        }
+    }
+
+    pub fn absorb<U>(&mut self, other: MultiResult<U, E>) -> U {
+        self.errors.extend(other.errors);
+        other.result
+    }
+
+    pub fn replace(&mut self, other: MultiResult<V, E>) {
+        self.result = other.result;
+        self.errors.extend(other.errors);
+    }
+
+    pub fn expect(self, debug: &str) -> V {
+        if self.errors.len() == 0 {
+            self.result
+        } else {
+            panic!("{:?}: {:?}", debug, self.errors);
+        }
+    }
+
+    pub fn as_result(mut self) -> Result<V, E> {
+        match self.errors.len() {
+            0 => Ok(self.result),
+            _ => Err(E::new_multi_error(
+                self.errors.drain(..).map(|e| e.1).collect(),
+            )),
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! c_try {
+    ($result: expr, $expr: expr) => {
+        match $expr {
+            Ok(v) => v,
+            Err(e) => {
+                $result.add_error(None, e.into());
+                return $result;
+            }
+        }
+    };
 }
