@@ -1,4 +1,5 @@
 use clap::Parser;
+use colored::Colorize;
 use snafu::{prelude::*, whatever};
 use std::fs;
 use std::path::Path;
@@ -35,6 +36,10 @@ struct Cli {
 
     #[arg(long)]
     no_inlining: bool,
+
+    /// Ignore compilation errors and continue executing queries
+    #[arg(long)]
+    ignore_errors: bool,
 }
 
 enum Mode {
@@ -82,7 +87,15 @@ fn main_result() -> Result<(), QVMError> {
                 allow_inlining: !cli.no_inlining,
                 ..Default::default()
             })?;
-            match run_file(compiler.clone(), &rt, engine_type, &file, mode, cli.execute) {
+            match run_file(
+                compiler.clone(),
+                &rt,
+                engine_type,
+                &file,
+                mode,
+                cli.execute,
+                cli.ignore_errors,
+            ) {
                 Err(err) => {
                     let errs = if cli.verbose {
                         err.format_backtrace()
@@ -126,6 +139,7 @@ fn run_file(
     file: &str,
     mode: Mode,
     execute: Option<String>,
+    ignore_errors: bool,
 ) -> Result<(), QVMError> {
     let path = Path::new(&file);
     if !path.exists() {
@@ -145,10 +159,30 @@ fn run_file(
         return Ok(());
     }
 
-    let schema = compiler
-        .compile_schema_from_file(&Path::new(&file))
-        .as_result()?
-        .unwrap();
+    let schema_result = compiler.compile_schema_from_file(&Path::new(&file));
+
+    let schema = if ignore_errors {
+        let schema = schema_result.result.unwrap();
+        if schema_result.errors.len() > 0 {
+            let contents = compiler.file_contents()?;
+            let err_msg = schema_result
+                .errors
+                .iter()
+                .map(|(_idx, e)| e.pretty_with_code(&contents.files))
+                .collect::<Vec<_>>()
+                .join("\n");
+            eprintln!(
+                "{}\n{}\n",
+                "Compilation errors (will ignore and attempt to continue execution):"
+                    .white()
+                    .bold(),
+                err_msg
+            );
+        }
+        schema
+    } else {
+        schema_result.as_result()?.unwrap()
+    };
 
     if let Some(execute) = &execute {
         // Add a semicolon on so that it's not required in the last expression within the argument
