@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::cell::RefCell;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::path::Path as FilePath;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::{sync::Mutex as TokioMutex, sync::RwLock as TokioRwLock, task};
 
@@ -12,7 +14,11 @@ use tower_lsp::{Client, LanguageServer};
 
 use qvm::{
     ast::SourceLocation,
-    compile::{schema::SchemaEntry, Compiler, Schema, SchemaRef},
+    compile::{
+        autocomplete::{loc_to_pos, pos_to_loc, AutoCompleter},
+        schema::SchemaEntry,
+        Compiler, Schema, SchemaRef,
+    },
     parser::{error::PrettyError, parse_schema},
     runtime,
     types::{Type as QVMType, Value as QVMValue},
@@ -241,48 +247,64 @@ impl LanguageServer for Backend {
         eprintln!("We receved a file change event.");
     }
 
-    // TODO: Implement real completion logic
-    async fn completion(&self, _params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        let completions = vec![
-            CompletionItem {
-                label: "TypeScript".to_string(),
-                kind: Some(CompletionItemKind::TEXT),
-                data: Some(1.into()),
-                ..Default::default()
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        eprintln!("Starting completion");
+        let loc = params.text_document_position.position;
+        let uri = params.text_document_position.text_document.uri.clone();
+        let file = uri.path().to_string();
+
+        let folder = FilePath::new(uri.path())
+            .parent()
+            .map(|p| p.to_str().unwrap())
+            .map(String::from);
+
+        let text = self.get_text(&uri).await?;
+        let pos = loc_to_pos(
+            text.as_str(),
+            qvm::ast::Location {
+                line: (loc.line + 1) as u64,
+                column: (loc.character + 1) as u64,
             },
-            CompletionItem {
-                label: "JavaScript".to_string(),
-                kind: Some(CompletionItemKind::TEXT),
-                data: Some(2.into()),
-                ..Default::default()
-            },
-        ];
-        Ok(Some(CompletionResponse::Array(completions)))
+        );
+
+        let compiler = self.compiler.clone();
+        let (start_pos, suggestions) = task::spawn_blocking({
+            let text = text.clone();
+            move || -> Result<_> {
+                let compiler = compiler.lock().map_err(log_internal_error)?;
+                let autocompleter = AutoCompleter::new(
+                    compiler.clone(),
+                    Schema::new(file, folder),
+                    Rc::new(RefCell::new(String::new())),
+                );
+                Ok(autocompleter.auto_complete(text.as_str(), pos))
+            }
+        })
+        .await
+        .map_err(log_internal_error)?
+        .map_err(log_internal_error)?;
+        let start_loc = pos_to_loc(text.as_str(), start_pos);
+
+        Ok(Some(CompletionResponse::List(CompletionList {
+            is_incomplete: true,
+            items: suggestions
+                .iter()
+                .map(|s| CompletionItem {
+                    label: s.clone(),
+                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                        range: Range {
+                            start: start_loc.normalize(),
+                            end: loc,
+                        },
+                        new_text: s.clone(),
+                    })),
+                    ..Default::default()
+                })
+                .collect(),
+        })))
     }
 
-    // TODO: Implement real completion logic
     async fn completion_resolve(&self, item: CompletionItem) -> Result<CompletionItem> {
-        if let Some(data) = &item.data {
-            if let serde_json::Value::Number(n) = data {
-                if n.as_u64() == Some(1) {
-                    return Ok(CompletionItem {
-                        detail: Some("TypeScript details".to_string()),
-                        documentation: Some(Documentation::String(
-                            "TypeScript documentation".to_string(),
-                        )),
-                        ..item
-                    });
-                } else if n.as_u64() == Some(2) {
-                    return Ok(CompletionItem {
-                        detail: Some("JavaScript details".to_string()),
-                        documentation: Some(Documentation::String(
-                            "JavaScript documentation".to_string(),
-                        )),
-                        ..item
-                    });
-                }
-            }
-        }
         Ok(item)
     }
 
@@ -535,6 +557,20 @@ impl Backend {
         Ok(schema)
     }
 
+    async fn get_text(&self, uri: &Url) -> Result<String> {
+        let entry = {
+            self.documents
+                .read()
+                .map_err(log_internal_error)?
+                .get(&uri.to_string())
+                .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?
+                .clone()
+        };
+
+        let text = entry.lock().await.text.clone();
+        Ok(text)
+    }
+
     async fn run_expr(&self, params: RunExprParams) -> Result<RunExprResult> {
         let uri = Url::parse(&params.uri)
             .map_err(|_| Error::invalid_params("Invalid URI".to_string()))?;
@@ -604,20 +640,28 @@ trait NormalizeRange {
 
 impl NormalizeRange for SourceLocation {
     fn normalize(&self) -> Option<Range> {
-        let (start_line, start_col, end_line, end_col) = match self.range() {
+        let (start, end) = match self.range() {
             Some(loc) => loc,
             None => return None, // In this case, we may want to send file-level diagnostics?
         };
         // The locations are 1-indexed, but LSP diagnostics are 0-indexed
         Some(Range {
-            start: Position {
-                line: (start_line - 1) as u32,
-                character: (start_col - 1) as u32,
-            },
-            end: Position {
-                line: (end_line - 1) as u32,
-                character: (end_col - 1) as u32,
-            },
+            start: start.normalize(),
+            end: end.normalize(),
         })
+    }
+}
+
+trait NormalizePosition {
+    fn normalize(&self) -> Position;
+}
+
+impl NormalizePosition for qvm::ast::Location {
+    fn normalize(&self) -> Position {
+        // The locations are 1-indexed, but LSP diagnostics are 0-indexed
+        Position {
+            line: (self.line - 1) as u32,
+            character: (self.column - 1) as u32,
+        }
     }
 }

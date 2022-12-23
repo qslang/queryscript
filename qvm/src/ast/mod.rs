@@ -17,11 +17,11 @@ pub enum SourceLocation {
 
 impl SourceLocation {
     // XXX can we delete this function?
-    pub fn range(&self) -> Option<(u64, u64, u64, u64)> {
+    pub fn range(&self) -> Option<(Location, Location)> {
         Some(match self {
             SourceLocation::Unknown | SourceLocation::File(_) => return None,
-            SourceLocation::Single(_, l) => (l.line, l.column, l.line, l.column),
-            SourceLocation::Range(_, s, e) => (s.line, s.column, e.line, e.column),
+            SourceLocation::Single(_, l) => (l.clone(), l.clone()),
+            SourceLocation::Range(_, s, e) => (s.clone(), e.clone()),
         })
     }
 

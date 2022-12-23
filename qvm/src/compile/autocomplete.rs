@@ -62,7 +62,7 @@ impl AutoCompleter {
     }
 }
 
-fn pos_to_loc(text: &str, pos: usize) -> parser::Location {
+pub fn pos_to_loc(text: &str, pos: usize) -> parser::Location {
     let line: u64 = (text[..pos]
         .as_bytes()
         .iter()
@@ -73,7 +73,7 @@ fn pos_to_loc(text: &str, pos: usize) -> parser::Location {
     parser::Location { line, column }
 }
 
-fn loc_to_pos(text: &str, loc: parser::Location) -> usize {
+pub fn loc_to_pos(text: &str, loc: parser::Location) -> usize {
     text.split('\n').collect::<Vec<_>>()[..(loc.line - 1) as usize]
         .iter()
         .map(|l| l.len() + 1)
