@@ -207,7 +207,10 @@ impl Compiler {
 
                     // There are two errors that can be thrown here: one from joining the task and the other
                     // from the task itself.
-                    c_try!(result, c_try!(result, external_type.handle.await));
+                    match c_try!(result, external_type.handle.await) {
+                        Ok(_) => {}
+                        Err(e) => result.add_error(None, e.into()),
+                    }
                 }
             }
 
