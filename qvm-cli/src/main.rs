@@ -140,7 +140,7 @@ fn run_file(
         };
         let (tokens, eof) = parser::tokenize(file, &contents)?;
         let mut parser = parser::Parser::new(file, tokens, eof);
-        let schema = parser.parse_schema()?;
+        let schema = parser.parse_schema().as_result()?;
         println!("{:#?}", schema);
         return Ok(());
     }

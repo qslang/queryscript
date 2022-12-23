@@ -136,14 +136,19 @@ impl<V, E: MultiError> MultiResult<V, E> {
         }
     }
 
+    pub fn set_result(&mut self, value: V) {
+        self.result = value;
+    }
+
     pub fn add_error(&mut self, idx: Option<usize>, error: E) {
         for err in error.into_errors() {
             self.errors.push((idx, err))
         }
     }
 
-    pub fn absorb<U>(&mut self, other: MultiResult<U, E>) -> U {
-        self.errors.extend(other.errors);
+    pub fn absorb<U, E2: MultiError + Into<E>>(&mut self, other: MultiResult<U, E2>) -> U {
+        self.errors
+            .extend(other.errors.into_iter().map(|(idx, err)| (idx, err.into())));
         other.result
     }
 
@@ -160,6 +165,10 @@ impl<V, E: MultiError> MultiResult<V, E> {
         }
     }
 
+    pub fn unwrap(self) -> V {
+        self.expect("error")
+    }
+
     pub fn as_result(mut self) -> Result<V, E> {
         match self.errors.len() {
             0 => Ok(self.result),
@@ -167,6 +176,10 @@ impl<V, E: MultiError> MultiResult<V, E> {
                 self.errors.drain(..).map(|e| e.1).collect(),
             )),
         }
+    }
+
+    pub fn ok(self) -> V {
+        self.result
     }
 }
 

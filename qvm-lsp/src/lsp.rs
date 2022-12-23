@@ -19,6 +19,7 @@ use qvm::{
         schema::SchemaEntry,
         Compiler, Schema, SchemaRef,
     },
+    error::MultiError,
     parser::{error::PrettyError, parse_schema},
     runtime,
     types::{Type as QVMType, Value as QVMValue},
@@ -498,18 +499,20 @@ impl Backend {
 
     async fn compile_document(&self, document: &Document) -> Result<Vec<Diagnostic>> {
         let mut diagnostics = Vec::new();
-        let ast = match parse_schema(&document.uri.path(), &document.text) {
+        let ast = match parse_schema(&document.uri.path(), &document.text).as_result() {
             Ok(ast) => ast,
             Err(err) => {
                 // XXX Fix this to send the error as a diagnostic (w/ the location)
-                if let Some(range) = err.location().normalize() {
-                    diagnostics.push(Diagnostic {
-                        severity: Some(DiagnosticSeverity::ERROR),
-                        range,
-                        message: err.pretty(),
-                        source: Some("qvm".to_string()),
-                        ..Default::default()
-                    });
+                for err in err.into_errors() {
+                    if let Some(range) = err.location().normalize() {
+                        diagnostics.push(Diagnostic {
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            range,
+                            message: err.pretty(),
+                            source: Some("qvm".to_string()),
+                            ..Default::default()
+                        });
+                    }
                 }
                 return Ok(diagnostics);
             }

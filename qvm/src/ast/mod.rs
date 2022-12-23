@@ -281,6 +281,7 @@ pub enum FnBody {
 #[derive(Clone, Debug)]
 pub enum StmtBody {
     Noop,
+    Unparsed,
     Expr(Expr),
     Import {
         path: Path,

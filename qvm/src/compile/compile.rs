@@ -118,7 +118,7 @@ impl Compiler {
         let mut result = CompileResult::new(());
         let (tokens, eof) = c_try!(result, parser::tokenize("<string>", text));
         let mut parser = parser::Parser::new("<string>", tokens, eof);
-        let schema_ast = c_try!(result, parser.parse_schema());
+        let schema_ast = result.absorb(parser.parse_schema());
         result.absorb(self.compile_schema_ast(schema.clone(), &schema_ast));
         result
     }
@@ -316,7 +316,7 @@ impl Compiler {
         Ok((
             file,
             folder,
-            parse_schema(parsed_path.to_str().unwrap(), contents)?,
+            parse_schema(parsed_path.to_str().unwrap(), contents).as_result()?,
         ))
     }
 
@@ -709,7 +709,7 @@ pub fn declare_schema_entry(
         stmt.end.clone(),
     );
     let entries: Vec<(Ident, bool, SchemaEntry)> = match &stmt.body {
-        ast::StmtBody::Noop => Vec::new(),
+        ast::StmtBody::Noop | ast::StmtBody::Unparsed => Vec::new(),
         ast::StmtBody::Expr(_) => Vec::new(),
         ast::StmtBody::Import { path, list, .. } => {
             let imported = lookup_schema(compiler.clone(), schema.clone(), &path)?;
@@ -984,7 +984,7 @@ pub fn compile_schema_entry(
         stmt.end.clone(),
     );
     match &stmt.body {
-        ast::StmtBody::Noop => {}
+        ast::StmtBody::Noop | ast::StmtBody::Unparsed => {}
         ast::StmtBody::Expr(expr) => {
             let compiled = compile_expr(compiler.clone(), schema.clone(), expr)?;
             schema.write()?.exprs.push(Located::new(compiled, loc));

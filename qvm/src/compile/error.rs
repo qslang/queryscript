@@ -298,6 +298,9 @@ impl MultiError for CompileError {
             CompileError::Multiple { sources } => {
                 sources.into_iter().flat_map(|e| e.into_errors()).collect()
             }
+            CompileError::SyntaxError { source } => {
+                source.into_errors().into_iter().map(Into::into).collect()
+            }
             _ => vec![self],
         }
     }

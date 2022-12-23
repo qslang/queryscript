@@ -4,6 +4,7 @@ use std::fmt;
 pub type Result<T> = std::result::Result<T, ParserError>;
 pub use crate::ast::SourceLocation as ErrorLocation;
 use crate::ast::{Location, Pretty};
+use crate::error::MultiError;
 use colored::*;
 
 pub trait PrettyError: ToString {
@@ -76,6 +77,13 @@ pub enum ParserError {
         backtrace: Option<Backtrace>,
         loc: ErrorLocation,
     },
+
+    #[snafu(display("{}", sources.first().unwrap()))]
+    Multiple {
+        // This is assumed to be non-empty
+        //
+        sources: Vec<ParserError>,
+    },
 }
 
 impl PrettyError for ParserError {
@@ -92,6 +100,21 @@ impl PrettyError for ParserError {
                 },
             ),
             ParserError::SQLParserError { loc, .. } => loc.clone(),
+            ParserError::Multiple { sources } => sources.first().unwrap().location(),
+        }
+    }
+}
+
+impl MultiError for ParserError {
+    fn new_multi_error(errs: Vec<Self>) -> Self {
+        ParserError::Multiple { sources: errs }
+    }
+    fn into_errors(self) -> Vec<Self> {
+        match self {
+            ParserError::Multiple { sources } => {
+                sources.into_iter().flat_map(|e| e.into_errors()).collect()
+            }
+            _ => vec![self],
         }
     }
 }

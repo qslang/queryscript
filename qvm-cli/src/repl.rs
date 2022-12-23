@@ -146,16 +146,13 @@ fn run_command(
     let mut parser = parser::Parser::new(file, tokens, eof);
 
     if parser.consume_token(&parser::Token::Placeholder("?".to_string())) {
-        match parser.parse_schema() {
-            Ok(_) => {}
-            Err(_) => {}
-        }
+        parser.parse_schema();
         let loc = parser.peek_token().location;
         eprintln!("{:#?}", parser.get_autocomplete(loc));
         return Ok(RunCommandResult::Done);
     }
 
-    match parser.parse_schema() {
+    match parser.parse_schema().as_result() {
         Ok(ast) => {
             let num_exprs = repl_schema.read()?.exprs.len();
 

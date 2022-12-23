@@ -1,6 +1,8 @@
 use crate::ast::*;
+use crate::c_try;
+use crate::error::MultiResult;
 use crate::parser::error::{
-    unexpected_token, ErrorLocation, Result, SQLParserSnafu, TokenizerSnafu,
+    unexpected_token, ErrorLocation, ParserError, Result, SQLParserSnafu, TokenizerSnafu,
 };
 use snafu::prelude::*;
 use sqlparser::{
@@ -24,6 +26,8 @@ pub const AUTOCOMPLETE_ALIAS: char = 'v'; // A new name, which shouldn't be auto
 pub const AUTOCOMPLETE_VARIABLE: char = 'v'; // A variable name
 pub const AUTOCOMPLETE_TYPE: char = 't'; // A type name
 pub const AUTOCOMPLETE_SCHEMA: char = 's'; // A schema
+
+type ParseResult<T> = MultiResult<T, ParserError>;
 
 pub struct Parser<'a> {
     file: String,
@@ -158,51 +162,99 @@ impl<'a> Parser<'a> {
     pub fn get_autocompletes(&self) -> Vec<Vec<Token>> {
         self.sqlparser.get_autocompletes()
     }
-    pub fn parse_schema(&mut self) -> Result<Schema> {
+    pub fn parse_schema(&mut self) -> ParseResult<Schema> {
         let mut stmts = Vec::new();
+        let mut errors = Vec::new();
+        let mut idx: usize = 0;
         while !matches!(self.peek_token().token, Token::EOF) {
-            stmts.push(self.parse_stmt()?);
+            let ParseResult {
+                result: stmt,
+                errors: stmt_errors,
+            } = self.parse_stmt(idx);
+            stmts.push(stmt);
+            errors.extend(stmt_errors);
+            idx += 1;
         }
 
-        Ok(Schema { stmts })
+        let mut result = ParseResult::new(Schema { stmts });
+        for (idx, err) in errors {
+            result.add_error(idx, err);
+        }
+        result
     }
 
-    pub fn parse_stmt(&mut self) -> Result<Stmt> {
+    pub fn parse_stmt(&mut self, idx: usize) -> ParseResult<Stmt> {
         let start = self.peek_start_location();
+        let mut result = ParseResult::<Stmt>::new(Stmt {
+            export: false,
+            body: StmtBody::Noop,
+            start: start.clone(),
+            end: start.clone(),
+        });
         if self.consume_token(&Token::SemiColon) {
-            return Ok(Stmt {
-                export: false,
-                body: StmtBody::Noop,
-                start: start.clone(),
-                end: start.clone(),
-            });
+            return result;
         }
 
         let export = self.consume_keyword("export");
         let body = if self.consume_keyword("fn") {
-            self.parse_fn()?
+            self.parse_fn()
         } else if self.consume_keyword("extern") {
-            self.parse_extern()?
+            self.parse_extern()
         } else if self.consume_keyword("let") {
-            self.parse_let()?
+            self.parse_let()
         } else if self.consume_keyword("type") {
-            self.parse_typedef()?
+            self.parse_typedef()
         } else if self.consume_keyword("import") || export {
-            self.parse_import()?
+            self.parse_import()
         } else if self.peek_keyword("select") {
-            self.parse_query()?
+            self.parse_query()
         } else {
-            self.parse_expr_stmt()?
+            self.parse_expr_stmt()
         };
 
-        let end = self.peek_end_location();
+        match body {
+            Ok(body) => {
+                let end = self.peek_end_location();
+                result.set_result(Stmt {
+                    export,
+                    body,
+                    start,
+                    end,
+                });
+            }
+            Err(err) => {
+                // Attempt to skip ahead until the next time we encounter something that looks like
+                // the start or end of a statement.
+                //
+                while !self.peek_keyword("export")
+                    && !self.peek_keyword("fn")
+                    && !self.peek_keyword("extern")
+                    && !self.peek_keyword("let")
+                    && !self.peek_keyword("type")
+                    && !self.peek_keyword("import")
+                    && !self.peek_keyword("select")
+                    && self.peek_token().token != Token::SemiColon
+                    && self.peek_token().token != Token::EOF
+                {
+                    self.next_token();
+                }
+                if self.peek_token().token == Token::SemiColon {
+                    self.next_token();
+                }
+                let end = self.peek_end_location();
 
-        Ok(Stmt {
-            export,
-            body,
-            start,
-            end,
-        })
+                result.set_result(Stmt {
+                    export: false,
+                    body: StmtBody::Unparsed,
+                    start,
+                    end,
+                });
+
+                result.add_error(Some(idx), err);
+            }
+        }
+
+        result
     }
 
     pub fn parse_ident(&mut self) -> Result<Ident> {
@@ -638,8 +690,9 @@ pub fn tokenize(file: &str, text: &str) -> Result<(Vec<TokenWithLocation>, Locat
         .context(TokenizerSnafu { file })?)
 }
 
-pub fn parse_schema(file: &str, text: &str) -> Result<Schema> {
-    let (tokens, eof) = tokenize(file.clone(), text)?;
+pub fn parse_schema(file: &str, text: &str) -> ParseResult<Schema> {
+    let mut result = ParseResult::new(Schema { stmts: Vec::new() });
+    let (tokens, eof) = c_try!(result, tokenize(file.clone(), text));
     let mut parser = Parser::new(file, tokens, eof);
 
     parser.parse_schema()
