@@ -561,7 +561,7 @@ impl Backend {
         let entry = {
             self.documents
                 .read()
-                .map_err(log_internal_error)?
+                .await
                 .get(&uri.to_string())
                 .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?
                 .clone()
