@@ -528,10 +528,25 @@ impl Backend {
         .await
         .map_err(log_internal_error)??;
 
-        for (_idx, err) in compile_result.errors {
+        for (idx, err) in compile_result.errors {
             let range = match err.location().normalize() {
+                Some(range) => Some(range),
+                None => {
+                    if let Some(idx) = idx {
+                        let loc = document.schema.read().map_err(log_internal_error)?.exprs[idx]
+                            .location()
+                            .clone();
+                        loc.normalize()
+                    } else {
+                        None
+                    }
+                }
+            };
+
+            // If we don't have a range, just use the whole document.
+            let range = match range {
                 Some(range) => range,
-                None => continue,
+                None => FULL_DOCUMENT_RANGE,
             };
 
             diagnostics.push(Diagnostic {
@@ -636,6 +651,17 @@ impl Backend {
         Ok(RunExprResult { value, r#type })
     }
 }
+
+const FULL_DOCUMENT_RANGE: Range = Range {
+    start: Position {
+        line: 0,
+        character: 0,
+    },
+    end: Position {
+        line: u32::MAX,
+        character: u32::MAX,
+    },
+};
 
 trait NormalizeRange {
     fn normalize(&self) -> Option<Range>;
