@@ -663,11 +663,11 @@ const FULL_DOCUMENT_RANGE: Range = Range {
     },
 };
 
-trait NormalizeRange {
-    fn normalize(&self) -> Option<Range>;
+trait NormalizePosition<T> {
+    fn normalize(&self) -> T;
 }
 
-impl NormalizeRange for SourceLocation {
+impl NormalizePosition<Option<Range>> for SourceLocation {
     fn normalize(&self) -> Option<Range> {
         let (start, end) = match self.range() {
             Some(loc) => loc,
@@ -681,11 +681,7 @@ impl NormalizeRange for SourceLocation {
     }
 }
 
-trait NormalizePosition {
-    fn normalize(&self) -> Position;
-}
-
-impl NormalizePosition for qvm::ast::Location {
+impl NormalizePosition<Position> for qvm::ast::Location {
     fn normalize(&self) -> Position {
         // The locations are 1-indexed, but LSP diagnostics are 0-indexed
         Position {
