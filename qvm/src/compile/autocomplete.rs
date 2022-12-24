@@ -69,7 +69,10 @@ pub fn pos_to_loc(text: &str, pos: usize) -> parser::Location {
         .filter(|&&c| c == b'\n')
         .count()
         + 1) as u64;
-    let column: u64 = (pos - text[..pos].rfind('\n').unwrap_or(0) + 1) as u64;
+    let column: u64 = match text[..pos].rfind('\n') {
+        Some(nl) => pos - nl,
+        None => pos + 1,
+    } as u64;
     parser::Location { line, column }
 }
 

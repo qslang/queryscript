@@ -171,9 +171,21 @@ impl<'a> Parser<'a> {
                 result: stmt,
                 errors: stmt_errors,
             } = self.parse_stmt(idx);
-            stmts.push(stmt);
+
             errors.extend(stmt_errors);
-            idx += 1;
+
+            if matches!(stmt.body, StmtBody::Unparsed)
+                && matches!(
+                    stmts.last().map(|s: &Stmt| &s.body),
+                    Some(&StmtBody::Unparsed)
+                )
+            {
+                let len = stmts.len();
+                stmts[len - 1].end = stmt.end;
+            } else {
+                idx += 1;
+                stmts.push(stmt);
+            }
         }
 
         let mut result = ParseResult::new(Schema { stmts });

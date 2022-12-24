@@ -242,7 +242,7 @@ impl LanguageServer for Backend {
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         eprintln!("Starting completion");
-        let loc = params.text_document_position.position;
+        let position = params.text_document_position.position;
         let uri = params.text_document_position.text_document.uri.clone();
         let file = uri.path().to_string();
 
@@ -252,31 +252,60 @@ impl LanguageServer for Backend {
             .map(String::from);
 
         let text = self.get_text(&uri).await?;
-        let pos = loc_to_pos(
-            text.as_str(),
-            qvm::ast::Location {
-                line: (loc.line + 1) as u64,
-                column: (loc.character + 1) as u64,
-            },
-        );
+        let loc = qvm::ast::Location {
+            line: (position.line + 1) as u64,
+            column: (position.character + 1) as u64,
+        };
+        let pos = loc_to_pos(text.as_str(), loc.clone());
+        let schema_ast = parse_schema(file.as_str(), text.as_str()).result;
+        let mut stmt = None;
+        for s in &schema_ast.stmts {
+            if &s.start > &loc {
+                break;
+            }
+            stmt = Some(s);
+        }
+        let (start_pos, start_loc, line) = if let Some(stmt) = stmt {
+            let (start_pos, end_pos) = (
+                loc_to_pos(text.as_str(), stmt.start.clone()),
+                loc_to_pos(text.as_str(), stmt.end.clone()),
+            );
+            (
+                start_pos,
+                stmt.start.clone(),
+                text[start_pos..end_pos + 1].to_string(),
+            )
+        } else {
+            (pos, loc.clone(), String::new())
+        };
 
+        eprintln!("Line: {} {}", start_pos, line);
         let compiler = self.compiler.clone();
-        let (start_pos, suggestions) = task::spawn_blocking({
-            let text = text.clone();
+        let (suggestion_pos, suggestions) = task::spawn_blocking({
             move || -> Result<_> {
                 let compiler = compiler.lock().map_err(log_internal_error)?;
+                let schema = Schema::new(file, folder);
+                compiler.compile_schema_ast(schema.clone(), &schema_ast);
                 let autocompleter = AutoCompleter::new(
                     compiler.clone(),
-                    Schema::new(file, folder),
+                    schema,
                     Rc::new(RefCell::new(String::new())),
                 );
-                Ok(autocompleter.auto_complete(text.as_str(), pos))
+                Ok(autocompleter.auto_complete(line.as_str(), pos - start_pos))
             }
         })
         .await
         .map_err(log_internal_error)?
         .map_err(log_internal_error)?;
-        let start_loc = pos_to_loc(text.as_str(), start_pos);
+        let suggestion_loc = pos_to_loc(text.as_str(), start_pos + suggestion_pos);
+        eprintln!(
+            "Location: {} {:?} {} {:?} {}",
+            start_pos,
+            start_loc,
+            suggestion_pos,
+            suggestion_loc,
+            loc_to_pos(text.as_str(), suggestion_loc.clone())
+        );
 
         Ok(Some(CompletionResponse::List(CompletionList {
             is_incomplete: true,
@@ -286,8 +315,8 @@ impl LanguageServer for Backend {
                     label: s.clone(),
                     text_edit: Some(CompletionTextEdit::Edit(TextEdit {
                         range: Range {
-                            start: start_loc.normalize(),
-                            end: loc,
+                            start: suggestion_loc.normalize(),
+                            end: position,
                         },
                         new_text: s.clone(),
                     })),
@@ -512,9 +541,12 @@ impl Backend {
         let schema = document.schema.clone();
         let compiler = self.compiler.clone();
 
-        let compile_result = task::spawn_blocking(move || {
-            let compiler = compiler.lock().map_err(log_internal_error)?;
-            Ok(compiler.compile_schema_ast(schema.clone(), &ast))
+        let compile_result = task::spawn_blocking({
+            let ast = ast.clone();
+            move || {
+                let compiler = compiler.lock().map_err(log_internal_error)?;
+                Ok(compiler.compile_schema_ast(schema.clone(), &ast))
+            }
         })
         .await
         .map_err(log_internal_error)??;
@@ -524,9 +556,12 @@ impl Backend {
                 Some(range) => Some(range),
                 None => {
                     if let Some(idx) = idx {
-                        let loc = document.schema.read().map_err(log_internal_error)?.exprs[idx]
-                            .location()
-                            .clone();
+                        let stmt = &ast.stmts[idx];
+                        let loc = SourceLocation::Range(
+                            document.uri.to_string(),
+                            stmt.start.clone(),
+                            stmt.end.clone(),
+                        );
                         loc.normalize()
                     } else {
                         None
