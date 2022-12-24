@@ -135,6 +135,9 @@ pub fn mkcref<T: 'static + Constrainable>(t: T) -> CRef<T> {
     CRef::new_known(mkref(t))
 }
 
+// Here, "C" means constrained.  In general, any structs prefixed with C indicate that there are
+// structures that may be unknown within them.
+//
 #[derive(Clone)]
 pub struct CRef<T>(Ref<Constrained<T>>)
 where

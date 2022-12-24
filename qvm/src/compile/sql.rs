@@ -24,6 +24,9 @@ pub struct TypedSQL {
     pub sql: Ref<SQL<CRef<MType>>>,
 }
 
+// Here, "C" means constrained.  In general, any structs prefixed with C indicate that there are
+// structures that may be unknown within them.
+//
 #[derive(Clone, Debug)]
 pub struct CTypedNameAndSQL {
     pub name: Ident,
@@ -37,6 +40,9 @@ pub struct NameAndSQL {
     pub sql: Arc<SQL<CRef<MType>>>,
 }
 
+// Here, "C" means constrained.  In general, any structs prefixed with C indicate that there are
+// structures that may be unknown within them.
+//
 #[derive(Clone, Debug)]
 pub struct CTypedSQL {
     pub type_: CRef<MType>,

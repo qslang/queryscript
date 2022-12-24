@@ -45,6 +45,10 @@ impl MField {
     }
 }
 
+// Here, "M" means monomorphic.  MTypes can contain free variables in the form of the "Name" branch
+// below, but they can't contain universal types.  Universal types can only exist at the top-level
+// of a schema declaration, and so are represented within `SType` below.
+//
 #[derive(Clone)]
 pub enum MType {
     Atom(Located<AtomicType>),
@@ -225,6 +229,9 @@ where
     fn type_(&self) -> &CRef<T>;
 }
 
+// Here, "C" means constrained.  In general, any structs prefixed with C indicate that there are
+// structures that may be unknown within them.
+//
 #[derive(Clone, Debug)]
 pub struct CTypedExpr {
     pub type_: CRef<MType>,
@@ -240,6 +247,9 @@ impl CTypedExpr {
     }
 }
 
+// Here, "C" means constrained.  In general, any structs prefixed with C indicate that there are
+// structures that may be unknown within them.
+//
 #[derive(Clone, Debug)]
 pub struct CTypedNameAndExpr {
     pub name: Ident,
@@ -440,6 +450,10 @@ where
 
 pub type Ref<T> = Arc<RwLock<T>>;
 
+// Here, "S" means schema.  This is to distinguish types that can exist anywhere and be built
+// recursively (i.e. monomorphic types) from ones that can only exist at the top-level of a schema
+// declaration (i.e. polymorphic types)
+//
 #[derive(Clone)]
 pub struct SType {
     pub variables: BTreeSet<String>,
