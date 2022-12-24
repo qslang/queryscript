@@ -285,3 +285,34 @@ impl FnValue for LoadFileFn {
         self
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct IdentityFn {
+    type_: types::FnType,
+}
+
+impl IdentityFn {
+    pub fn new(type_: &types::Type) -> Result<IdentityFn> {
+        let type_ = match type_ {
+            types::Type::Fn(fn_type) => fn_type.clone(),
+            _ => return fail!("Type of load is not a function"),
+        };
+
+        Ok(IdentityFn { type_ })
+    }
+}
+
+#[async_trait]
+impl FnValue for IdentityFn {
+    fn execute<'a>(&'a self, _ctx: &'a Context, args: Vec<Value>) -> BoxFuture<'a, Result<Value>> {
+        async move { Ok(args.into_iter().next().unwrap()) }.boxed()
+    }
+
+    fn fn_type(&self) -> types::FnType {
+        self.type_.clone()
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}

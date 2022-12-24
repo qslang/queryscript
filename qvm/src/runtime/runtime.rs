@@ -98,6 +98,9 @@ pub fn eval<'a>(
                     "load" => Ok(Value::Fn(Arc::new(LoadFileFn::new(
                         &*typed_expr.type_.read()?,
                     )?))),
+                    "__native_identity" => Ok(Value::Fn(Arc::new(IdentityFn::new(
+                        &*typed_expr.type_.read()?,
+                    )?))),
                     _ => return rt_unimplemented!("native function: {}", name),
                 }
             }

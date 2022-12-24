@@ -13,7 +13,7 @@ use sqlparser::ast as sqlast;
 use crate::types::{Relation, Value};
 
 use crate::runtime::{
-    error::Result,
+    error::{rt_unimplemented, Result},
     normalize::Normalizer,
     sql::{SQLEngine, SQLParam},
     Context,
@@ -116,6 +116,9 @@ impl DuckDBEngine {
                             schema: Arc::new((&param.type_).try_into()?),
                         },
                     );
+                }
+                Value::Fn(_) => {
+                    return rt_unimplemented!("Function parameters");
                 }
                 _ => {
                     scalar_params.push(key.clone());

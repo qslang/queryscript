@@ -51,6 +51,7 @@ const BUILTIN_TYPES: &'static [BuiltinType] = &[
 
 const BUILTIN_FUNCTIONS: &'static str = "
 fn load<R>(file varchar, format varchar) -> External<[R]> = native;
+fn __native_identity<T>(t T) -> T = native;
 fn min<R>(value R) -> R = sql;
 fn max<R>(value R) -> R = sql;
 fn count<R>(value R) -> bigint = sql;
