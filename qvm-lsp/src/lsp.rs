@@ -227,9 +227,7 @@ impl LanguageServer for Backend {
 
         let uri_s = uri.to_string();
 
-        eprintln!("CHANGED {:?}!", uri_s);
         let _ = self.on_change(uri, text, Some(version)).await;
-        eprintln!("DONE COMPILING CHANGE {:?}!", uri_s);
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
@@ -239,9 +237,7 @@ impl LanguageServer for Backend {
 
         let uri_s = uri.to_string();
 
-        eprintln!("OPENED {:?}!", uri_s);
         let _ = self.on_change(uri, text, Some(version)).await;
-        eprintln!("DONE COMPILING OPEN {:?}!", uri_s);
     }
 
     async fn did_change_watched_files(&self, _params: DidChangeWatchedFilesParams) {
@@ -311,7 +307,6 @@ impl LanguageServer for Backend {
 
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
         let uri = params.text_document.uri;
-        eprintln!("code lens {:?}!", uri.to_string());
         let schema = self.get_schema(&uri).await?;
 
         let mut lenses = Vec::new();
