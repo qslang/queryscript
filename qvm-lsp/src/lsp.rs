@@ -683,6 +683,7 @@ impl NormalizePosition<Option<Range>> for SourceLocation {
 
 impl NormalizePosition<Position> for qvm::ast::Location {
     fn normalize(&self) -> Position {
+        assert!(self.line > 0 && self.column > 0);
         // The locations are 1-indexed, but LSP diagnostics are 0-indexed
         Position {
             line: (self.line - 1) as u32,
