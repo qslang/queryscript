@@ -225,8 +225,6 @@ impl LanguageServer for Backend {
         // NOTE: If we change this to INCREMENTAL we'll need to recompute the new document text
         let text = params.content_changes.swap_remove(0).text;
 
-        let uri_s = uri.to_string();
-
         let _ = self.on_change(uri, text, Some(version)).await;
     }
 
@@ -234,8 +232,6 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         let version = params.text_document.version;
         let text = params.text_document.text;
-
-        let uri_s = uri.to_string();
 
         let _ = self.on_change(uri, text, Some(version)).await;
     }
