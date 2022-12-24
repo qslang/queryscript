@@ -165,8 +165,8 @@ pub fn compile_sqlreference(
         1 => {
             let name = sqlpath[0].value.clone();
 
-            if let Some(relation) = scope.read()?.relations.get(&name) {
-                let type_ = get_rowtype(compiler.clone(), relation.type_.clone())?;
+            if let Some(relation_type) = scope.read()?.relations.get(&name) {
+                let type_ = get_rowtype(compiler.clone(), relation_type.clone())?;
                 let expr = mkcref(Expr::SQL(Arc::new(SQL {
                     names: CSQLNames::from_unbound(sqlpath),
                     body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
@@ -223,8 +223,8 @@ pub fn compile_sqlreference(
 
             // If the relation can't be found in the scope, just fall through
             //
-            if let Some(relation) = scope.read()?.relations.get(&relation_name) {
-                let rowtype = get_rowtype(compiler.clone(), relation.type_.clone())?;
+            if let Some(relation_type) = scope.read()?.relations.get(&relation_name) {
+                let rowtype = get_rowtype(compiler.clone(), relation_type.clone())?;
                 let type_ = typecheck_path(
                     rowtype,
                     vec![Ident::with_location(loc.clone(), field_name)].as_slice(),
@@ -410,7 +410,7 @@ impl Constrainable for FieldMatch {}
 #[derive(Clone, Debug)]
 pub struct SQLScope {
     pub parent: Option<Arc<SQLScope>>,
-    pub relations: BTreeMap<String, TypedExpr<CRef<MType>>>,
+    pub relations: BTreeMap<String, CRef<MType>>,
     pub multiple_rows: bool,
 }
 
@@ -437,28 +437,26 @@ impl SQLScope {
                 .iter()
                 .map(|(n, te)| {
                     let n = Ident::with_location(loc.clone(), n.clone());
-                    get_rowtype(compiler.clone(), te.type_.clone())?.then(
-                        move |rowtype: Ref<MType>| {
-                            let rowtype = rowtype.read()?.clone();
-                            match &rowtype {
-                                MType::Record(fields) => Ok(mkcref(
-                                    fields
-                                        .iter()
-                                        .map(|field| FieldMatch {
-                                            relation: n.clone(),
-                                            field: field.name.clone(),
-                                            type_: Some(field.type_.clone()),
-                                        })
-                                        .collect(),
-                                )),
-                                _ => Ok(mkcref(vec![FieldMatch {
-                                    relation: n.clone(),
-                                    field: n.clone(),
-                                    type_: Some(mkcref(rowtype)),
-                                }])),
-                            }
-                        },
-                    )
+                    get_rowtype(compiler.clone(), te.clone())?.then(move |rowtype: Ref<MType>| {
+                        let rowtype = rowtype.read()?.clone();
+                        match &rowtype {
+                            MType::Record(fields) => Ok(mkcref(
+                                fields
+                                    .iter()
+                                    .map(|field| FieldMatch {
+                                        relation: n.clone(),
+                                        field: field.name.clone(),
+                                        type_: Some(field.type_.clone()),
+                                    })
+                                    .collect(),
+                            )),
+                            _ => Ok(mkcref(vec![FieldMatch {
+                                relation: n.clone(),
+                                field: n.clone(),
+                                type_: Some(mkcref(rowtype)),
+                            }])),
+                        }
+                    })
                 })
                 .collect::<Result<Vec<_>>>()?,
         )?
@@ -487,9 +485,9 @@ impl SQLScope {
             let compiler = compiler.clone();
             async move {
                 let mut names = names.clone();
-                for (relation, expr) in &relations {
+                for (relation, type_) in &relations {
                     names.unbound.remove(&vec![relation.clone()]);
-                    let rowtype = get_rowtype(compiler.clone(), expr.type_.clone())?.await?;
+                    let rowtype = get_rowtype(compiler.clone(), type_.clone())?.await?;
                     match &*rowtype.read()? {
                         MType::Record(fields) => {
                             for field in fields.iter() {
@@ -506,6 +504,26 @@ impl SQLScope {
             }
         })
     }
+
+    pub fn add_reference(
+        &mut self,
+        name: &String,
+        loc: &SourceLocation,
+        type_: CRef<MType>,
+    ) -> Result<()> {
+        match self.relations.entry(name.clone()) {
+            btree_map::Entry::Occupied(_) => {
+                return Err(CompileError::duplicate_entry(vec![Ident::with_location(
+                    loc.clone(),
+                    name.clone(),
+                )]))
+            }
+            btree_map::Entry::Vacant(e) => {
+                e.insert(type_);
+            }
+        };
+        Ok(())
+    }
 }
 
 impl Constrainable for SQLScope {}
@@ -516,8 +534,7 @@ pub fn compile_relation(
     scope: &Ref<SQLScope>,
     loc: &SourceLocation,
     relation: &sqlast::TableFactor,
-    from_names: &mut CSQLNames,
-) -> Result<sqlast::TableFactor> {
+) -> Result<CRef<CWrap<(CSQLNames, sqlast::TableFactor)>>> {
     Ok(match relation {
         sqlast::TableFactor::Table {
             name,
@@ -561,34 +578,82 @@ pub fn compile_relation(
                     .value
                     .clone(),
             };
-            match scope.write()?.relations.entry(name.clone()) {
-                btree_map::Entry::Occupied(_) => {
-                    return Err(CompileError::duplicate_entry(vec![Ident::with_location(
-                        loc.clone(),
-                        name,
-                    )]))
-                }
-                btree_map::Entry::Vacant(e) => {
-                    let relation = e.insert(relation).clone();
 
-                    let placeholder_name =
-                        QVM_NAMESPACE.to_string() + compiler.next_placeholder("rel")?.as_str();
-                    from_names.params.insert(placeholder_name.clone(), relation);
+            let mut from_names = CSQLNames::new();
 
-                    sqlast::TableFactor::Table {
-                        name: sqlast::ObjectName(vec![ident(placeholder_name)]),
+            scope
+                .write()?
+                .add_reference(&name, loc, relation.type_.clone())?;
+
+            let placeholder_name =
+                QVM_NAMESPACE.to_string() + compiler.next_placeholder("rel")?.as_str();
+            from_names.params.insert(placeholder_name.clone(), relation);
+
+            cwrap((
+                from_names,
+                sqlast::TableFactor::Table {
+                    name: sqlast::ObjectName(vec![ident(placeholder_name)]),
+                    alias: Some(sqlast::TableAlias {
+                        name: ident(name.to_string()),
+                        columns: Vec::new(),
+                    }),
+                    args: None,
+                    with_hints: Vec::new(),
+                },
+            ))
+        }
+        sqlast::TableFactor::Derived {
+            lateral,
+            subquery,
+            alias,
+        } => {
+            if *lateral {
+                // This is a lateral subquery, which I haven't tested yet (because it will require
+                // forwarding the outer scope into the subquery).
+                return Err(CompileError::unimplemented(
+                    loc.clone(),
+                    "Lateral Subqueries",
+                ));
+            }
+
+            // NOTE: Once we thread locations through the parse tree, we should use the location here.
+            let subquery = compile_sqlquery(compiler.clone(), schema.clone(), loc, subquery)?;
+
+            let name = match alias {
+                Some(a) => a.name.value.clone(),
+                None => compiler.next_placeholder("anonymous_subquery")?,
+            };
+
+            scope
+                .write()?
+                .add_reference(&name, &loc, subquery.type_.clone())?;
+
+            let loc = loc.clone();
+            let lateral = *lateral;
+            compiler.async_cref(async move {
+                let subquery_expr = Arc::new(subquery.expr.await?.read()?.clone());
+                let (sql_names, sql_query) = match &*subquery_expr {
+                    Expr::SQL(q) => (q.names.clone(), Box::new(q.body.as_query())),
+                    _ => {
+                        return Err(CompileError::internal(
+                            loc.clone(),
+                            "Subquery must be a SQL expression",
+                        ))
+                    }
+                };
+
+                Ok(cwrap((
+                    sql_names,
+                    sqlast::TableFactor::Derived {
+                        lateral,
+                        subquery: sql_query,
                         alias: Some(sqlast::TableAlias {
                             name: ident(name.to_string()),
                             columns: Vec::new(),
                         }),
-                        args: None,
-                        with_hints: Vec::new(),
-                    }
-                }
-            }
-        }
-        sqlast::TableFactor::Derived { .. } => {
-            return Err(CompileError::unimplemented(loc.clone(), "Subqueries"))
+                    },
+                )))
+            })?
         }
         sqlast::TableFactor::TableFunction { .. } => {
             return Err(CompileError::unimplemented(loc.clone(), "TABLE"))
@@ -669,27 +734,12 @@ pub fn compile_table_with_joins(
     loc: &SourceLocation,
     table: &sqlast::TableWithJoins,
 ) -> Result<CRef<CWrap<(CSQLNames, sqlast::TableWithJoins)>>> {
-    let mut table_names = CSQLNames::new();
-    let relation = compile_relation(
-        compiler,
-        schema,
-        scope,
-        loc,
-        &table.relation,
-        &mut table_names,
-    )?;
+    let relation = compile_relation(compiler, schema, scope, loc, &table.relation)?;
 
     let mut join_rels = Vec::new();
     let mut join_ops = Vec::new();
     for join in &table.joins {
-        let join_relation = compile_relation(
-            compiler,
-            schema,
-            scope,
-            loc,
-            &join.relation,
-            &mut table_names,
-        )?;
+        let join_relation = compile_relation(compiler, schema, scope, loc, &join.relation)?;
 
         join_rels.push(join_relation);
         join_ops.push(compile_join_operator(
@@ -701,17 +751,24 @@ pub fn compile_table_with_joins(
         )?);
     }
     compiler.async_cref(async move {
+        let mut table_params = CSQLNames::new();
+        let (relation_params, relation) = cunwrap(relation.await?)?;
+        table_params.extend(relation_params);
+
         let mut joins = Vec::new();
         for (jo, relation) in join_ops.into_iter().zip(join_rels.into_iter()) {
-            let (names, join_operator) = cunwrap(jo.await?)?;
-            table_names.extend(names);
+            let (relation_params, relation) = cunwrap(relation.await?)?;
+            table_params.extend(relation_params);
+
+            let (join_op_params, join_operator) = cunwrap(jo.await?)?;
+            table_params.extend(join_op_params);
             joins.push(sqlast::Join {
                 relation,
                 join_operator,
             });
         }
         Ok(cwrap((
-            table_names,
+            table_params,
             sqlast::TableWithJoins { relation, joins },
         )))
     })
@@ -1109,12 +1166,12 @@ pub fn compile_sqlquery(
         sqlast::SetExpr::Select(s) => {
             let (scope, type_, select) = compile_select(compiler.clone(), schema.clone(), loc, s)?;
 
-            let compiled_order_by =
-                compile_order_by(&compiler, &schema, &scope, loc, &query.order_by)?;
-
             Ok(CTypedExpr {
                 type_,
                 expr: compiler.async_cref({
+                    let compiled_order_by =
+                        compile_order_by(&compiler, &schema, &scope, loc, &query.order_by)?;
+
                     let loc = loc.clone();
                     let compiler = compiler.clone();
                     async move {
