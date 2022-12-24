@@ -805,10 +805,6 @@ pub fn compile_select(
     CRef<MType>,
     CRef<CWrap<(CSQLNames, Box<sqlast::SetExpr>)>>,
 )> {
-    if select.distinct {
-        return Err(CompileError::unimplemented(loc.clone(), "DISTINCT"));
-    }
-
     if select.top.is_some() {
         return Err(CompileError::unimplemented(loc.clone(), "TOP"));
     }
