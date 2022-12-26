@@ -1,5 +1,5 @@
 use colored::*;
-use sqlparser::ast as sqlast;
+pub use sqlparser::ast as sqlast;
 
 pub use sqlparser::tokenizer::Location;
 

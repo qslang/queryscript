@@ -22,7 +22,7 @@ use qvm::{
     error::MultiError,
     parser::{error::PrettyError, parse_schema},
     runtime,
-    types::{Type as QVMType, Value as QVMValue},
+    types::Type as QVMType,
 };
 
 // XXX Do we need any of these settings? If not, we can probably remove them.
@@ -33,17 +33,15 @@ struct Configuration {
     pub has_diagnostic_related_information_capability: bool,
 }
 
-// XXX Remove this or add real settings in
-#[allow(unused)]
 #[derive(Debug)]
-struct ExampleSettings {
-    pub max_number_of_problems: u32,
+struct Settings {
+    pub max_number_of_rows: i64,
 }
 
 // XXX Remove this or add real settings in
 #[allow(unused)]
-const DEFAULT_SETTINGS: ExampleSettings = ExampleSettings {
-    max_number_of_problems: 1000,
+const DEFAULT_SETTINGS: Settings = Settings {
+    max_number_of_rows: 1000,
 };
 
 #[derive(Debug, Clone)]
@@ -58,7 +56,13 @@ pub struct Document {
 pub struct Backend {
     client: Client,
     configuration: Arc<RwLock<Configuration>>,
-    settings: Arc<RwLock<BTreeMap<String, ExampleSettings>>>,
+
+    // XXX The LSP example from Microsoft implements this by remembering the settings each
+    // file was analayzed with, and then changing it when the settings are updated. From
+    // what I can tell, these settings are _not_ per file. Before we ship this, we should
+    // either follow what the Microsoft example does or remove it.
+    settings: Arc<RwLock<BTreeMap<String, Settings>>>,
+
     documents: Arc<TokioRwLock<BTreeMap<String, Arc<TokioMutex<Document>>>>>,
 
     // We use a mutex for the compiler, because we want to serialize compilation
@@ -462,7 +466,7 @@ struct RunExprParams {
 
 #[derive(Debug, Clone, Serialize)]
 struct RunExprResult {
-    value: QVMValue,
+    value: serde_json::Value,
     r#type: QVMType,
 }
 
@@ -620,8 +624,16 @@ impl Backend {
             .map_err(|_| Error::invalid_params("Invalid URI".to_string()))?;
         let schema_ref = self.get_schema(&uri).await?;
 
+        let limit = {
+            let settings = self.settings.read().map_err(log_internal_error)?;
+            settings.get(&uri.to_string()).map_or_else(
+                || DEFAULT_SETTINGS.max_number_of_rows,
+                |c| c.max_number_of_rows,
+            )
+        };
+
         let expr = {
-            // We have to stuff "schema" into this block, because it cannot be held across an await point.
+            // We have to "stuff" schema into this block, because it cannot be held across an await point.
             let schema = schema_ref.read().map_err(log_internal_error)?;
             match params.expr {
                 RunExprType::Expr(expr) => {
@@ -668,9 +680,28 @@ impl Backend {
 
         let ctx = runtime::build_context(&schema_ref, runtime::SQLEngineType::DuckDB);
 
+        // XXX We should change this log_internal_error to return an error to the webview
         let value = runtime::eval(&ctx, &expr)
             .await
             .map_err(log_internal_error)?;
+
+        // NOTE: Ideally we should be applying the limit to the query tree, but we don't have a
+        // great way to do that (without unwrapping and mutating the compiled expression). We probably
+        // want to add a transform feature to the compiler that allows us to inject transforms at certain
+        // points in the compilation process (or generate expressions that _can_ be limited/paginated).
+        let mut value = json!(value);
+        if limit >= 0 {
+            value = match json!(value) {
+                serde_json::Value::Array(arr) => {
+                    let arr = arr
+                        .into_iter()
+                        .take(limit as usize)
+                        .collect::<Vec<serde_json::Value>>();
+                    serde_json::Value::Array(arr)
+                }
+                other => other,
+            };
+        }
 
         let r#type = expr.type_.read().map_err(log_internal_error)?.clone();
 
