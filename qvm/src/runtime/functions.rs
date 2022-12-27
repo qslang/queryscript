@@ -1,5 +1,5 @@
 use arrow::{
-    datatypes::{DataType as DFDataType, Schema as DFSchema},
+    datatypes::{DataType as ArrowDataType, Schema as ArrowSchema},
     error::ArrowError,
     record_batch::RecordBatch,
 };
@@ -87,7 +87,7 @@ enum Format {
 
 #[derive(Clone, Debug)]
 pub struct LoadFileFn {
-    schema: Arc<DFSchema>,
+    schema: Arc<ArrowSchema>,
 }
 
 impl LoadFileFn {
@@ -98,9 +98,9 @@ impl LoadFileFn {
         };
 
         let mut schema = None;
-        if let DFDataType::List(dt) = ret_type.as_ref().try_into()? {
-            if let DFDataType::Struct(s) = dt.data_type() {
-                schema = Some(Arc::new(DFSchema::new(s.clone())));
+        if let ArrowDataType::List(dt) = ret_type.as_ref().try_into()? {
+            if let ArrowDataType::Struct(s) = dt.data_type() {
+                schema = Some(Arc::new(ArrowSchema::new(s.clone())));
             }
         }
 
@@ -153,18 +153,20 @@ impl LoadFileFn {
                 Format::Csv => {
                     let reader = arrow::csv::ReaderBuilder::new()
                         .has_header(true)
+                        .with_schema(self.schema.clone())
                         .build(fd)?;
 
                     reader.collect::<Result<Vec<RecordBatch>, ArrowError>>()
                 }
                 Format::Json => {
                     let reader = arrow::json::ReaderBuilder::new()
-                        .infer_schema(Some(100))
+                        .with_schema(self.schema.clone())
                         .build(fd)?;
 
                     reader.collect::<Result<Vec<RecordBatch>, ArrowError>>()
                 }
                 Format::Parquet => {
+                    // XXX We should dynamically verify that this file's schema matches the function's return schema
                     let reader =
                         parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(fd)?
                             .build()?;
