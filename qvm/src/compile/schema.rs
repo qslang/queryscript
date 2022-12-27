@@ -165,25 +165,26 @@ impl MType {
                 inner.substitute(variables)?,
                 inner.location().clone(),
             ))),
-            MType::Fn(Located {
-                value: MFnType { args, ret },
-                location,
-            }) => mkcref(MType::Fn(Located::new(
-                MFnType {
-                    args: args
-                        .iter()
-                        .map(|a| {
-                            Ok(MField {
-                                name: a.name.clone(),
-                                type_: a.type_.substitute(variables)?,
-                                nullable: a.nullable,
+            MType::Fn(mfn) => {
+                let MFnType { args, ret } = mfn.get();
+                let location = mfn.location();
+                mkcref(MType::Fn(Located::new(
+                    MFnType {
+                        args: args
+                            .iter()
+                            .map(|a| {
+                                Ok(MField {
+                                    name: a.name.clone(),
+                                    type_: a.type_.substitute(variables)?,
+                                    nullable: a.nullable,
+                                })
                             })
-                        })
-                        .collect::<Result<_>>()?,
-                    ret: ret.substitute(variables)?,
-                },
-                location.clone(),
-            ))),
+                            .collect::<Result<_>>()?,
+                        ret: ret.substitute(variables)?,
+                    },
+                    location.clone(),
+                )))
+            }
             MType::Name(n) => variables
                 .get(&n.get().value)
                 .ok_or_else(|| CompileError::no_such_entry(vec![n.get().clone()]))?
@@ -288,10 +289,8 @@ impl fmt::Debug for MType {
                 inner.fmt(f)?;
                 f.write_str("]")?;
             }
-            MType::Fn(Located {
-                value: MFnType { args, ret },
-                ..
-            }) => {
+            MType::Fn(mfn) => {
+                let MFnType { args, ret } = mfn.get();
                 f.write_str("λ ")?;
                 DebugMFields(&args).fmt(f)?;
                 f.write_str(" -> ")?;
@@ -332,28 +331,26 @@ impl Constrainable for MType {
                 MType::List(rinner) => linner.unify(rinner)?,
                 _ => return Err(CompileError::wrong_type(self, other)),
             },
-            MType::Fn(Located {
-                value:
-                    MFnType {
-                        args: largs,
-                        ret: lret,
-                    },
-                location: lloc,
-            }) => match other {
-                MType::Fn(Located {
-                    value:
-                        MFnType {
+            MType::Fn(lmfn) => {
+                let MFnType {
+                    args: largs,
+                    ret: lret,
+                } = lmfn.get();
+                let lloc = lmfn.location();
+                match other {
+                    MType::Fn(rmfn) => {
+                        let MFnType {
                             args: rargs,
                             ret: rret,
-                        },
-                    location: rloc,
-                }) => {
-                    Located::new(largs.clone(), lloc.clone())
-                        .unify(&Located::new(rargs.clone(), rloc.clone()))?;
-                    lret.unify(rret)?;
+                        } = rmfn.get();
+                        let rloc = rmfn.location();
+                        Located::new(largs.clone(), lloc.clone())
+                            .unify(&Located::new(rargs.clone(), rloc.clone()))?;
+                        lret.unify(rret)?;
+                    }
+                    _ => return Err(CompileError::wrong_type(self, other)),
                 }
-                _ => return Err(CompileError::wrong_type(self, other)),
-            },
+            }
             MType::Name(name) => {
                 return Err(CompileError::internal(
                     name.location().clone(),
@@ -967,57 +964,11 @@ pub struct ImportedSchema {
     pub schema: SchemaRef,
 }
 
-pub struct Located<T> {
-    value: T,
-    location: SourceLocation,
-}
-
-impl<T> std::fmt::Debug for Located<T>
-where
-    T: std::fmt::Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.value.fmt(f)
-    }
-}
-
-impl<T> Clone for Located<T>
-where
-    T: Clone,
-{
-    fn clone(&self) -> Self {
-        Located {
-            value: self.value.clone(),
-            location: self.location.clone(),
-        }
-    }
-}
-
-impl<T> Located<T> {
-    pub fn new(value: T, location: SourceLocation) -> Located<T> {
-        Located { value, location }
-    }
-
-    pub fn location(&self) -> &SourceLocation {
-        &self.location
-    }
-
-    pub fn get(&self) -> &T {
-        &self.value
-    }
-}
+pub type Located<T> = sqlast::Located<T, SourceLocation>;
 
 impl<T> Pretty for Located<T> {
     fn pretty(&self) -> String {
-        self.location.pretty()
-    }
-}
-
-impl<T> std::ops::Deref for Located<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.value
+        self.location().pretty()
     }
 }
 
