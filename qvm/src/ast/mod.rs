@@ -16,6 +16,16 @@ pub enum SourceLocation {
 }
 
 impl SourceLocation {
+    pub fn from_file_range(
+        file: String,
+        range: Option<sqlparser::location::Range>,
+    ) -> SourceLocation {
+        match range {
+            Some(range) => SourceLocation::Range(file, range.start, range.end),
+            None => SourceLocation::File(file),
+        }
+    }
+
     // XXX can we delete this function?
     pub fn range(&self) -> Option<(Location, Location)> {
         Some(match self {
@@ -180,20 +190,15 @@ impl ToStrings for Path {
 }
 
 pub trait ToPath {
-    fn to_path(&self, loc: &SourceLocation) -> Path;
+    fn to_path(&self, file: String) -> Path;
 }
 
 impl ToPath for Vec<sqlast::Located<sqlast::Ident>> {
-    fn to_path(&self, loc: &SourceLocation) -> Path {
+    fn to_path(&self, file: String) -> Path {
         self.iter()
             .map(|p| {
-                // XXX: This is wrong, since we're putting the same location onto each element of
-                // the path.  Given that we don't actually know whether the location passed in here
-                // is correct anyway, this is the safest way to ensure that the overall location is
-                // preserved.
-                //
                 Ident::with_location(
-                    loc.clone(),
+                    SourceLocation::from_file_range(file.clone(), p.location().clone()),
                     match p.quote_style {
                         Some(_) => p.value.clone(), // Preserve the case if the string is quoted
                         None => p.value.to_lowercase(),
@@ -205,8 +210,8 @@ impl ToPath for Vec<sqlast::Located<sqlast::Ident>> {
 }
 
 impl ToPath for sqlast::ObjectName {
-    fn to_path(&self, loc: &SourceLocation) -> Path {
-        (&self.0).to_path(loc)
+    fn to_path(&self, file: String) -> Path {
+        (&self.0).to_path(file)
     }
 }
 

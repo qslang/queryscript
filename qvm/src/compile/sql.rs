@@ -157,10 +157,11 @@ pub fn compile_sqlreference(
     compiler: Compiler,
     schema: Ref<Schema>,
     scope: Ref<SQLScope>,
-    loc: &SourceLocation,
     sqlpath: &Vec<sqlast::Located<sqlast::Ident>>,
 ) -> Result<CTypedExpr> {
-    let path = sqlpath.to_path(loc);
+    let file = schema.read()?.file.clone();
+    let path = sqlpath.to_path(file.clone());
+    let loc = path_location(&path);
     match sqlpath.len() {
         0 => {
             return Err(CompileError::internal(
@@ -182,7 +183,7 @@ pub fn compile_sqlreference(
                 let available =
                     scope
                         .read()?
-                        .get_available_references(compiler.clone(), loc, None)?;
+                        .get_available_references(compiler.clone(), &loc, None)?;
 
                 let tse = available.then({
                     let loc = loc.clone();
@@ -547,6 +548,7 @@ pub fn compile_relation(
     loc: &SourceLocation,
     relation: &sqlast::TableFactor,
 ) -> Result<CRef<CWrap<(CSQLNames, sqlast::TableFactor)>>> {
+    let file = schema.read()?.file.clone();
     Ok(match relation {
         sqlast::TableFactor::Table {
             name,
@@ -568,7 +570,11 @@ pub fn compile_relation(
             // TODO: This currently assumes that table references always come from outside
             // the query, which is not actually the case.
             //
-            let relation = compile_reference(compiler.clone(), schema.clone(), &name.to_path(loc))?;
+            let relation = compile_reference(
+                compiler.clone(),
+                schema.clone(),
+                &name.to_path(file.clone()),
+            )?;
 
             let list_type = mkcref(MType::List(Located::new(
                 MType::new_unknown(format!("FROM {}", name.to_string()).as_str()),
@@ -1415,6 +1421,7 @@ pub fn compile_sqlexpr(
     loc: &SourceLocation,
     expr: &sqlast::Expr,
 ) -> Result<CTypedExpr> {
+    let file = schema.read()?.file.clone();
     let c_sqlarg =
         |e: &sqlast::Expr| compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, e);
 
@@ -1708,7 +1715,7 @@ pub fn compile_sqlexpr(
                 ));
             }
 
-            let func_name = name.to_path(loc);
+            let func_name = name.to_path(file.clone());
             let func = compile_reference(compiler.clone(), schema.clone(), &func_name)?;
             let fn_type = match func
                 .type_
@@ -1992,18 +1999,13 @@ pub fn compile_sqlexpr(
 
             CTypedExpr { type_, expr }
         }
-        sqlast::Expr::CompoundIdentifier(sqlpath) => compile_sqlreference(
-            compiler.clone(),
-            schema.clone(),
-            scope.clone(),
-            loc,
-            sqlpath,
-        )?,
+        sqlast::Expr::CompoundIdentifier(sqlpath) => {
+            compile_sqlreference(compiler.clone(), schema.clone(), scope.clone(), sqlpath)?
+        }
         sqlast::Expr::Identifier(ident) => compile_sqlreference(
             compiler.clone(),
             schema.clone(),
             scope.clone(),
-            loc,
             &vec![ident.clone()],
         )?,
         _ => {
