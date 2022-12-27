@@ -81,11 +81,8 @@ pub fn get_rowtype(compiler: Compiler, relation: CRef<MType>) -> Result<CRef<MTy
     })?)
 }
 
-pub fn ident(value: String) -> sqlast::Ident {
-    sqlast::Ident {
-        value,
-        quote_style: None,
-    }
+pub fn ident(value: String) -> sqlast::Located<sqlast::Ident> {
+    sqlast::Ident::new(value)
 }
 
 pub fn select_from(
@@ -117,7 +114,10 @@ pub fn select_from(
     }
 }
 
-pub fn select_no_from(expr: sqlast::Expr, alias: Option<sqlast::Ident>) -> sqlast::Query {
+pub fn select_no_from(
+    expr: sqlast::Expr,
+    alias: Option<sqlast::Located<sqlast::Ident>>,
+) -> sqlast::Query {
     select_from(
         vec![match alias {
             Some(alias) => sqlast::SelectItem::ExprWithAlias { expr, alias },
@@ -158,7 +158,7 @@ pub fn compile_sqlreference(
     schema: Ref<Schema>,
     scope: Ref<SQLScope>,
     loc: &SourceLocation,
-    sqlpath: &Vec<sqlast::Ident>,
+    sqlpath: &Vec<sqlast::Located<sqlast::Ident>>,
 ) -> Result<CTypedExpr> {
     let path = sqlpath.to_path(loc);
     match sqlpath.len() {
@@ -327,7 +327,7 @@ pub fn intern_nonsql_placeholder(
     compiler: Compiler,
     kind: &str,
     expr: &TypedExpr<CRef<MType>>,
-) -> Result<(sqlast::Ident, Arc<SQL<CRef<MType>>>)> {
+) -> Result<(sqlast::Located<sqlast::Ident>, Arc<SQL<CRef<MType>>>)> {
     match &*expr.expr {
         Expr::SQL(_) => Err(CompileError::internal(
             SourceLocation::Unknown,
@@ -977,14 +977,8 @@ pub fn compile_select(
                                     }
                                 };
                                 let sqlpath = vec![
-                                    sqlast::Ident {
-                                        value: m.relation.value.clone(),
-                                        quote_style: None,
-                                    },
-                                    sqlast::Ident {
-                                        value: m.field.value.clone(),
-                                        quote_style: None,
-                                    },
+                                    sqlast::Ident::new(m.relation.value.clone()),
+                                    sqlast::Ident::new(m.field.value.clone()),
                                 ];
                                 ret.push(CTypedNameAndSQL {
                                     name: m.field.clone(),

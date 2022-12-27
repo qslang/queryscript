@@ -664,6 +664,13 @@ impl<V: SQLVisitor, T: VisitSQL<V>> VisitSQL<V> for Box<T> {
     }
 }
 
+impl<V: SQLVisitor, T: VisitSQL<V>> VisitSQL<V> for Located<T> {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        let range = self.location().clone();
+        Located::new(self.get().visit_sql(visitor), range)
+    }
+}
+
 impl<V: SQLVisitor> VisitSQL<V> for schema::SQLBody {
     fn visit_sql(&self, visitor: &V) -> Self {
         match self {

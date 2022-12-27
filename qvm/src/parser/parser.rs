@@ -59,6 +59,10 @@ impl<'a> Parser<'a> {
         self.sqlparser.peek_end_location()
     }
 
+    pub fn prev_end_location(&self) -> Location {
+        self.sqlparser.prev_end_location()
+    }
+
     pub fn is_eof(&self) -> bool {
         self.peek_token().token == Token::EOF
     }
@@ -86,7 +90,7 @@ impl<'a> Parser<'a> {
 
     pub fn range_context(&self, start: &Location) -> SQLParserSnafu<ErrorLocation> {
         SQLParserSnafu {
-            loc: self.range_location(start.clone()),
+            loc: ErrorLocation::Range(self.file.clone(), start.clone(), self.prev_end_location()),
         }
     }
 
@@ -226,7 +230,7 @@ impl<'a> Parser<'a> {
 
         match body {
             Ok(body) => {
-                let end = self.peek_end_location();
+                let end = self.prev_end_location();
                 result.set_result(Stmt {
                     export,
                     body,
@@ -253,7 +257,7 @@ impl<'a> Parser<'a> {
                 if self.peek_token().token == Token::SemiColon {
                     self.next_token();
                 }
-                let end = self.peek_end_location();
+                let end = self.prev_end_location();
 
                 result.set_result(Stmt {
                     export: false,
@@ -271,8 +275,8 @@ impl<'a> Parser<'a> {
 
     pub fn parse_ident(&mut self) -> Result<Ident> {
         let start = self.peek_start_location();
-        let token = self.next_token();
         let end = self.peek_end_location();
+        let token = self.next_token();
         let loc = SourceLocation::Range(self.file.clone(), start.clone(), end);
         match token.token {
             Token::Word(w) => Ok(Ident::with_location(loc, w.value)),
@@ -292,16 +296,9 @@ impl<'a> Parser<'a> {
         let mut path = Vec::<Ident>::new();
         loop {
             self.autocomplete_tokens(&[Token::make_word(
-                sqlast::ObjectName(
-                    path.iter()
-                        .map(|p| sqlast::Ident {
-                            value: p.value.clone(),
-                            quote_style: Some('\"'),
-                        })
-                        .collect(),
-                )
-                .to_string()
-                .as_str(),
+                sqlast::ObjectName(path.iter().map(Ident::to_sqlident).collect())
+                    .to_string()
+                    .as_str(),
                 Some(kind),
             )]);
             path.push(self.parse_ident()?);
@@ -527,7 +524,7 @@ impl<'a> Parser<'a> {
             .parse_query()
             .context(self.range_context(&start))?;
         self.expect_eos()?;
-        let end = self.peek_end_location();
+        let end = self.prev_end_location();
 
         Ok(StmtBody::Expr(Expr {
             body: ExprBody::SQLQuery(query),
@@ -543,7 +540,7 @@ impl<'a> Parser<'a> {
             .parse_expr()
             .context(self.range_context(&start))?;
         self.expect_eos()?;
-        let end = self.peek_end_location();
+        let end = self.prev_end_location();
 
         Ok(StmtBody::Expr(Expr {
             body: ExprBody::SQLExpr(expr),
@@ -584,7 +581,7 @@ impl<'a> Parser<'a> {
 
         if self.consume_keyword("exclude") {
             let excluded = self.parse_idents()?;
-            let end = self.peek_end_location();
+            let end = self.prev_end_location();
             body = TypeBody::Exclude {
                 inner: Box::new(Type {
                     body,
@@ -595,7 +592,7 @@ impl<'a> Parser<'a> {
             };
         }
 
-        let end = self.peek_end_location();
+        let end = self.prev_end_location();
 
         Ok(Type { body, start, end })
     }
@@ -670,7 +667,7 @@ impl<'a> Parser<'a> {
                     .sqlparser
                     .parse_query()
                     .context(self.range_context(&start))?;
-                let end = self.peek_end_location();
+                let end = self.prev_end_location();
                 Expr {
                     body: ExprBody::SQLQuery(query),
                     start,
@@ -682,7 +679,7 @@ impl<'a> Parser<'a> {
                     .sqlparser
                     .parse_expr()
                     .context(self.range_context(&start))?;
-                let end = self.peek_end_location();
+                let end = self.prev_end_location();
                 Expr {
                     body: ExprBody::SQLExpr(expr),
                     start,

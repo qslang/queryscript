@@ -137,11 +137,13 @@ impl Ident {
         }
     }
 
-    pub fn to_sqlident(&self) -> sqlast::Ident {
-        sqlast::Ident {
-            value: self.value.clone(),
-            quote_style: Some('\"'),
-        }
+    pub fn to_sqlident(&self) -> sqlast::Located<sqlast::Ident> {
+        sqlast::Located::new(
+            sqlast::Ident::with_quote_unlocated('\"', self.value.clone()),
+            self.loc
+                .range()
+                .map(|(start, end)| sqlast::Range { start, end }),
+        )
     }
 
     pub fn replace_location(&self, loc: SourceLocation) -> Ident {
@@ -181,7 +183,7 @@ pub trait ToPath {
     fn to_path(&self, loc: &SourceLocation) -> Path;
 }
 
-impl ToPath for Vec<sqlast::Ident> {
+impl ToPath for Vec<sqlast::Located<sqlast::Ident>> {
     fn to_path(&self, loc: &SourceLocation) -> Path {
         self.iter()
             .map(|p| {

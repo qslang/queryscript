@@ -552,10 +552,7 @@ impl SQLBody {
                                 distinct: false,
                                 special: false,
                             }),
-                            alias: sqlast::Ident {
-                                value: "value".to_string(),
-                                quote_style: None,
-                            },
+                            alias: sqlast::Ident::new("value"),
                         }],
                         into: None,
                         from: vec![sqlast::TableWithJoins {
@@ -672,7 +669,7 @@ where
         }
     }
 
-    pub fn from_unbound(sqlpath: &Vec<sqlast::Ident>) -> SQLNames<TypeRef> {
+    pub fn from_unbound(sqlpath: &Vec<sqlast::Located<sqlast::Ident>>) -> SQLNames<TypeRef> {
         SQLNames {
             params: BTreeMap::new(),
             unbound: BTreeSet::from([sqlpath.iter().map(|i| i.value.clone()).collect()]),
