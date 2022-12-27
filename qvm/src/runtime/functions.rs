@@ -1,22 +1,10 @@
-use async_trait::async_trait;
-use datafusion::arrow::{
+use arrow::{
     datatypes::{DataType as DFDataType, Schema as DFSchema},
+    error::ArrowError,
     record_batch::RecordBatch,
 };
-use datafusion::common::Statistics;
-use datafusion::config::ConfigOptions;
-use datafusion::datasource::file_format::FileFormat;
-use datafusion::datasource::file_format::{
-    csv::CsvFormat, json::JsonFormat, parquet::ParquetFormat,
-};
-use datafusion::datasource::object_store::ObjectStoreUrl;
-use datafusion::execution::context::{SessionConfig, SessionContext};
-use datafusion::execution::runtime_env::RuntimeEnv;
-use datafusion::physical_plan::collect;
-use datafusion::physical_plan::file_format::FileScanConfig;
+use async_trait::async_trait;
 use futures::future::{BoxFuture, FutureExt};
-use object_store::path::Path;
-use object_store::ObjectMeta;
 use std::path::{Path as FilePath, PathBuf as FilePathBuf};
 use std::sync::Arc;
 
@@ -27,7 +15,7 @@ use crate::{
 };
 
 use super::{
-    error::{fail, Result},
+    error::{fail, Result, RuntimeError},
     runtime, Context,
 };
 
@@ -144,49 +132,49 @@ impl LoadFileFn {
     }
 
     // XXX We should change this to use arrow directly
-    pub async fn load(&self, file: &FilePath, format: Option<String>) -> Result<Value> {
-        let format_type = Self::derive_format(file, &format);
+    pub async fn load(
+        &self,
+        ctx: &Context,
+        file_path: &FilePath,
+        format: Option<String>,
+    ) -> Result<Value> {
+        let format_type = Self::derive_format(file_path, &format);
 
-        let format: Box<dyn FileFormat> = match format_type {
-            Format::Json => Box::new(JsonFormat::default().with_schema_infer_max_rec(Some(0)))
-                as Box<dyn FileFormat>,
-            Format::Csv => Box::new(CsvFormat::default().with_schema_infer_max_rec(Some(0)))
-                as Box<dyn FileFormat>,
-            Format::Parquet => Box::new(ParquetFormat::default()) as Box<dyn FileFormat>,
-        };
-        let location = Path::from_filesystem_path(&file)?;
-        let fmeta = std::fs::metadata(&file)?;
-        let ometa = ObjectMeta {
-            location,
-            last_modified: fmeta.modified().map(chrono::DateTime::from).unwrap(),
-            size: fmeta.len() as usize,
-        };
+        let records = ctx.expensive(move || {
+            let fd = std::fs::File::open(file_path)?;
 
-        let plan = format
-            .create_physical_plan(
-                FileScanConfig {
-                    file_schema: self.schema.clone(),
-                    file_groups: vec![vec![ometa.into()]],
-                    limit: None,
-                    object_store_url: ObjectStoreUrl::local_filesystem(),
-                    projection: None,
-                    statistics: Statistics {
-                        num_rows: None,
-                        total_byte_size: None,
-                        column_statistics: None,
-                        is_exact: true,
-                    },
-                    table_partition_cols: Vec::new(),
-                    config_options: ConfigOptions::new().into_shareable(),
-                },
-                &[],
-            )
-            .await?;
+            // NOTES:
+            // - This reads the entire file into memory, and then operates over it. We could
+            //   instead implement the Relation attribute for each Reader (or for Iterator<Item=RecordBatch>).
+            // - DataFusion implements an async reader for non-files (i.e. streams that are already async) by reading
+            //   newline delimited chunks of the file. We could do something like that to leverage async file reading.
+            // - The parquet library actually supports async reading, which we could do in a separate branch
+            let records = Arc::new(match format_type {
+                Format::Csv => {
+                    let reader = arrow::csv::ReaderBuilder::new()
+                        .has_header(true)
+                        .build(fd)?;
 
-        let ctx =
-            SessionContext::with_config_rt(SessionConfig::new(), Arc::new(RuntimeEnv::default()));
-        let task_ctx = ctx.task_ctx();
-        let records = Arc::new(collect(plan, task_ctx).await? as Vec<RecordBatch>);
+                    reader.collect::<Result<Vec<RecordBatch>, ArrowError>>()
+                }
+                Format::Json => {
+                    let reader = arrow::json::ReaderBuilder::new()
+                        .infer_schema(Some(100))
+                        .build(fd)?;
+
+                    reader.collect::<Result<Vec<RecordBatch>, ArrowError>>()
+                }
+                Format::Parquet => {
+                    let reader =
+                        parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(fd)?
+                            .build()?;
+
+                    reader.collect::<Result<Vec<RecordBatch>, ArrowError>>()
+                }
+            }? as Vec<RecordBatch>);
+
+            Ok::<Arc<Vec<_>>, RuntimeError>(records)
+        })?;
 
         Ok(Value::Relation(records))
     }
@@ -261,7 +249,7 @@ impl FnValue for LoadFileFn {
         let us = self.clone();
         async move {
             let (path_buf, format) = Self::parse_args(ctx, args)?;
-            us.load(&*path_buf, format).await
+            us.load(ctx, &*path_buf, format).await
         }
         .boxed()
     }
