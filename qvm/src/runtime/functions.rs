@@ -1,7 +1,7 @@
 use arrow::{
     datatypes::{DataType as ArrowDataType, Schema as ArrowSchema},
     error::ArrowError,
-    record_batch::RecordBatch,
+    record_batch::{RecordBatch, RecordBatchReader},
 };
 use async_trait::async_trait;
 use futures::future::{BoxFuture, FutureExt};
@@ -131,7 +131,6 @@ impl LoadFileFn {
         }
     }
 
-    // XXX We should change this to use arrow directly
     pub async fn load(
         &self,
         ctx: &Context,
@@ -166,10 +165,16 @@ impl LoadFileFn {
                     reader.collect::<Result<Vec<RecordBatch>, ArrowError>>()
                 }
                 Format::Parquet => {
-                    // XXX We should dynamically verify that this file's schema matches the function's return schema
                     let reader =
                         parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(fd)?
                             .build()?;
+
+                    if reader.schema() != self.schema {
+                        return fail!(
+                            "Parquet file {:?} has a different schema than the target variable's type",
+                            file_path
+                        );
+                    }
 
                     reader.collect::<Result<Vec<RecordBatch>, ArrowError>>()
                 }
