@@ -1,7 +1,6 @@
 use object_store;
-use snafu::{Backtrace, GenerateImplicitData, Snafu};
+use snafu::{Backtrace, Snafu};
 use std::num::ParseFloatError;
-use std::sync::Arc;
 
 pub type Result<T, E = RuntimeError> = std::result::Result<T, E>;
 
@@ -35,14 +34,6 @@ pub enum RuntimeError {
     #[snafu(context(false))]
     ParquetError {
         source: parquet::errors::ParquetError,
-        backtrace: Option<Backtrace>,
-    },
-
-    // NOTE: We should eventually make these feature-dependent errors
-    // (e.g. DataFusionError only needs to exist if the datafusion feature is on)
-    #[snafu(context(false))]
-    DataFusionError {
-        source: Arc<datafusion::common::DataFusionError>,
         backtrace: Option<Backtrace>,
     },
 
@@ -84,15 +75,6 @@ impl RuntimeError {
 impl<Guard> From<std::sync::PoisonError<Guard>> for RuntimeError {
     fn from(e: std::sync::PoisonError<Guard>) -> RuntimeError {
         RuntimeError::new(format!("{}", e).as_str())
-    }
-}
-
-impl From<datafusion::common::DataFusionError> for RuntimeError {
-    fn from(e: datafusion::common::DataFusionError) -> RuntimeError {
-        RuntimeError::DataFusionError {
-            source: Arc::new(e),
-            backtrace: Option::<Backtrace>::generate(),
-        }
     }
 }
 

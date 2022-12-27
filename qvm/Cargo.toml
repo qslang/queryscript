@@ -13,6 +13,12 @@ ts = ["serde", "dep:ts-rs"]
 
 [dependencies]
 
+arrow = { version = "26.0.0", default-features = false, features = [
+    "csv",
+    "ffi",
+    "json",
+    "prettyprint",
+] }
 async-trait = "0.1"
 chrono = { version = "0.4.22", default-features = false }
 colored = "2"
@@ -32,6 +38,7 @@ ts-rs = { version = "6.2", optional = true }
 # We don't import this directly (rather, through "arrow"), but need the serde feature
 # to be propagated through to it.
 arrow-schema = { version = "*" }
+arrow-buffer = { version = "*" }
 
 # This comes via arrow, but we need to access it directly.
 parquet = { version = "*" }
@@ -43,15 +50,7 @@ parquet = { version = "*" }
 duckdb = { version = "0.6.0", features = ["bundled"] }
 cxx = "1.0"
 # These are duckdb dependencies that we access directly
-arrow = { version = "*", default-features = false, features = [
-    "prettyprint",
-    "ffi",
-] }
 hashlink = { version = "*" }
-
-# Datafusion
-datafusion = { path = "../arrow-datafusion/datafusion/core" }
-arrow-buffer = { version = "*" }
 
 [build-dependencies]
 cxx-build = "1.0"

@@ -5,8 +5,10 @@ mod normalize;
 pub mod runtime;
 pub mod sql;
 
-pub mod datafusion;
 pub mod duckdb;
+
+// NOTE: Datafusion is no longer in the repo, so this is technically dead code.
+// pub mod datafusion;
 
 pub use crate::runtime::runtime::*;
 pub use context::Context;

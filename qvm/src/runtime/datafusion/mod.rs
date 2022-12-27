@@ -1,3 +1,5 @@
+// NOTE: This is currently dead code, since we've removed support for datafusion
+
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use datafusion::arrow::datatypes::{
     DataType as DFDataType, Schema as DFSchema, SchemaRef as DFSchemaRef,

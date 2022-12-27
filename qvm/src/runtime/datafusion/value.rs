@@ -1,3 +1,5 @@
+// NOTE: This is currently dead code, since we've removed support for datafusion
+
 use crate::runtime::error::{fail, Result, RuntimeError};
 use crate::types::{types::try_fields_to_arrow_fields, ArrowField, Value};
 use arrow::datatypes::{DECIMAL128_MAX_PRECISION, DECIMAL128_MAX_SCALE};

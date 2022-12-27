@@ -41,7 +41,6 @@ impl SQLParam {
 #[derive(Copy, Clone)]
 pub enum SQLEngineType {
     DuckDB,
-    DataFusion,
 }
 
 impl SQLEngineType {
@@ -49,7 +48,6 @@ impl SQLEngineType {
         use SQLEngineType::*;
         Ok(match name.to_lowercase().as_str() {
             "duckdb" => DuckDB,
-            "datafusion" => DataFusion,
             name => {
                 return Err(crate::runtime::RuntimeError::unimplemented(
                     format!("SQL engine {}", name).as_str(),
@@ -63,6 +61,5 @@ pub fn new_engine(kind: SQLEngineType) -> Arc<dyn SQLEngine> {
     use SQLEngineType::*;
     match kind {
         DuckDB => Arc::new(super::duckdb::DuckDBEngine::new()),
-        DataFusion => Arc::new(super::datafusion::DataFusionEngine()),
     }
 }
