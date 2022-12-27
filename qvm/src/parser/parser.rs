@@ -271,8 +271,8 @@ impl<'a> Parser<'a> {
 
     pub fn parse_ident(&mut self) -> Result<Ident> {
         let start = self.peek_start_location();
-        let end = self.peek_end_location();
         let token = self.next_token();
+        let end = self.peek_end_location();
         let loc = SourceLocation::Range(self.file.clone(), start.clone(), end);
         match token.token {
             Token::Word(w) => Ok(Ident::with_location(loc, w.value)),
