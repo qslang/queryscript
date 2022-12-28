@@ -221,12 +221,8 @@ impl Compiler {
                     c_try!(result, idle.changed().await);
                 }
 
-                // In case there's no more work to be done, yield to the executor so that we can be sure
-                // that we'll trigger the park signal (and not get stuck waiting forever for it)
-                tokio::task::yield_now().await;
-
                 // If there were any unresolved types, then loop around again (knowing that the thread will
-                // park at least once after the requisite work is done).
+                // park at least once after the requisite work is done or immediately if there's no more work).
                 continue;
             }
 
@@ -1199,4 +1195,41 @@ pub fn coerce<T: Constrainable + 'static>(
 
         Constrainable::coerce(&op, &left, &right)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{atomic::AtomicUsize, Arc};
+
+    #[test]
+    fn test_park_no_op() {
+        // This test verifies that if there's no work to be done, then the thread will be parked and the
+        // receive signal will fire, so it's safe to keep checking changed() and not risk blocking indefinitely.
+        let (idle_tx, mut idle_rx) = tokio::sync::watch::channel(());
+        let on_park = move || {
+            idle_tx.send(()).ok();
+        };
+
+        let drive_counter = Arc::new(AtomicUsize::new(0));
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .thread_name("qvm-compiler")
+            .thread_stack_size(3 * 1024 * 1024)
+            .on_thread_park(on_park)
+            .build()
+            .unwrap();
+
+        runtime.block_on({
+            let drive_counter = drive_counter.clone();
+            async move {
+                for _ in 0..10 {
+                    idle_rx.changed().await.unwrap();
+                    drive_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    assert!(!idle_rx.has_changed().unwrap());
+                }
+            }
+        });
+
+        assert_eq!(drive_counter.load(std::sync::atomic::Ordering::SeqCst), 10);
+    }
 }
