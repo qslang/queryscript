@@ -179,9 +179,10 @@ pub fn compile_sqlreference(
                 })));
                 return Ok(CTypedExpr { type_, expr });
             } else {
-                let available = scope
-                    .read()?
-                    .get_available_references(compiler.clone(), loc)?;
+                let available =
+                    scope
+                        .read()?
+                        .get_available_references(compiler.clone(), loc, None)?;
 
                 let tse = available.then({
                     let loc = loc.clone();
@@ -437,10 +438,15 @@ impl SQLScope {
         &self,
         compiler: Compiler,
         loc: &SourceLocation,
+        relation: Option<String>,
     ) -> Result<CRef<InsertionOrderMap<String, FieldMatch>>> {
         combine_crefs(
             self.relations
                 .iter()
+                .filter(|(n, _)| match &relation {
+                    Some(r) => *n == r,
+                    None => true,
+                })
                 .map(|(n, te)| {
                     let n = Ident::with_location(loc.clone(), n.clone());
                     get_rowtype(compiler.clone(), te.clone())?.then(move |rowtype: Ref<MType>| {
@@ -938,10 +944,25 @@ pub fn compile_select(
                         sql: compiled.sql,
                     }])
                 }
-                sqlast::SelectItem::Wildcard => {
-                    let available = scope
-                        .read()?
-                        .get_available_references(compiler.clone(), loc)?;
+                sqlast::SelectItem::Wildcard | sqlast::SelectItem::QualifiedWildcard { .. } => {
+                    let qualifier = match p {
+                        sqlast::SelectItem::Wildcard => None,
+                        sqlast::SelectItem::QualifiedWildcard(qualifier) => {
+                            if qualifier.0.len() != 1 {
+                                return Err(CompileError::unimplemented(
+                                    loc.clone(),
+                                    "Wildcard of lenght != 1",
+                                ));
+                            }
+
+                            Some(qualifier.0[0].value.clone())
+                        }
+                        _ => unreachable!(),
+                    };
+                    let available =
+                        scope
+                            .read()?
+                            .get_available_references(compiler.clone(), loc, qualifier)?;
                     available.then({
                         let loc = loc.clone();
                         move |available: Ref<InsertionOrderMap<String, FieldMatch>>| {
@@ -979,9 +1000,6 @@ pub fn compile_select(
                             Ok(mkcref(ret))
                         }
                     })?
-                }
-                sqlast::SelectItem::QualifiedWildcard { .. } => {
-                    return Err(CompileError::unimplemented(loc.clone(), "Table wildcard"));
                 }
             })
         })
