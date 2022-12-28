@@ -215,6 +215,11 @@ impl Compiler {
             }
 
             if unresolved > 0 {
+                // Consume the changed() signals, so that next time we loop around, we actually park once
+                // the remaining work is complete.
+                while c_try!(result, idle.has_changed()) {
+                    c_try!(result, idle.changed().await);
+                }
                 // If there were any unresolved types, then loop around again (knowing that the thread will
                 // park at least once after the requisite work is done).
                 continue;
