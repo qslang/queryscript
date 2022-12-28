@@ -220,6 +220,11 @@ impl Compiler {
                 while c_try!(result, idle.has_changed()) {
                     c_try!(result, idle.changed().await);
                 }
+
+                // In case there's no more work to be done, yield to the executor so that we can be sure
+                // that we'll trigger the park signal (and not get stuck waiting forever for it)
+                tokio::task::yield_now().await;
+
                 // If there were any unresolved types, then loop around again (knowing that the thread will
                 // park at least once after the requisite work is done).
                 continue;
