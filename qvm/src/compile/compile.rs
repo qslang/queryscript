@@ -163,6 +163,13 @@ impl Compiler {
             let idle = c_try!(result, self.data.read()).idle.clone();
             let mut idle = c_try!(result, idle.try_write());
 
+            // Consume any ready changed() signals, so that next time we do not cancel the handles
+            // prematurely. If we consume all of the ready signals, and there's no more work left,
+            // then the thread will immediately park, so there's no risk of "over checking" the signal.
+            while c_try!(result, idle.has_changed()) {
+                c_try!(result, idle.changed().await);
+            }
+
             c_try!(result, idle.changed().await);
 
             // Claim the set external types we've accrued within the compiler to reset things.
@@ -215,12 +222,6 @@ impl Compiler {
             }
 
             if unresolved > 0 {
-                // Consume the changed() signals, so that next time we loop around, we actually park once
-                // the remaining work is complete.
-                while c_try!(result, idle.has_changed()) {
-                    c_try!(result, idle.changed().await);
-                }
-
                 // If there were any unresolved types, then loop around again (knowing that the thread will
                 // park at least once after the requisite work is done or immediately if there's no more work).
                 continue;
