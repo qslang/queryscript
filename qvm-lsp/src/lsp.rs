@@ -18,7 +18,7 @@ use qvm::{
     compile,
     compile::{
         autocomplete::{loc_to_pos, pos_to_loc, AutoCompleter},
-        schema::{CRef, SType, SchemaEntry},
+        schema::{CRef, Decl, SType, SchemaEntry},
         Compiler, Schema, SchemaRef,
     },
     error::MultiError,
@@ -51,6 +51,8 @@ pub struct Symbol {
     pub loc: SourceLocation,
     pub name: String,
     pub type_: CRef<SType>,
+    pub def: SourceLocation,
+    pub decl: Option<Decl>,
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +157,7 @@ impl LanguageServer for Backend {
                     ..Default::default()
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                definition_provider: Some(OneOf::Left(true)),
                 code_lens_provider: Some(CodeLensOptions {
                     resolve_provider: Some(true),
                 }),
@@ -367,6 +370,33 @@ impl LanguageServer for Backend {
         }
     }
 
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let loc = {
+            let Position { line, character } = params.text_document_position_params.position;
+            Location {
+                line: (line + 1) as u64,
+                column: (character + 1) as u64,
+            }
+        };
+        if let Some(symbol) = self
+            .get_symbol(
+                params.text_document_position_params.text_document.uri,
+                loc.clone(),
+            )
+            .await?
+        {
+            Ok(symbol
+                .def
+                .normalize()
+                .map(|l| GotoDefinitionResponse::Scalar(l)))
+        } else {
+            Ok(None)
+        }
+    }
+
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
         let uri = params.text_document.uri;
         let schema = self.get_schema(&uri).await?;
@@ -511,6 +541,8 @@ impl compile::OnSymbol for SymbolRecorder {
         &mut self,
         name: String,
         type_: CRef<SType>,
+        def: SourceLocation,
+        decl: Option<Decl>,
         loc: SourceLocation,
     ) -> compile::Result<()> {
         let file = loc.file();
@@ -522,6 +554,8 @@ impl compile::OnSymbol for SymbolRecorder {
                     loc: SourceLocation::Range(file, range),
                     name,
                     type_,
+                    def,
+                    decl,
                 };
                 match self.symbols.entry(uri) {
                     Entry::Vacant(e) => {

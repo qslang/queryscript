@@ -37,7 +37,14 @@ pub struct CompilerData {
 pub trait OnSymbol {
     fn as_any(&self) -> &dyn std::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
-    fn on_symbol(&mut self, name: String, type_: CRef<SType>, loc: SourceLocation) -> Result<()>;
+    fn on_symbol(
+        &mut self,
+        name: String,
+        type_: CRef<SType>,
+        def: SourceLocation,
+        decl: Option<Decl>,
+        loc: SourceLocation,
+    ) -> Result<()>;
 }
 
 pub struct CompilerConfig {
@@ -143,12 +150,14 @@ impl Compiler {
         &self,
         name: String,
         type_: CRef<SType>,
+        def: SourceLocation,
+        decl: Option<Decl>,
         loc: SourceLocation,
     ) -> Result<()> {
         let mut data = self.data.write()?;
         let on_symbol = &mut data.config.on_symbol;
         Ok(match on_symbol {
-            Some(f) => f.on_symbol(name, type_, loc)?,
+            Some(f) => f.on_symbol(name, type_, def, decl, loc)?,
             None => {}
         })
     }
@@ -432,7 +441,7 @@ pub fn lookup_path(
     path: &ast::Path,
     import_global: bool,
     resolve_last: bool,
-) -> Result<(Ref<Schema>, Option<Decl>, ast::Path)> {
+) -> Result<(Ref<Schema>, Option<Located<Decl>>, ast::Path)> {
     if path.len() == 0 {
         return Ok((schema, None, path.clone()));
     }
@@ -446,7 +455,7 @@ pub fn lookup_path(
                 }
 
                 if i == path.len() - 1 && !resolve_last {
-                    return Ok((schema.clone(), Some(decl.get().clone()), vec![]));
+                    return Ok((schema.clone(), Some(decl.clone()), vec![]));
                 }
 
                 match &decl.value {
@@ -456,13 +465,7 @@ pub fn lookup_path(
                             .schema
                             .clone()
                     }
-                    _ => {
-                        return Ok((
-                            schema.clone(),
-                            Some(decl.get().clone()),
-                            path[i + 1..].to_vec(),
-                        ))
-                    }
+                    _ => return Ok((schema.clone(), Some(decl.clone()), path[i + 1..].to_vec())),
                 }
             }
             None => match &schema.read()?.parent_scope {
@@ -522,8 +525,8 @@ pub fn resolve_type(
                 return Err(CompileError::no_such_entry(r));
             }
             let decl = decl.ok_or_else(|| CompileError::no_such_entry(r))?;
-            let t = match decl.value {
-                SchemaEntry::Type(t) => t,
+            let t = match &decl.value {
+                SchemaEntry::Type(t) => t.clone(),
                 _ => return Err(CompileError::wrong_kind(path.clone(), "type", &decl)),
             };
 
@@ -1015,7 +1018,13 @@ pub fn unify_expr_decl(
         }
     }
 
-    compiler.run_on_symbol(name.clone().into(), value.type_.clone(), name.loc.clone())?;
+    compiler.run_on_symbol(
+        name.clone().into(),
+        value.type_.clone(),
+        decl.location().clone(),
+        Some(decl.get().clone()),
+        decl.location().clone(),
+    )?;
 
     Ok(())
 }

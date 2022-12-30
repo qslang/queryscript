@@ -184,12 +184,19 @@ pub fn compile_sqlreference(
         1 => {
             let name = sqlpath[0].value.clone();
 
-            if let Some(relation_type) = scope.read()?.relations.get(&name) {
+            if let Some((relation_type, relation_loc)) = scope.read()?.relations.get(&name) {
                 let type_ = get_rowtype(compiler.clone(), relation_type.clone())?;
                 let expr = mkcref(Expr::SQL(Arc::new(SQL {
                     names: CSQLNames::from_unbound(sqlpath),
                     body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
                 })));
+                compiler.run_on_symbol(
+                    name.clone(),
+                    mkcref(type_.clone().into()),
+                    relation_loc.clone(),
+                    None,
+                    loc.clone(),
+                )?;
                 return Ok(CTypedExpr { type_, expr });
             } else {
                 let available =
@@ -201,12 +208,13 @@ pub fn compile_sqlreference(
                     move |available: Ref<InsertionOrderMap<String, FieldMatch>>| {
                         if let Some(fm) = available.read()?.get(&name) {
                             if let Some(type_) = fm.type_.clone() {
-                                let loc = path[0].loc.clone();
                                 let sqlpath =
                                     vec![ident(fm.relation.value.clone()), ident(name.clone())];
                                 compiler.run_on_symbol(
                                     name.clone(),
                                     mkcref(type_.clone().into()),
+                                    fm.relation.loc.clone(),
+                                    None,
                                     loc.clone(),
                                 )?;
                                 Ok(mkcref(TypedExpr {
@@ -247,7 +255,8 @@ pub fn compile_sqlreference(
 
             // If the relation can't be found in the scope, just fall through
             //
-            if let Some(relation_type) = scope.read()?.relations.get(&relation_name) {
+            if let Some((relation_type, relation_loc)) = scope.read()?.relations.get(&relation_name)
+            {
                 let rowtype = get_rowtype(compiler.clone(), relation_type.clone())?;
                 let type_ = typecheck_path(rowtype, vec![path[1].clone()].as_slice())?;
                 let expr = mkcref(Expr::SQL(Arc::new(SQL {
@@ -257,6 +266,8 @@ pub fn compile_sqlreference(
                 compiler.run_on_symbol(
                     path[1].value.clone(),
                     mkcref(type_.clone().into()),
+                    relation_loc.clone(),
+                    None,
                     path[1].loc.clone(),
                 )?;
                 return Ok(CTypedExpr { type_, expr });
@@ -326,7 +337,13 @@ pub fn compile_reference(
     };
 
     if let Some(ident) = path.last() {
-        compiler.run_on_symbol(ident.value.clone(), stype.clone(), ident.loc.clone())?;
+        compiler.run_on_symbol(
+            ident.value.clone(),
+            stype.clone(),
+            decl.location().clone(),
+            Some(decl.get().clone()),
+            ident.loc.clone(),
+        )?;
     }
 
     Ok(r)
@@ -440,7 +457,7 @@ impl Constrainable for FieldMatch {}
 #[derive(Clone, Debug)]
 pub struct SQLScope {
     pub parent: Option<Arc<SQLScope>>,
-    pub relations: BTreeMap<String, CRef<MType>>,
+    pub relations: BTreeMap<String, (CRef<MType>, SourceLocation)>,
     pub multiple_rows: bool,
 }
 
@@ -470,7 +487,7 @@ impl SQLScope {
                     Some(r) => *n == r,
                     None => true,
                 })
-                .map(|(n, te)| {
+                .map(|(n, (te, _))| {
                     let n = Ident::with_location(loc.clone(), n.clone());
                     get_rowtype(compiler.clone(), te.clone())?.then(move |rowtype: Ref<MType>| {
                         let rowtype = rowtype.read()?.clone();
@@ -520,7 +537,7 @@ impl SQLScope {
             let compiler = compiler.clone();
             async move {
                 let mut names = names.clone();
-                for (relation, type_) in &relations {
+                for (relation, (type_, _)) in &relations {
                     names.unbound.remove(&vec![relation.clone()]);
                     let rowtype = get_rowtype(compiler.clone(), type_.clone())?.await?;
                     match &*rowtype.read()? {
@@ -554,7 +571,7 @@ impl SQLScope {
                 )]))
             }
             btree_map::Entry::Vacant(e) => {
-                e.insert(type_);
+                e.insert((type_, loc.clone()));
             }
         };
         Ok(())
