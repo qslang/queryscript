@@ -40,6 +40,7 @@ pub enum SymbolKind {
     Field,
     Argument,
     Type,
+    File,
 }
 
 pub trait OnSymbol {
@@ -402,44 +403,62 @@ pub fn lookup_schema(
     schema: Ref<Schema>,
     path: &ast::Path,
 ) -> Result<Ref<ImportedSchema>> {
-    if let Some(s) = schema.read()?.imports.get(&path.to_strings()) {
-        return Ok(s.clone());
-    }
-
-    let (k, v) = if let Some(root) = &schema.read()?.folder {
-        let mut file_path_buf = FilePath::new(root).to_path_buf();
-        for p in path {
-            file_path_buf.push(FilePath::new(&p.value));
-        }
-        for extension in SCHEMA_EXTENSIONS.iter() {
-            file_path_buf.set_extension(extension);
-            if file_path_buf.as_path().exists() {
-                break;
-            }
-        }
-        let file_path = file_path_buf.as_path();
-
-        let s = compile_schema_from_file(compiler.clone(), file_path)
-            .as_result()?
-            .unwrap();
-        (path.clone(), s.clone())
+    let imported = schema
+        .read()?
+        .imports
+        .get(&path.to_strings())
+        .map(Clone::clone);
+    let imported = if let Some(imported) = imported {
+        imported
     } else {
-        return Err(CompileError::no_such_entry(path.clone()));
+        let (k, v) = if let Some(root) = &schema.read()?.folder {
+            let mut file_path_buf = FilePath::new(root).to_path_buf();
+            for p in path {
+                file_path_buf.push(FilePath::new(&p.value));
+            }
+            for extension in SCHEMA_EXTENSIONS.iter() {
+                file_path_buf.set_extension(extension);
+                if file_path_buf.as_path().exists() {
+                    break;
+                }
+            }
+            let file_path = file_path_buf.as_path();
+
+            let s = compile_schema_from_file(compiler.clone(), file_path)
+                .as_result()?
+                .unwrap();
+            (path.clone(), s.clone())
+        } else {
+            return Err(CompileError::no_such_entry(path.clone()));
+        };
+
+        let imported = mkref(ImportedSchema {
+            args: if v.read()?.externs.len() == 0 {
+                None
+            } else {
+                Some(Vec::new())
+            },
+            schema: v.clone(),
+        });
+
+        schema
+            .write()?
+            .imports
+            .insert(k.to_strings(), imported.clone());
+
+        imported
     };
 
-    let imported = mkref(ImportedSchema {
-        args: if v.read()?.externs.len() == 0 {
-            None
-        } else {
-            Some(Vec::new())
-        },
-        schema: v.clone(),
-    });
-
-    schema
-        .write()?
-        .imports
-        .insert(k.to_strings(), imported.clone());
+    if let Some(ident) = path.last() {
+        let file = imported.read()?.schema.read()?.file.clone();
+        compiler.run_on_symbol(
+            ident.clone(),
+            SymbolKind::File,
+            CRef::new_unknown("schema"),
+            SourceLocation::File(file),
+            None,
+        )?;
+    }
 
     return Ok(imported);
 }
@@ -913,6 +932,10 @@ pub fn declare_schema_entry(
                         }
                         let decl = decl.ok_or_else(|| CompileError::no_such_entry(r))?;
 
+                        if let Some(ident) = item.last() {
+                            run_on_decl(compiler.clone(), ident.clone(), decl.get())?;
+                        }
+
                         let imported_schema = SchemaInstance {
                             schema: schema.clone(),
                             id: None,
@@ -977,7 +1000,32 @@ pub fn declare_schema_entry(
     Ok(())
 }
 
-pub fn unify_type_decl(schema: Ref<Schema>, name: &Ident, type_: CRef<MType>) -> Result<()> {
+fn run_on_decl(compiler: Compiler, ident: Ident, decl: &Decl) -> Result<()> {
+    match &decl.value {
+        SchemaEntry::Expr(e) => compiler.run_on_symbol(
+            ident,
+            SymbolKind::Value,
+            e.type_.clone(),
+            decl.name.loc.clone(),
+            Some(decl.clone()),
+        ),
+        SchemaEntry::Type(t) => compiler.run_on_symbol(
+            ident,
+            SymbolKind::Type,
+            SType::new_mono(t.clone()),
+            decl.name.loc.clone(),
+            Some(decl.clone()),
+        ),
+        SchemaEntry::Schema(_) => Ok(()),
+    }
+}
+
+pub fn unify_type_decl(
+    compiler: Compiler,
+    schema: Ref<Schema>,
+    name: &Ident,
+    type_: CRef<MType>,
+) -> Result<()> {
     let s = schema.read()?;
     let decl = s.decls.get(&name.value).ok_or_else(|| {
         CompileError::internal(
@@ -1002,6 +1050,8 @@ pub fn unify_type_decl(schema: Ref<Schema>, name: &Ident, type_: CRef<MType>) ->
             ))
         }
     }
+
+    run_on_decl(compiler.clone(), decl.name.clone(), decl.get())?;
 
     Ok(())
 }
@@ -1037,13 +1087,7 @@ pub fn unify_expr_decl(
         }
     }
 
-    compiler.run_on_symbol(
-        decl.name.clone(),
-        SymbolKind::Value,
-        value.type_.clone(),
-        decl.name.loc.clone(),
-        Some(decl.get().clone()),
-    )?;
+    run_on_decl(compiler.clone(), decl.name.clone(), decl.get())?;
 
     Ok(())
 }
@@ -1084,7 +1128,7 @@ pub fn compile_schema_entry(
         ast::StmtBody::Import { .. } => {}
         ast::StmtBody::TypeDef(nt) => {
             let type_ = resolve_type(compiler.clone(), schema.clone(), &nt.def)?;
-            unify_type_decl(schema.clone(), &nt.name, type_)?;
+            unify_type_decl(compiler.clone(), schema.clone(), &nt.name, type_)?;
         }
         ast::StmtBody::FnDef {
             name,

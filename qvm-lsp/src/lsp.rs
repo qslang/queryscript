@@ -358,18 +358,20 @@ impl LanguageServer for Backend {
             )
             .await?
         {
+            let mut contents = vec![MarkedString::LanguageString(LanguageString {
+                language: "".into(),
+                value: symbol.def.pretty(),
+            })];
             let formatted = format_symbol(&symbol)?;
+            if formatted.len() > 0 {
+                contents.push(MarkedString::LanguageString(LanguageString {
+                    language: "tql".into(),
+                    value: formatted,
+                }));
+            }
+
             Ok(symbol.name.loc.range().map(|range| Hover {
-                contents: HoverContents::Array(vec![
-                    MarkedString::LanguageString(LanguageString {
-                        language: "".into(),
-                        value: symbol.def.pretty(),
-                    }),
-                    MarkedString::LanguageString(LanguageString {
-                        language: "tql".into(),
-                        value: formatted,
-                    }),
-                ]),
+                contents: HoverContents::Array(contents),
                 range: Some(range.normalize()),
             }))
         } else {
@@ -395,10 +397,20 @@ impl LanguageServer for Backend {
             )
             .await?
         {
-            Ok(symbol
-                .def
-                .normalize()
-                .map(|l| GotoDefinitionResponse::Scalar(l)))
+            Ok(match &symbol.def {
+                SourceLocation::File(f) => {
+                    if let Ok(uri) = Url::from_file_path(FilePath::new(f)) {
+                        Some(lsp_types::Location {
+                            uri,
+                            range: FULL_DOCUMENT_RANGE,
+                        })
+                    } else {
+                        None
+                    }
+                }
+                _ => symbol.def.normalize(),
+            }
+            .map(|l| GotoDefinitionResponse::Scalar(l)))
         } else {
             Ok(None)
         }
@@ -526,6 +538,7 @@ fn format_symbol(symbol: &Symbol) -> Result<String> {
             parts.push(" ".into());
             parts.push(format!("{:#?}", symbol.type_));
         }
+        compile::SymbolKind::File => {}
     }
     Ok(parts.join(""))
 }
