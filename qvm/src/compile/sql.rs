@@ -477,7 +477,7 @@ impl SQLScope {
     pub fn get_available_references(
         &self,
         compiler: Compiler,
-        loc: &SourceLocation,
+        _loc: &SourceLocation,
         relation: Option<String>,
     ) -> Result<CRef<InsertionOrderMap<String, FieldMatch>>> {
         combine_crefs(
@@ -487,7 +487,7 @@ impl SQLScope {
                     Some(r) => *n == r,
                     None => true,
                 })
-                .map(|(n, (te, _))| {
+                .map(|(n, (te, loc))| {
                     let n = Ident::with_location(loc.clone(), n.clone());
                     get_rowtype(compiler.clone(), te.clone())?.then(move |rowtype: Ref<MType>| {
                         let rowtype = rowtype.read()?.clone();
@@ -595,6 +595,8 @@ pub fn compile_relation(
             args,
             with_hints,
         } => {
+            let loc = path_location(&name.0.to_path(file.clone()));
+
             if args.is_some() {
                 return Err(CompileError::unimplemented(
                     loc.clone(),
@@ -640,7 +642,7 @@ pub fn compile_relation(
 
             scope
                 .write()?
-                .add_reference(&name, loc, relation.type_.clone())?;
+                .add_reference(&name, &loc, relation.type_.clone())?;
 
             let placeholder_name =
                 QVM_NAMESPACE.to_string() + compiler.next_placeholder("rel")?.as_str();
@@ -676,9 +678,19 @@ pub fn compile_relation(
             // NOTE: Once we thread locations through the parse tree, we should use the location here.
             let subquery = compile_sqlquery(compiler.clone(), schema.clone(), loc, subquery)?;
 
-            let name = match alias {
-                Some(a) => a.name.value.clone(),
-                None => compiler.next_placeholder("anonymous_subquery")?,
+            let (loc, name) = match alias {
+                Some(a) => (
+                    a.name
+                        .location()
+                        .as_ref()
+                        .map(|r| SourceLocation::from_file_range(file.clone(), Some(r.clone())))
+                        .unwrap_or(loc.clone()),
+                    a.name.value.clone(),
+                ),
+                None => (
+                    loc.clone(),
+                    compiler.next_placeholder("anonymous_subquery")?,
+                ),
             };
 
             scope
