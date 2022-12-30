@@ -530,6 +530,15 @@ pub fn resolve_type(
                 SchemaEntry::Type(t) => t.clone(),
                 _ => return Err(CompileError::wrong_kind(path.clone(), "type", &decl)),
             };
+            if let Some(ident) = path.last() {
+                compiler.run_on_symbol(
+                    ident.value.clone(),
+                    SType::new_mono(t.clone()),
+                    decl.name.loc.clone(),
+                    Some(decl.get().clone()),
+                    ident.loc.clone(),
+                )?;
+            }
 
             Ok(t)
         }

@@ -611,24 +611,25 @@ impl compile::OnSymbol for SymbolRecorder {
         loc: SourceLocation,
     ) -> compile::Result<()> {
         let file = loc.file();
-        let range = loc.range();
         if let Some(file) = file {
-            let uri = Url::from_file_path(FilePath::new(&file)).unwrap();
-            if let Some(range) = range {
-                let symbol = Symbol {
-                    loc: SourceLocation::Range(file, range),
-                    name,
-                    type_,
-                    def,
-                    decl,
-                };
-                match self.symbols.entry(uri) {
-                    Entry::Vacant(e) => {
-                        e.insert(vec![symbol]);
-                    }
-                    Entry::Occupied(mut e) => {
-                        e.get_mut().push(symbol);
-                    }
+            let uri = match Url::from_file_path(FilePath::new(&file)) {
+                Ok(uri) => uri,
+                Err(_) => return Ok(()),
+            };
+
+            let symbol = Symbol {
+                loc,
+                name,
+                type_,
+                def,
+                decl,
+            };
+            match self.symbols.entry(uri) {
+                Entry::Vacant(e) => {
+                    e.insert(vec![symbol]);
+                }
+                Entry::Occupied(mut e) => {
+                    e.get_mut().push(symbol);
                 }
             }
         }
