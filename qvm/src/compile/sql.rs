@@ -8,7 +8,9 @@ use std::sync::Arc;
 
 use crate::ast::{SourceLocation, ToPath};
 use crate::compile::coerce::CoerceOp;
-use crate::compile::compile::{coerce, lookup_path, resolve_global_atom, typecheck_path, Compiler};
+use crate::compile::compile::{
+    coerce, lookup_path, resolve_global_atom, typecheck_path, Compiler, SymbolKind,
+};
 use crate::compile::error::*;
 use crate::compile::inference::*;
 use crate::compile::inline::*;
@@ -191,11 +193,11 @@ pub fn compile_sqlreference(
                     body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
                 })));
                 compiler.run_on_symbol(
-                    name.clone(),
+                    path[0].clone(),
+                    SymbolKind::Field,
                     mkcref(type_.clone().into()),
                     relation_loc.clone(),
                     None,
-                    loc.clone(),
                 )?;
                 return Ok(CTypedExpr { type_, expr });
             } else {
@@ -211,11 +213,11 @@ pub fn compile_sqlreference(
                                 let sqlpath =
                                     vec![ident(fm.relation.value.clone()), ident(name.clone())];
                                 compiler.run_on_symbol(
-                                    name.clone(),
+                                    path[0].clone(),
+                                    SymbolKind::Field,
                                     mkcref(type_.clone().into()),
                                     fm.relation.loc.clone(),
                                     None,
-                                    loc.clone(),
                                 )?;
                                 Ok(mkcref(TypedExpr {
                                     type_: type_.clone(),
@@ -264,11 +266,11 @@ pub fn compile_sqlreference(
                     body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
                 })));
                 compiler.run_on_symbol(
-                    path[1].value.clone(),
+                    path[1].clone(),
+                    SymbolKind::Value,
                     mkcref(type_.clone().into()),
                     relation_loc.clone(),
                     None,
-                    path[1].loc.clone(),
                 )?;
                 return Ok(CTypedExpr { type_, expr });
             }
@@ -337,12 +339,17 @@ pub fn compile_reference(
     };
 
     if let Some(ident) = path.last() {
+        let kind = if decl.fn_arg {
+            SymbolKind::Argument
+        } else {
+            SymbolKind::Value
+        };
         compiler.run_on_symbol(
-            ident.value.clone(),
+            ident.clone(),
+            kind,
             stype.clone(),
             decl.name.loc.clone(),
             Some(decl.get().clone()),
-            ident.loc.clone(),
         )?;
     }
 

@@ -34,16 +34,24 @@ pub struct CompilerData {
     pub files: BTreeMap<String, String>,
 }
 
+#[derive(Clone, Debug)]
+pub enum SymbolKind {
+    Value,
+    Field,
+    Argument,
+    Type,
+}
+
 pub trait OnSymbol {
     fn as_any(&self) -> &dyn std::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
     fn on_symbol(
         &mut self,
-        name: String,
+        name: Ident,
+        kind: SymbolKind,
         type_: CRef<SType>,
         def: SourceLocation,
         decl: Option<Decl>,
-        loc: SourceLocation,
     ) -> Result<()>;
 }
 
@@ -148,16 +156,16 @@ impl Compiler {
 
     pub fn run_on_symbol(
         &self,
-        name: String,
+        name: Ident,
+        kind: SymbolKind,
         type_: CRef<SType>,
         def: SourceLocation,
         decl: Option<Decl>,
-        loc: SourceLocation,
     ) -> Result<()> {
         let mut data = self.data.write()?;
         let on_symbol = &mut data.config.on_symbol;
         Ok(match on_symbol {
-            Some(f) => f.on_symbol(name, type_, def, decl, loc)?,
+            Some(f) => f.on_symbol(name, kind, type_, def, decl)?,
             None => {}
         })
     }
@@ -532,11 +540,11 @@ pub fn resolve_type(
             };
             if let Some(ident) = path.last() {
                 compiler.run_on_symbol(
-                    ident.value.clone(),
+                    ident.clone(),
+                    SymbolKind::Type,
                     SType::new_mono(t.clone()),
                     decl.name.loc.clone(),
                     Some(decl.get().clone()),
-                    ident.loc.clone(),
                 )?;
             }
 
@@ -958,6 +966,7 @@ pub fn declare_schema_entry(
                 Decl {
                     public: stmt.export,
                     extern_: *extern_,
+                    fn_arg: false,
                     name: name.clone(),
                     value: value.clone(),
                 },
@@ -1029,11 +1038,11 @@ pub fn unify_expr_decl(
     }
 
     compiler.run_on_symbol(
-        name.clone().into(),
+        decl.name.clone(),
+        SymbolKind::Value,
         value.type_.clone(),
         decl.name.loc.clone(),
         Some(decl.get().clone()),
-        decl.name.loc.clone(),
     )?;
 
     Ok(())
@@ -1093,8 +1102,9 @@ pub fn compile_schema_entry(
                     generic.value.clone(),
                     Located::new(
                         Decl {
-                            public: true,
+                            public: false,
                             extern_: true,
+                            fn_arg: true,
                             name: generic.clone(),
                             value: SchemaEntry::Type(mkcref(MType::Name(Located::new(
                                 generic.clone(),
@@ -1117,8 +1127,9 @@ pub fn compile_schema_entry(
                     arg.name.value.clone(),
                     Located::new(
                         Decl {
-                            public: true,
+                            public: false,
                             extern_: true,
+                            fn_arg: true,
                             name: arg.name.clone(),
                             value: SchemaEntry::Expr(STypedExpr {
                                 type_: stype.clone(),
@@ -1129,11 +1140,11 @@ pub fn compile_schema_entry(
                     ),
                 );
                 compiler.run_on_symbol(
-                    arg.name.value.clone(),
+                    arg.name.clone(),
+                    SymbolKind::Argument,
                     stype,
                     arg.name.loc.clone(),
                     None,
-                    arg.name.loc.clone(),
                 )?;
                 inner_schema
                     .write()?

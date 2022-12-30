@@ -939,6 +939,7 @@ pub fn mkref<T>(t: T) -> Ref<T> {
 pub struct Decl {
     pub public: bool,
     pub extern_: bool,
+    pub fn_arg: bool,
     pub name: Ident,
     pub value: SchemaEntry,
 }

@@ -69,6 +69,7 @@ lazy_static! {
             Decl {
                 public: true,
                 extern_: false,
+                fn_arg: false,
                 name: Ident::with_location(BUILTIN_LOC.clone(), name.to_string()),
                 value: SchemaEntry::Type(mkcref(MType::Atom(Located::new(
                     type_.clone(),

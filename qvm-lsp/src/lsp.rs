@@ -48,8 +48,8 @@ const DEFAULT_SETTINGS: Settings = Settings {
 
 #[derive(Debug, Clone)]
 pub struct Symbol {
-    pub loc: SourceLocation,
-    pub name: String,
+    pub name: ast::Ident,
+    pub kind: compile::SymbolKind,
     pub type_: CRef<SType>,
     pub def: SourceLocation,
     pub decl: Option<Decl>,
@@ -358,12 +358,8 @@ impl LanguageServer for Backend {
             )
             .await?
         {
-            let formatted = format_decl(
-                symbol.name,
-                symbol.type_,
-                symbol.decl.map_or(false, |decl| decl.public),
-            )?;
-            Ok(symbol.loc.range().map(|range| Hover {
+            let formatted = format_symbol(&symbol)?;
+            Ok(symbol.name.loc.range().map(|range| Hover {
                 contents: HoverContents::Array(vec![
                     MarkedString::LanguageString(LanguageString {
                         language: "".into(),
@@ -480,40 +476,56 @@ fn get_fn_type(type_: CRef<SType>) -> Result<Option<(MFnType, BTreeSet<String>)>
     Ok(None)
 }
 
-fn format_decl(name: String, type_: CRef<SType>, is_public: bool) -> Result<String> {
+fn format_symbol(symbol: &Symbol) -> Result<String> {
+    let is_public = symbol.decl.as_ref().map_or(false, |decl| decl.public);
     let mut parts = Vec::<String>::new();
     if is_public {
         parts.push("export ".into());
     }
-    if let Some((mfn, variables)) = get_fn_type(type_.clone())? {
-        parts.push("fn ".into());
-        parts.push(name);
-        if variables.len() > 0 {
-            parts.push("<".into());
-            for (i, v) in variables.into_iter().enumerate() {
-                if i > 0 {
-                    parts.push(", ".into());
-                }
+    match symbol.kind {
+        compile::SymbolKind::Value => {
+            if let Some((mfn, variables)) = get_fn_type(symbol.type_.clone())? {
+                parts.push("fn ".into());
+                parts.push(symbol.name.value.clone());
+                if variables.len() > 0 {
+                    parts.push("<".into());
+                    for (i, v) in variables.into_iter().enumerate() {
+                        if i > 0 {
+                            parts.push(", ".into());
+                        }
 
-                parts.push(v);
+                        parts.push(v);
+                    }
+                    parts.push(">".into());
+                }
+                parts.push("(\n".into());
+                for f in mfn.args.into_iter() {
+                    parts.push("\t".into());
+                    parts.push(f.name.into());
+                    parts.push(" ".into());
+                    parts.push(format!("{:#?}", f.type_).replace("\n", "\n\t"));
+                    parts.push(",\n".into());
+                }
+                parts.push(") ".into());
+                parts.push(format!("{:#?}", mfn.ret));
+            } else {
+                parts.push("let ".into());
+                parts.push(symbol.name.value.clone());
+                parts.push(" ".into());
+                parts.push(format!("{:#?}", symbol.type_));
             }
-            parts.push(">".into());
         }
-        parts.push("(\n".into());
-        for f in mfn.args.into_iter() {
-            parts.push("\t".into());
-            parts.push(f.name.into());
+        compile::SymbolKind::Type => {
+            parts.push("type ".into());
+            parts.push(symbol.name.value.clone());
             parts.push(" ".into());
-            parts.push(format!("{:#?}", f.type_).replace("\n", "\n\t"));
-            parts.push(",\n".into());
+            parts.push(format!("{:#?}", symbol.type_));
         }
-        parts.push(") ".into());
-        parts.push(format!("{:#?}", mfn.ret));
-    } else {
-        parts.push("let ".into());
-        parts.push(name);
-        parts.push(" ".into());
-        parts.push(format!("{:#?}", type_));
+        compile::SymbolKind::Argument | compile::SymbolKind::Field => {
+            parts.push(symbol.name.value.clone());
+            parts.push(" ".into());
+            parts.push(format!("{:#?}", symbol.type_));
+        }
     }
     Ok(parts.join(""))
 }
@@ -604,13 +616,13 @@ impl compile::OnSymbol for SymbolRecorder {
     }
     fn on_symbol(
         &mut self,
-        name: String,
+        name: ast::Ident,
+        kind: compile::SymbolKind,
         type_: CRef<SType>,
         def: SourceLocation,
         decl: Option<Decl>,
-        loc: SourceLocation,
     ) -> compile::Result<()> {
-        let file = loc.file();
+        let file = name.loc.file();
         if let Some(file) = file {
             let uri = match Url::from_file_path(FilePath::new(&file)) {
                 Ok(uri) => uri,
@@ -618,8 +630,8 @@ impl compile::OnSymbol for SymbolRecorder {
             };
 
             let symbol = Symbol {
-                loc,
                 name,
+                kind,
                 type_,
                 def,
                 decl,
@@ -813,7 +825,7 @@ impl Backend {
             let mut document = document.lock().await;
             document.symbols = symbols
                 .into_iter()
-                .filter_map(|s| s.loc.range().map(|r| (r.start.clone(), s)))
+                .filter_map(|s| s.name.loc.range().map(|r| (r.start.clone(), s)))
                 .collect();
         }
         Ok(())
@@ -853,7 +865,7 @@ impl Backend {
             .range((Unbounded, Included(&loc)))
             .last()
             .map(|r| {
-                if let Some(range) = r.1.loc.range() {
+                if let Some(range) = r.1.name.loc.range() {
                     if range.end >= loc {
                         return Some(r.1.clone());
                     }
