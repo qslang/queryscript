@@ -1,5 +1,5 @@
 use crate::ast;
-use crate::ast::Pretty;
+use crate::ast::{Pretty, Range};
 use crate::compile::schema::{Decl, MType};
 use crate::error::MultiError;
 pub use crate::parser::error::ErrorLocation;
@@ -196,14 +196,14 @@ pub fn path_location(path: &Vec<ast::Ident>) -> ErrorLocation {
     }
 
     let (start_file, start) = match &path[0].loc {
-        ErrorLocation::Range(file, start, _) => (file, Some(start)),
+        ErrorLocation::Range(file, range) => (file, Some(&range.start)),
         ErrorLocation::Single(file, _) => (file, None),
         ErrorLocation::File(file) => (file, None),
         ErrorLocation::Unknown => return ErrorLocation::Unknown,
     };
 
     let (end_file, end) = match &path[path.len() - 1].loc {
-        ErrorLocation::Range(file, _, end) => (file, Some(end)),
+        ErrorLocation::Range(file, range) => (file, Some(&range.end)),
         ErrorLocation::Single(file, _) => (file, None),
         ErrorLocation::File(file) => (file, None),
         ErrorLocation::Unknown => return ErrorLocation::Unknown,
@@ -219,8 +219,10 @@ pub fn path_location(path: &Vec<ast::Ident>) -> ErrorLocation {
 
     ErrorLocation::Range(
         start_file.clone(),
-        start.unwrap().clone(),
-        end.unwrap().clone(),
+        Range {
+            start: start.unwrap().clone(),
+            end: end.unwrap().clone(),
+        },
     )
 }
 

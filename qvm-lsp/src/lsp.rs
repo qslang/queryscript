@@ -519,7 +519,7 @@ impl compile::OnSymbol for SymbolRecorder {
             let uri = Url::from_file_path(FilePath::new(&file)).unwrap();
             if let Some(range) = range {
                 let symbol = Symbol {
-                    loc: SourceLocation::Range(file, range.start, range.end),
+                    loc: SourceLocation::Range(file, range),
                     name,
                     type_,
                 };
@@ -671,8 +671,10 @@ impl Backend {
                         let stmt = &ast.stmts[idx];
                         let loc = SourceLocation::Range(
                             uri.to_string(),
-                            stmt.start.clone(),
-                            stmt.end.clone(),
+                            ast::Range {
+                                start: stmt.start.clone(),
+                                end: stmt.end.clone(),
+                            },
                         );
                         loc.normalize()
                     } else {

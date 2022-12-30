@@ -79,7 +79,7 @@ impl<'a> Parser<'a> {
     pub fn range_location(&self, start: Location) -> ErrorLocation {
         let end = self.peek_end_location();
 
-        ErrorLocation::Range(self.file.clone(), start, end)
+        ErrorLocation::Range(self.file.clone(), Range { start, end })
     }
 
     pub fn token_context(&self) -> SQLParserSnafu<ErrorLocation> {
@@ -90,7 +90,13 @@ impl<'a> Parser<'a> {
 
     pub fn range_context(&self, start: &Location) -> SQLParserSnafu<ErrorLocation> {
         SQLParserSnafu {
-            loc: ErrorLocation::Range(self.file.clone(), start.clone(), self.prev_end_location()),
+            loc: ErrorLocation::Range(
+                self.file.clone(),
+                Range {
+                    start: start.clone(),
+                    end: self.prev_end_location(),
+                },
+            ),
         }
     }
 
@@ -277,7 +283,13 @@ impl<'a> Parser<'a> {
         let start = self.peek_start_location();
         let end = self.peek_end_location();
         let token = self.next_token();
-        let loc = SourceLocation::Range(self.file.clone(), start.clone(), end);
+        let loc = SourceLocation::Range(
+            self.file.clone(),
+            Range {
+                start: start.clone(),
+                end,
+            },
+        );
         match token.token {
             Token::Word(w) => Ok(Ident::with_location(loc, w.value)),
             Token::DoubleQuotedString(s) => Ok(Ident::with_location(loc, s)),

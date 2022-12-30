@@ -12,7 +12,7 @@ pub enum SourceLocation {
     Unknown,
     File(String),
     Single(String, Location),
-    Range(String, Location, Location),
+    Range(String, Range),
 }
 
 impl SourceLocation {
@@ -21,7 +21,7 @@ impl SourceLocation {
         range: Option<sqlparser::location::Range>,
     ) -> SourceLocation {
         match range {
-            Some(range) => SourceLocation::Range(file, range.start, range.end),
+            Some(range) => SourceLocation::Range(file, range),
             None => SourceLocation::File(file),
         }
     }
@@ -34,10 +34,7 @@ impl SourceLocation {
                 start: l.clone(),
                 end: l.clone(),
             },
-            SourceLocation::Range(_, s, e) => Range {
-                start: s.clone(),
-                end: e.clone(),
-            },
+            SourceLocation::Range(_, r) => r.clone(),
         })
     }
 
@@ -45,11 +42,11 @@ impl SourceLocation {
         match self {
             SourceLocation::Unknown | SourceLocation::File(_) => false,
             SourceLocation::Single(_, l) => l == loc,
-            SourceLocation::Range(_, s, e) => {
-                loc.line >= s.line
-                    && loc.line <= e.line
-                    && (loc.column >= s.column || loc.line > s.line)
-                    && (loc.column <= e.column || loc.line < e.line)
+            SourceLocation::Range(_, r) => {
+                loc.line >= r.start.line
+                    && loc.line <= r.end.line
+                    && (loc.column >= r.start.column || loc.line > r.start.line)
+                    && (loc.column <= r.end.column || loc.line < r.end.line)
             }
         }
     }
@@ -65,11 +62,11 @@ impl SourceLocation {
                 l.column,
                 &lines[(l.line as usize) - 1..l.line as usize],
             ),
-            SourceLocation::Range(_, s, e) => (
-                s.line,
-                s.column,
-                e.column,
-                &lines[s.line as usize - 1..e.line as usize],
+            SourceLocation::Range(_, r) => (
+                r.start.line,
+                r.start.column,
+                r.end.column,
+                &lines[r.start.line as usize - 1..r.end.line as usize],
             ),
         };
 
@@ -111,7 +108,7 @@ impl SourceLocation {
             SourceLocation::Unknown => None,
             SourceLocation::File(file) => Some(file.clone()),
             SourceLocation::Single(file, _) => Some(file.clone()),
-            SourceLocation::Range(file, _, _) => Some(file.clone()),
+            SourceLocation::Range(file, _) => Some(file.clone()),
         }
     }
 }
@@ -125,12 +122,13 @@ impl Pretty for SourceLocation {
                 .white()
                 .bold()
                 .to_string(),
-            SourceLocation::Range(f, s, e) => {
-                format!("{}:{}:{}-{}:{}", f, s.line, s.column, e.line, e.column)
-                    .white()
-                    .bold()
-                    .to_string()
-            }
+            SourceLocation::Range(f, r) => format!(
+                "{}:{}:{}-{}:{}",
+                f, r.start.line, r.start.column, r.end.line, r.end.column
+            )
+            .white()
+            .bold()
+            .to_string(),
         }
     }
 }

@@ -6,7 +6,7 @@ use std::path::Path as FilePath;
 use std::sync::Arc;
 
 use crate::ast;
-use crate::ast::{SourceLocation, ToStrings};
+use crate::ast::{Range, SourceLocation, ToStrings};
 use crate::compile::builtin_types::{BUILTIN_LOC, GLOBAL_SCHEMA};
 use crate::compile::coerce::CoerceOp;
 use crate::compile::error::*;
@@ -504,8 +504,10 @@ pub fn resolve_type(
 ) -> Result<CRef<MType>> {
     let loc = SourceLocation::Range(
         schema.read()?.file.clone(),
-        ast.start.clone(),
-        ast.end.clone(),
+        Range {
+            start: ast.start.clone(),
+            end: ast.end.clone(),
+        },
     );
     match &ast.body {
         ast::TypeBody::Reference(path) => {
@@ -648,8 +650,10 @@ pub fn compile_expr(
 ) -> Result<CTypedExpr> {
     let loc = SourceLocation::Range(
         schema.read()?.file.clone(),
-        expr.start.clone(),
-        expr.end.clone(),
+        Range {
+            start: expr.start.clone(),
+            end: expr.end.clone(),
+        },
     );
     match &expr.body {
         ast::ExprBody::SQLQuery(q) => {
@@ -754,8 +758,10 @@ pub fn declare_schema_entry(
 ) -> Result<()> {
     let loc = SourceLocation::Range(
         schema.read()?.file.clone(),
-        stmt.start.clone(),
-        stmt.end.clone(),
+        Range {
+            start: stmt.start.clone(),
+            end: stmt.end.clone(),
+        },
     );
     let entries: Vec<(Ident, bool, SchemaEntry)> = match &stmt.body {
         ast::StmtBody::Noop | ast::StmtBody::Unparsed => Vec::new(),
@@ -1036,8 +1042,10 @@ pub fn compile_schema_entry(
 ) -> Result<()> {
     let loc = SourceLocation::Range(
         schema.read()?.file.clone(),
-        stmt.start.clone(),
-        stmt.end.clone(),
+        Range {
+            start: stmt.start.clone(),
+            end: stmt.end.clone(),
+        },
     );
     match &stmt.body {
         ast::StmtBody::Noop | ast::StmtBody::Unparsed => {}
