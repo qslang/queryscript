@@ -1,7 +1,7 @@
 use colored::*;
 pub use sqlparser::ast as sqlast;
 
-pub use sqlparser::tokenizer::Location;
+pub use sqlparser::{location::Range, tokenizer::Location};
 
 pub trait Pretty {
     fn pretty(&self) -> String;

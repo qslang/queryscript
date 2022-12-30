@@ -13,10 +13,12 @@ use tower_lsp::{lsp_types::*, LspServiceBuilder};
 use tower_lsp::{Client, LanguageServer};
 
 use qvm::{
-    ast::SourceLocation,
+    ast,
+    ast::{Location, SourceLocation},
+    compile,
     compile::{
         autocomplete::{loc_to_pos, pos_to_loc, AutoCompleter},
-        schema::SchemaEntry,
+        schema::{CRef, SType, SchemaEntry},
         Compiler, Schema, SchemaRef,
     },
     error::MultiError,
@@ -45,11 +47,20 @@ const DEFAULT_SETTINGS: Settings = Settings {
 };
 
 #[derive(Debug, Clone)]
+pub struct Symbol {
+    pub uri: Url,
+    pub range: ast::Range,
+    pub name: String,
+    pub type_: CRef<SType>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Document {
     pub uri: Url,
     pub version: Option<i32>,
     pub text: String,
     pub schema: SchemaRef,
+    pub symbols: BTreeMap<Location, Symbol>,
 }
 
 #[derive(Debug)]
@@ -142,9 +153,9 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::FULL,
                 )),
                 completion_provider: Some(CompletionOptions {
-                    resolve_provider: Some(true),
                     ..Default::default()
                 }),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 code_lens_provider: Some(CodeLensOptions {
                     resolve_provider: Some(true),
                 }),
@@ -330,8 +341,34 @@ impl LanguageServer for Backend {
         })))
     }
 
-    async fn completion_resolve(&self, item: CompletionItem) -> Result<CompletionItem> {
-        Ok(item)
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let loc = {
+            let Position { line, character } = params.text_document_position_params.position;
+            Location {
+                line: (line + 1) as u64,
+                column: (character + 1) as u64,
+            }
+        };
+        if let Some(symbol) = self
+            .get_symbol(
+                params.text_document_position_params.text_document.uri,
+                loc.clone(),
+            )
+            .await?
+        {
+            Ok(Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::PlainText,
+                    value: format!("{:?}", symbol.type_),
+                }),
+                range: Some(Range {
+                    start: symbol.range.start.normalize(),
+                    end: symbol.range.end.normalize(),
+                }),
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
@@ -451,6 +488,63 @@ fn find_expr_by_location(
     Ok(None)
 }
 
+struct SymbolRecorder {
+    pub symbols: BTreeMap<Url, Vec<Symbol>>,
+}
+impl SymbolRecorder {
+    pub fn new() -> Self {
+        SymbolRecorder {
+            symbols: BTreeMap::new(),
+        }
+    }
+
+    pub fn claim_symbols(&mut self) -> BTreeMap<Url, Vec<Symbol>> {
+        let mut symbols = BTreeMap::new();
+        std::mem::swap(&mut self.symbols, &mut symbols);
+        symbols
+    }
+}
+impl compile::OnSymbol for SymbolRecorder {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    fn on_symbol(
+        &mut self,
+        name: String,
+        type_: CRef<SType>,
+        loc: SourceLocation,
+    ) -> compile::Result<()> {
+        let file = loc.file();
+        let range = loc.range();
+        if let Some(file) = file {
+            let uri = Url::from_file_path(FilePath::new(&file)).unwrap();
+            if let Some(range) = range {
+                let symbol = Symbol {
+                    uri: uri.clone(),
+                    range: ast::Range {
+                        start: range.0,
+                        end: range.1,
+                    },
+                    name,
+                    type_,
+                };
+                match self.symbols.entry(uri) {
+                    Entry::Vacant(e) => {
+                        e.insert(vec![symbol]);
+                    }
+                    Entry::Occupied(mut e) => {
+                        e.get_mut().push(symbol);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
 enum RunExprType {
     Query(usize),
@@ -487,13 +581,14 @@ impl Backend {
             version,
             text,
             schema: Schema::new(file.clone(), folder),
+            symbols: BTreeMap::new(),
         };
 
         // We need to hold the write lock throughout the whole compilation process, because we don't
         // want others to read the (uninitialized) schema. We do this by keeping the write lock on
         // documents while locking the entry, and then release that lock before processing the document.
         let mut document_entry = documents.entry(document.uri.to_string());
-        let document = match document_entry {
+        let mut document = match document_entry {
             Entry::Vacant(entry) => {
                 let new_val = entry.insert(Arc::new(TokioMutex::new(document)));
                 let new_val = new_val.clone();
@@ -510,10 +605,11 @@ impl Backend {
         // Release the write lock on the documents map while we compile the document.
         drop(documents);
 
-        let diagnostics = self.compile_document(&document).await?;
+        let (diagnostics, symbols) = self.compile_document(&mut document).await?;
         let uri = document.uri.clone();
         drop(document);
 
+        self.register_symbols(symbols).await?;
         self.client
             .publish_diagnostics(uri, diagnostics, version)
             .await;
@@ -521,7 +617,10 @@ impl Backend {
         Ok(())
     }
 
-    async fn compile_document(&self, document: &Document) -> Result<Vec<Diagnostic>> {
+    async fn compile_document(
+        &self,
+        document: &mut Document,
+    ) -> Result<(Vec<Diagnostic>, BTreeMap<Url, Vec<Symbol>>)> {
         let mut diagnostics = Vec::new();
         let ast = match parse_schema(&document.uri.path(), &document.text).as_result() {
             Ok(ast) => ast,
@@ -538,18 +637,35 @@ impl Backend {
                         });
                     }
                 }
-                return Ok(diagnostics);
+                return Ok((diagnostics, BTreeMap::new()));
             }
         };
 
         let schema = document.schema.clone();
         let compiler = self.compiler.clone();
+        let uri = document.uri.clone();
 
-        let compile_result = task::spawn_blocking({
+        let (compile_result, symbols) = task::spawn_blocking({
             let ast = ast.clone();
             move || {
+                let record_symbol = Box::new(SymbolRecorder::new());
+
                 let compiler = compiler.lock().map_err(log_internal_error)?;
-                Ok(compiler.compile_schema_ast(schema.clone(), &ast))
+                let orig_on_symbol = compiler
+                    .on_symbol(Some(record_symbol))
+                    .map_err(log_internal_error)?;
+                let result = compiler.compile_schema_ast(schema.clone(), &ast);
+                let mut record_symbol = compiler
+                    .on_symbol(orig_on_symbol)
+                    .map_err(log_internal_error)?
+                    .unwrap();
+                let symbols = record_symbol
+                    .as_any_mut()
+                    .downcast_mut::<SymbolRecorder>()
+                    .unwrap()
+                    .claim_symbols();
+
+                Ok((result, symbols))
             }
         })
         .await
@@ -562,7 +678,7 @@ impl Backend {
                     if let Some(idx) = idx {
                         let stmt = &ast.stmts[idx];
                         let loc = SourceLocation::Range(
-                            document.uri.to_string(),
+                            uri.to_string(),
                             stmt.start.clone(),
                             stmt.end.clone(),
                         );
@@ -588,35 +704,62 @@ impl Backend {
             });
         }
 
-        Ok(diagnostics)
+        Ok((diagnostics, symbols))
+    }
+
+    async fn register_symbols(&self, symbols: BTreeMap<Url, Vec<Symbol>>) -> Result<()> {
+        for (uri, symbols) in symbols {
+            let document = self.get_document(&uri).await?;
+            let mut document = document.lock().await;
+            document.symbols = symbols
+                .into_iter()
+                .map(|s| (s.range.start.clone(), s))
+                .collect();
+        }
+        Ok(())
+    }
+
+    async fn get_document(&self, uri: &Url) -> Result<Arc<TokioMutex<Document>>> {
+        Ok(self
+            .documents
+            .read()
+            .await
+            .get(&uri.to_string())
+            .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?
+            .clone())
     }
 
     async fn get_schema(&self, uri: &Url) -> Result<SchemaRef> {
-        let entry = {
-            self.documents
-                .read()
-                .await
-                .get(&uri.to_string())
-                .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?
-                .clone()
-        };
+        let doc = self.get_document(uri).await?;
 
-        let schema = entry.lock().await.schema.clone();
+        let schema = doc.lock().await.schema.clone();
         Ok(schema)
     }
 
     async fn get_text(&self, uri: &Url) -> Result<String> {
-        let entry = {
-            self.documents
-                .read()
-                .await
-                .get(&uri.to_string())
-                .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?
-                .clone()
-        };
+        let doc = self.get_document(uri).await?;
 
-        let text = entry.lock().await.text.clone();
+        let text = doc.lock().await.text.clone();
         Ok(text)
+    }
+
+    async fn get_symbol(&self, uri: Url, loc: Location) -> Result<Option<Symbol>> {
+        let doc = self.get_document(&uri).await?;
+        let doc = doc.lock().await;
+        use std::ops::Bound::{Included, Unbounded};
+
+        Ok(doc
+            .symbols
+            .range((Unbounded, Included(&loc)))
+            .last()
+            .map(|r| {
+                if r.1.range.end >= loc {
+                    Some(r.1.clone())
+                } else {
+                    None
+                }
+            })
+            .flatten())
     }
 
     async fn run_expr(&self, params: RunExprParams) -> Result<RunExprResult> {
@@ -745,6 +888,15 @@ impl NormalizePosition<Position> for qvm::ast::Location {
         Position {
             line: (self.line - 1) as u32,
             character: (self.column - 1) as u32,
+        }
+    }
+}
+
+impl NormalizePosition<Range> for ast::Range {
+    fn normalize(&self) -> Range {
+        Range {
+            start: self.start.normalize(),
+            end: self.end.normalize(),
         }
     }
 }
