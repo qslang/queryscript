@@ -7,7 +7,7 @@ pub trait Pretty {
     fn pretty(&self) -> String;
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum SourceLocation {
     Unknown,
     File(String),

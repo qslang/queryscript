@@ -53,6 +53,7 @@ pub struct Symbol {
     pub type_: CRef<SType>,
     pub def: SourceLocation,
     pub decl: Option<Decl>,
+    pub references: BTreeSet<SourceLocation>,
 }
 
 #[derive(Debug, Clone)]
@@ -62,6 +63,26 @@ pub struct Document {
     pub text: String,
     pub schema: Option<SchemaRef>,
     pub symbols: BTreeMap<Location, Symbol>,
+}
+
+impl Document {
+    pub fn get_symbol(&mut self, loc: Location) -> Option<&mut Symbol> {
+        use std::ops::Bound::{Included, Unbounded};
+
+        self.symbols
+            .range_mut((Unbounded, Included(&loc)))
+            .last()
+            .map(|r| {
+                if let Some(range) = r.1.name.loc.range() {
+                    if range.end >= loc {
+                        return Some(r.1);
+                    }
+                }
+
+                return None;
+            })
+            .flatten()
+    }
 }
 
 #[derive(Debug)]
@@ -178,6 +199,7 @@ impl LanguageServer for Backend {
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
                 code_lens_provider: Some(CodeLensOptions {
                     resolve_provider: Some(true),
                 }),
@@ -436,6 +458,33 @@ impl LanguageServer for Backend {
         }
     }
 
+    async fn references(
+        &self,
+        params: ReferenceParams,
+    ) -> Result<Option<Vec<lsp_types::Location>>> {
+        let loc = {
+            let Position { line, character } = params.text_document_position.position;
+            Location {
+                line: (line + 1) as u64,
+                column: (character + 1) as u64,
+            }
+        };
+        if let Some(symbol) = self
+            .get_symbol(params.text_document_position.text_document.uri, loc.clone())
+            .await?
+        {
+            Ok(Some(
+                symbol
+                    .references
+                    .iter()
+                    .flat_map(|l| l.normalize())
+                    .collect(),
+            ))
+        } else {
+            Ok(None)
+        }
+    }
+
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
         let uri = params.text_document.uri;
         let schema = match self.get_schema(&uri).await? {
@@ -671,6 +720,7 @@ impl compile::OnSymbol for SymbolRecorder {
                 type_,
                 def,
                 decl,
+                references: BTreeSet::new(),
             };
             match self.symbols.entry(uri) {
                 Entry::Vacant(e) => {
@@ -744,13 +794,54 @@ impl Backend {
     }
 
     async fn register_symbols(&self, symbols: BTreeMap<Url, Vec<Symbol>>) -> Result<()> {
+        let mut references = BTreeMap::new();
         for (uri, symbols) in symbols {
+            for symbol in &symbols {
+                let file = symbol.def.file();
+                let range = symbol.def.range();
+                if file.is_none() || range.is_none() {
+                    continue;
+                }
+                let uri = Url::from_file_path(FilePath::new(&file.unwrap()));
+                if let Err(_) = uri {
+                    continue;
+                }
+                let start = range.unwrap().start.clone();
+                let ref_loc = symbol.name.loc.clone();
+
+                match references.entry(uri.unwrap()) {
+                    Entry::Vacant(e) => {
+                        e.insert(BTreeMap::from([(start, vec![ref_loc])]));
+                    }
+                    Entry::Occupied(mut e) => match e.get_mut().entry(start) {
+                        Entry::Vacant(e) => {
+                            e.insert(vec![ref_loc]);
+                        }
+                        Entry::Occupied(mut e) => {
+                            e.get_mut().push(ref_loc);
+                        }
+                    },
+                }
+            }
             if let Some(document) = self.get_document(&uri).await? {
                 let mut document = document.lock().await;
                 document.symbols = symbols
                     .into_iter()
                     .filter_map(|s| s.name.loc.range().map(|r| (r.start.clone(), s.clone())))
                     .collect();
+            }
+        }
+
+        for (uri, references) in references {
+            if let Some(document) = self.get_document(&uri).await? {
+                let mut document = document.lock().await;
+                for (symbol_loc, ref_locs) in references {
+                    if let Some(symbol) = document.get_symbol(symbol_loc) {
+                        for ref_loc in ref_locs {
+                            symbol.references.insert(ref_loc);
+                        }
+                    }
+                }
             }
         }
 
@@ -781,27 +872,14 @@ impl Backend {
     }
 
     async fn get_symbol(&self, uri: Url, loc: Location) -> Result<Option<Symbol>> {
-        let doc = match self.get_document(&uri).await? {
-            Some(doc) => doc,
-            None => return Ok(None),
-        };
-        let doc = doc.lock().await;
-        use std::ops::Bound::{Included, Unbounded};
+        let doc = self
+            .get_document(&uri)
+            .await?
+            .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?;
 
-        Ok(doc
-            .symbols
-            .range((Unbounded, Included(&loc)))
-            .last()
-            .map(|r| {
-                if let Some(range) = r.1.name.loc.range() {
-                    if range.end >= loc {
-                        return Some(r.1.clone());
-                    }
-                }
+        let mut doc = doc.lock().await;
 
-                return None;
-            })
-            .flatten())
+        Ok(doc.get_symbol(loc).map(|s| s.clone()))
     }
 
     async fn run_expr(&self, params: RunExprParams) -> Result<RunExprResult> {
