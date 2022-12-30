@@ -1103,6 +1103,7 @@ pub fn compile_schema_entry(
                     return Err(CompileError::duplicate_entry(vec![name.clone()]));
                 }
                 let type_ = resolve_type(compiler.clone(), inner_schema.clone(), &arg.type_)?;
+                let stype = SType::new_mono(type_.clone());
                 inner_schema.write()?.decls.insert(
                     arg.name.value.clone(),
                     Located::new(
@@ -1111,13 +1112,20 @@ pub fn compile_schema_entry(
                             extern_: true,
                             name: arg.name.clone(),
                             value: SchemaEntry::Expr(STypedExpr {
-                                type_: SType::new_mono(type_.clone()),
+                                type_: stype.clone(),
                                 expr: mkcref(Expr::ContextRef(arg.name.value.clone())),
                             }),
                         },
                         loc.clone(),
                     ),
                 );
+                compiler.run_on_symbol(
+                    arg.name.value.clone(),
+                    stype,
+                    arg.name.loc.clone(),
+                    None,
+                    arg.name.loc.clone(),
+                )?;
                 inner_schema
                     .write()?
                     .externs
