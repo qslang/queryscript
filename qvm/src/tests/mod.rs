@@ -29,8 +29,6 @@ mod tests {
                 let rel_path = path.strip_prefix(std::env::current_dir().unwrap()).unwrap();
                 println!("Running {}", rel_path.display());
                 test_schema(&rt, &rel_path);
-            } else {
-                println!("Skipping {}", path.display());
             }
         }
     }
