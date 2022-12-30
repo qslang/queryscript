@@ -1021,9 +1021,9 @@ pub fn unify_expr_decl(
     compiler.run_on_symbol(
         name.clone().into(),
         value.type_.clone(),
-        decl.location().clone(),
+        decl.name.loc.clone(),
         Some(decl.get().clone()),
-        decl.location().clone(),
+        decl.name.loc.clone(),
     )?;
 
     Ok(())

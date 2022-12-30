@@ -916,9 +916,13 @@ impl NormalizePosition<Position> for qvm::ast::Location {
 
 impl NormalizePosition<Range> for ast::Range {
     fn normalize(&self) -> Range {
+        let end = self.end.normalize();
         Range {
             start: self.start.normalize(),
-            end: self.end.normalize(),
+            end: Position {
+                line: end.line,
+                character: end.character + 1,
+            },
         }
     }
 }

@@ -340,7 +340,7 @@ pub fn compile_reference(
         compiler.run_on_symbol(
             ident.value.clone(),
             stype.clone(),
-            decl.location().clone(),
+            decl.name.loc.clone(),
             Some(decl.get().clone()),
             ident.loc.clone(),
         )?;
