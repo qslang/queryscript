@@ -81,8 +81,20 @@ pub fn get_rowtype(compiler: Compiler, relation: CRef<MType>) -> Result<CRef<MTy
     })?)
 }
 
+pub fn valid_ident(value: &str) -> bool {
+    // TODO: This should use the tokenizer instead
+    //
+    value.len() > 0
+        && value.chars().all(char::is_alphanumeric)
+        && !value.chars().next().unwrap().is_numeric()
+}
+
 pub fn ident(value: String) -> sqlast::Located<sqlast::Ident> {
-    sqlast::Ident::new(value)
+    if valid_ident(value.as_str()) {
+        sqlast::Ident::new(value)
+    } else {
+        sqlast::Ident::with_quote('"', value)
+    }
 }
 
 pub fn select_from(
@@ -186,12 +198,17 @@ pub fn compile_sqlreference(
                         .get_available_references(compiler.clone(), &loc, None)?;
 
                 let tse = available.then({
-                    let loc = loc.clone();
                     move |available: Ref<InsertionOrderMap<String, FieldMatch>>| {
                         if let Some(fm) = available.read()?.get(&name) {
                             if let Some(type_) = fm.type_.clone() {
+                                let loc = path[0].loc.clone();
                                 let sqlpath =
                                     vec![ident(fm.relation.value.clone()), ident(name.clone())];
+                                compiler.run_on_symbol(
+                                    name.clone(),
+                                    mkcref(type_.clone().into()),
+                                    loc.clone(),
+                                )?;
                                 Ok(mkcref(TypedExpr {
                                     type_: type_.clone(),
                                     expr: Arc::new(Expr::SQL(Arc::new(SQL {
@@ -227,20 +244,21 @@ pub fn compile_sqlreference(
         }
         2 => {
             let relation_name = sqlpath[0].value.clone();
-            let field_name = sqlpath[1].value.clone();
 
             // If the relation can't be found in the scope, just fall through
             //
             if let Some(relation_type) = scope.read()?.relations.get(&relation_name) {
                 let rowtype = get_rowtype(compiler.clone(), relation_type.clone())?;
-                let type_ = typecheck_path(
-                    rowtype,
-                    vec![Ident::with_location(loc.clone(), field_name)].as_slice(),
-                )?;
+                let type_ = typecheck_path(rowtype, vec![path[1].clone()].as_slice())?;
                 let expr = mkcref(Expr::SQL(Arc::new(SQL {
                     names: CSQLNames::from_unbound(&sqlpath),
                     body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
                 })));
+                compiler.run_on_symbol(
+                    path[1].value.clone(),
+                    mkcref(type_.clone().into()),
+                    path[1].loc.clone(),
+                )?;
                 return Ok(CTypedExpr { type_, expr });
             }
         }
@@ -288,8 +306,8 @@ pub fn compile_reference(
         expr: Arc::new(Expr::SchemaEntry(expr.clone())),
     };
 
-    let r = match remainder.len() {
-        0 => top_level_ref,
+    let (stype, r) = match remainder.len() {
+        0 => (expr.type_, top_level_ref),
         _ => {
             // Turn the top level reference into a SQL placeholder, and return
             // a path accessing it
@@ -303,9 +321,13 @@ pub fn compile_reference(
                 body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(full_name)),
             })));
 
-            TypedExpr { type_, expr }
+            (mkcref(type_.clone().into()), TypedExpr { type_, expr })
         }
     };
+
+    if let Some(ident) = path.last() {
+        compiler.run_on_symbol(ident.value.clone(), stype.clone(), ident.loc.clone())?;
+    }
 
     Ok(r)
 }
@@ -983,8 +1005,8 @@ pub fn compile_select(
                                     }
                                 };
                                 let sqlpath = vec![
-                                    sqlast::Ident::new(m.relation.value.clone()),
-                                    sqlast::Ident::new(m.field.value.clone()),
+                                    ident(m.relation.value.clone()),
+                                    ident(m.field.value.clone()),
                                 ];
                                 ret.push(CTypedNameAndSQL {
                                     name: m.field.clone(),
@@ -1896,7 +1918,7 @@ pub fn compile_sqlexpr(
                     // run locally (e.g. `load`).
                     //
                     let can_lift = !args.iter().any(|a| has_unbound_names(a.expr.clone()));
-                    let should_lift = if compiler.allow_inlining() {
+                    let should_lift = if compiler.allow_inlining()? {
                         matches!(fn_kind, FnKind::Native)
                     } else {
                         !matches!(fn_kind, FnKind::SQLBuiltin)
@@ -1920,7 +1942,7 @@ pub fn compile_sqlexpr(
                         match (&fn_kind, fn_body) {
                             // If the function body is an expression, inline it.
                             //
-                            (FnKind::Expr, Some(fn_body)) if compiler.allow_inlining() => {
+                            (FnKind::Expr, Some(fn_body)) if compiler.allow_inlining()? => {
                                 // Within a function body, arguments are represented as
                                 // Expr::ContextRef with the given name.  This first pass will
                                 // replace any context references with the actual argument bodies,

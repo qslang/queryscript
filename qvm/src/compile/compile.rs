@@ -1,5 +1,6 @@
 use snafu::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, LinkedList};
+use std::fmt;
 use std::fs;
 use std::path::Path as FilePath;
 use std::sync::Arc;
@@ -25,6 +26,7 @@ pub struct ExternalTypeHandle {
 
 #[derive(Debug)]
 pub struct CompilerData {
+    pub config: CompilerConfig,
     pub next_placeholder: usize,
     pub idle: Ref<tokio::sync::watch::Receiver<()>>,
     pub handles: LinkedList<tokio::task::JoinHandle<Result<()>>>,
@@ -32,10 +34,16 @@ pub struct CompilerData {
     pub files: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone)]
+pub trait OnSymbol {
+    fn as_any(&self) -> &dyn std::any::Any;
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+    fn on_symbol(&mut self, name: String, type_: CRef<SType>, loc: SourceLocation) -> Result<()>;
+}
+
 pub struct CompilerConfig {
     pub allow_native: bool,
     pub allow_inlining: bool,
+    pub on_symbol: Option<Box<dyn OnSymbol + Send + Sync>>,
 }
 
 impl Default for CompilerConfig {
@@ -43,7 +51,17 @@ impl Default for CompilerConfig {
         CompilerConfig {
             allow_native: false,
             allow_inlining: true,
+            on_symbol: None,
         }
+    }
+}
+
+impl fmt::Debug for CompilerConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CompilerConfig")
+            .field("allow_native", &self.allow_native)
+            .field("allow_inlining", &self.allow_inlining)
+            .finish_non_exhaustive()
     }
 }
 
@@ -52,7 +70,6 @@ pub struct Compiler {
     runtime: Ref<tokio::runtime::Runtime>,
     data: Ref<CompilerData>,
     builtins: Ref<Schema>,
-    config: CompilerConfig,
 }
 
 impl Compiler {
@@ -89,6 +106,7 @@ impl Compiler {
                     .build()?,
             ),
             data: mkref(CompilerData {
+                config,
                 next_placeholder: 1,
                 idle: mkref(idle_rx),
                 handles: LinkedList::new(),
@@ -96,7 +114,6 @@ impl Compiler {
                 files: BTreeMap::new(),
             }),
             builtins: schema.clone(),
-            config,
         };
 
         Ok(compiler)
@@ -106,12 +123,34 @@ impl Compiler {
         self.builtins.clone()
     }
 
-    pub fn allow_native(&self) -> bool {
-        self.config.allow_native
+    pub fn allow_native(&self) -> Result<bool> {
+        Ok(self.data.read()?.config.allow_native)
     }
 
-    pub fn allow_inlining(&self) -> bool {
-        self.config.allow_inlining
+    pub fn allow_inlining(&self) -> Result<bool> {
+        Ok(self.data.read()?.config.allow_inlining)
+    }
+
+    pub fn on_symbol(
+        &self,
+        mut on_symbol: Option<Box<dyn OnSymbol + Send + Sync>>,
+    ) -> Result<Option<Box<dyn OnSymbol + Send + Sync>>> {
+        std::mem::swap(&mut self.data.write()?.config.on_symbol, &mut on_symbol);
+        Ok(on_symbol)
+    }
+
+    pub fn run_on_symbol(
+        &self,
+        name: String,
+        type_: CRef<SType>,
+        loc: SourceLocation,
+    ) -> Result<()> {
+        let mut data = self.data.write()?;
+        let on_symbol = &mut data.config.on_symbol;
+        Ok(match on_symbol {
+            Some(f) => f.on_symbol(name, type_, loc)?,
+            None => {}
+        })
     }
 
     pub fn compile_string(&self, schema: Ref<Schema>, text: &str) -> CompileResult<()> {
@@ -939,7 +978,12 @@ pub fn unify_type_decl(schema: Ref<Schema>, name: &Ident, type_: CRef<MType>) ->
     Ok(())
 }
 
-pub fn unify_expr_decl(schema: Ref<Schema>, name: &Ident, value: &STypedExpr) -> Result<()> {
+pub fn unify_expr_decl(
+    compiler: Compiler,
+    schema: Ref<Schema>,
+    name: &Ident,
+    value: &STypedExpr,
+) -> Result<()> {
     let s = schema.read()?;
     let decl = s.decls.get(&name.value).ok_or_else(|| {
         CompileError::internal(
@@ -964,6 +1008,8 @@ pub fn unify_expr_decl(schema: Ref<Schema>, name: &Ident, value: &STypedExpr) ->
             ))
         }
     }
+
+    compiler.run_on_symbol(name.clone().into(), value.type_.clone(), name.loc.clone())?;
 
     Ok(())
 }
@@ -1063,7 +1109,7 @@ pub fn compile_schema_entry(
 
             let (compiled, is_sql) = match body {
                 ast::FnBody::Native => {
-                    if !compiler.allow_native() {
+                    if !compiler.allow_native()? {
                         return Err(CompileError::internal(
                             loc.clone(),
                             "Cannot compile native functions",
@@ -1107,6 +1153,7 @@ pub fn compile_schema_entry(
             );
 
             unify_expr_decl(
+                compiler.clone(),
                 schema.clone(),
                 name,
                 &STypedExpr {
@@ -1137,6 +1184,7 @@ pub fn compile_schema_entry(
             let compiled = compile_expr(compiler.clone(), schema.clone(), &body)?;
             lhs_type.unify(&compiled.type_)?;
             unify_expr_decl(
+                compiler.clone(),
                 schema.clone(),
                 name,
                 &STypedExpr {
@@ -1147,6 +1195,7 @@ pub fn compile_schema_entry(
         }
         ast::StmtBody::Extern { name, type_ } => {
             unify_expr_decl(
+                compiler.clone(),
                 schema.clone(),
                 name,
                 &STypedExpr {

@@ -216,6 +216,15 @@ impl Pretty for MType {
     }
 }
 
+impl Into<SType> for CRef<MType> {
+    fn into(self) -> SType {
+        SType {
+            variables: BTreeSet::new(),
+            body: self,
+        }
+    }
+}
+
 pub trait HasCExpr<E>
 where
     E: Constrainable,
