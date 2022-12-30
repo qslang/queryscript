@@ -1141,6 +1141,7 @@ pub fn compile_schema_entry(
                 Schema::new(schema.read()?.file.clone(), schema.read()?.folder.clone());
             inner_schema.write()?.parent_scope = Some(schema.clone());
 
+            let mut unknowns = BTreeMap::new();
             for generic in generics {
                 inner_schema.write()?.decls.insert(
                     generic.value.clone(),
@@ -1158,6 +1159,10 @@ pub fn compile_schema_entry(
                         loc.clone(),
                     ),
                 );
+                unknowns.insert(
+                    generic.value.clone(),
+                    CRef::new_unknown(generic.value.as_str()),
+                );
             }
 
             let mut compiled_args = Vec::new();
@@ -1166,7 +1171,8 @@ pub fn compile_schema_entry(
                     return Err(CompileError::duplicate_entry(vec![name.clone()]));
                 }
                 let type_ = resolve_type(compiler.clone(), inner_schema.clone(), &arg.type_)?;
-                let stype = SType::new_mono(type_.clone());
+                let substituted = type_.substitute(&unknowns)?;
+                let stype = SType::new_mono(substituted.clone());
                 inner_schema.write()?.decls.insert(
                     arg.name.value.clone(),
                     Located::new(
@@ -1228,7 +1234,19 @@ pub fn compile_schema_entry(
             };
 
             if let Some(ret) = ret {
-                resolve_type(compiler.clone(), inner_schema.clone(), ret)?.unify(&compiled.type_)?
+                let ret = resolve_type(compiler.clone(), inner_schema.clone(), ret)?;
+                let ret = ret.substitute(&unknowns)?;
+                ret.unify(&compiled.type_)?
+            }
+
+            for generic in generics {
+                unknowns
+                    .get(&generic.value)
+                    .unwrap()
+                    .unify(&mkcref(MType::Name(Located::new(
+                        generic.clone(),
+                        generic.loc.clone(),
+                    ))))?;
             }
 
             let fn_type = SType::new_poly(
