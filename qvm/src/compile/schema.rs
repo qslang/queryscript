@@ -272,15 +272,23 @@ struct DebugMFields<'a>(&'a Vec<MField>);
 impl<'a> fmt::Debug for DebugMFields<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("{")?;
+        if f.alternate() {
+            f.write_str("\n")?;
+        }
         for i in 0..self.0.len() {
-            if i > 0 {
-                f.write_str(", ")?;
+            if f.alternate() {
+                f.write_str("\t")?;
             }
             f.write_str(self.0[i].name.value.as_str())?;
             f.write_str(" ")?;
             self.0[i].type_.fmt(f)?;
             if !self.0[i].nullable {
                 f.write_str(" not null")?;
+            }
+            if f.alternate() {
+                f.write_str(",\n")?;
+            } else if i < self.0.len() - 1 {
+                f.write_str(", ")?;
             }
         }
         f.write_str("}")?;

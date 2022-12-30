@@ -164,8 +164,9 @@ impl Compiler {
 
     pub fn compile_string(&self, schema: Ref<Schema>, text: &str) -> CompileResult<()> {
         let mut result = CompileResult::new(());
-        let (tokens, eof) = c_try!(result, parser::tokenize("<string>", text));
-        let mut parser = parser::Parser::new("<string>", tokens, eof);
+        let file = c_try!(result, schema.read()).file.clone();
+        let (tokens, eof) = c_try!(result, parser::tokenize(file.as_str(), text));
+        let mut parser = parser::Parser::new(file.as_str(), tokens, eof);
         let schema_ast = result.absorb(parser.parse_schema());
         result.absorb(self.compile_schema_ast(schema.clone(), &schema_ast));
         result

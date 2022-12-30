@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::cell::RefCell;
 use std::collections::btree_map::Entry;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path as FilePath;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, RwLock};
@@ -14,11 +14,11 @@ use tower_lsp::{Client, LanguageServer};
 
 use qvm::{
     ast,
-    ast::{Location, SourceLocation},
+    ast::{Location, Pretty, SourceLocation},
     compile,
     compile::{
         autocomplete::{loc_to_pos, pos_to_loc, AutoCompleter},
-        schema::{CRef, Decl, SType, SchemaEntry},
+        schema::{CRef, Decl, MFnType, MType, SType, SchemaEntry},
         Compiler, Schema, SchemaRef,
     },
     error::MultiError,
@@ -358,11 +358,22 @@ impl LanguageServer for Backend {
             )
             .await?
         {
+            let formatted = format_decl(
+                symbol.name,
+                symbol.type_,
+                symbol.decl.map_or(false, |decl| decl.public),
+            )?;
             Ok(symbol.loc.range().map(|range| Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::PlainText,
-                    value: format!("{:?}", symbol.type_),
-                }),
+                contents: HoverContents::Array(vec![
+                    MarkedString::LanguageString(LanguageString {
+                        language: "".into(),
+                        value: symbol.def.pretty(),
+                    }),
+                    MarkedString::LanguageString(LanguageString {
+                        language: "tql".into(),
+                        value: formatted,
+                    }),
+                ]),
                 range: Some(range.normalize()),
             }))
         } else {
@@ -451,6 +462,60 @@ impl LanguageServer for Backend {
         }
         Ok(Some(lenses))
     }
+}
+
+fn get_fn_type(type_: CRef<SType>) -> Result<Option<(MFnType, BTreeSet<String>)>> {
+    if type_.is_known().map_err(log_internal_error)? {
+        let type_ = type_.must().map_err(log_internal_error)?;
+        let type_ = type_.read().map_err(log_internal_error)?;
+        if type_.body.is_known().map_err(log_internal_error)? {
+            let body = type_.body.must().map_err(log_internal_error)?;
+            let body = body.read().map_err(log_internal_error)?;
+            match &*body {
+                MType::Fn(mfn) => return Ok(Some((mfn.get().clone(), type_.variables.clone()))),
+                _ => {}
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn format_decl(name: String, type_: CRef<SType>, is_public: bool) -> Result<String> {
+    let mut parts = Vec::<String>::new();
+    if is_public {
+        parts.push("export ".into());
+    }
+    if let Some((mfn, variables)) = get_fn_type(type_.clone())? {
+        parts.push("fn ".into());
+        parts.push(name);
+        if variables.len() > 0 {
+            parts.push("<".into());
+            for (i, v) in variables.into_iter().enumerate() {
+                if i > 0 {
+                    parts.push(", ".into());
+                }
+
+                parts.push(v);
+            }
+            parts.push(">".into());
+        }
+        parts.push("(\n".into());
+        for f in mfn.args.into_iter() {
+            parts.push("\t".into());
+            parts.push(f.name.into());
+            parts.push(" ".into());
+            parts.push(format!("{:#?}", f.type_).replace("\n", "\n\t"));
+            parts.push(",\n".into());
+        }
+        parts.push(") ".into());
+        parts.push(format!("{:#?}", mfn.ret));
+    } else {
+        parts.push("let ".into());
+        parts.push(name);
+        parts.push(" ".into());
+        parts.push(format!("{:#?}", type_));
+    }
+    Ok(parts.join(""))
 }
 
 fn is_runnable_decl(decl: &SchemaEntry) -> Result<bool> {
