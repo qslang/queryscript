@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use tokio::{sync::Mutex as TokioMutex, sync::RwLock as TokioRwLock, task};
 
 use tower_lsp::jsonrpc::{Error, Result};
-use tower_lsp::{lsp_types::*, LspServiceBuilder};
+use tower_lsp::{lsp_types, lsp_types::*, LspServiceBuilder};
 use tower_lsp::{Client, LanguageServer};
 
 use qvm::{
@@ -48,8 +48,7 @@ const DEFAULT_SETTINGS: Settings = Settings {
 
 #[derive(Debug, Clone)]
 pub struct Symbol {
-    pub uri: Url,
-    pub range: ast::Range,
+    pub loc: SourceLocation,
     pub name: String,
     pub type_: CRef<SType>,
 }
@@ -356,15 +355,12 @@ impl LanguageServer for Backend {
             )
             .await?
         {
-            Ok(Some(Hover {
+            Ok(symbol.loc.range().map(|range| Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind: MarkupKind::PlainText,
                     value: format!("{:?}", symbol.type_),
                 }),
-                range: Some(Range {
-                    start: symbol.range.start.normalize(),
-                    end: symbol.range.end.normalize(),
-                }),
+                range: Some(range.normalize()),
             }))
         } else {
             Ok(None)
@@ -383,8 +379,8 @@ impl LanguageServer for Backend {
             .iter()
             .enumerate()
         {
-            let range = match expr.location().normalize() {
-                Some(range) => range,
+            let loc = match expr.location().normalize() {
+                Some(loc) => loc,
                 None => continue,
             };
 
@@ -395,7 +391,7 @@ impl LanguageServer for Backend {
             };
 
             lenses.push(CodeLens {
-                range,
+                range: loc.range,
                 command: Some(command),
                 data: None,
             });
@@ -406,8 +402,8 @@ impl LanguageServer for Backend {
                 continue;
             }
 
-            let range = match decl.location().normalize() {
-                Some(range) => range,
+            let loc = match decl.location().normalize() {
+                Some(loc) => loc,
                 None => continue,
             };
 
@@ -418,7 +414,7 @@ impl LanguageServer for Backend {
             };
 
             lenses.push(CodeLens {
-                range,
+                range: loc.range,
                 command: Some(command),
                 data: None,
             });
@@ -523,11 +519,7 @@ impl compile::OnSymbol for SymbolRecorder {
             let uri = Url::from_file_path(FilePath::new(&file)).unwrap();
             if let Some(range) = range {
                 let symbol = Symbol {
-                    uri: uri.clone(),
-                    range: ast::Range {
-                        start: range.0,
-                        end: range.1,
-                    },
+                    loc: SourceLocation::Range(file, range.start, range.end),
                     name,
                     type_,
                 };
@@ -627,10 +619,10 @@ impl Backend {
             Err(err) => {
                 // XXX Fix this to send the error as a diagnostic (w/ the location)
                 for err in err.into_errors() {
-                    if let Some(range) = err.location().normalize() {
+                    if let Some(loc) = err.location().normalize() {
                         diagnostics.push(Diagnostic {
                             severity: Some(DiagnosticSeverity::ERROR),
-                            range,
+                            range: loc.range,
                             message: err.pretty(),
                             source: Some("qvm".to_string()),
                             ..Default::default()
@@ -672,8 +664,8 @@ impl Backend {
         .map_err(log_internal_error)??;
 
         for (idx, err) in compile_result.errors {
-            let range = match err.location().normalize() {
-                Some(range) => Some(range),
+            let loc = match err.location().normalize() {
+                Some(loc) => Some(loc),
                 None => {
                     if let Some(idx) = idx {
                         let stmt = &ast.stmts[idx];
@@ -690,14 +682,20 @@ impl Backend {
             };
 
             // If we don't have a range, just use the whole document.
-            let range = match range {
-                Some(range) => range,
-                None => FULL_DOCUMENT_RANGE,
+            let loc = match loc {
+                Some(loc) => loc,
+                None => lsp_types::Location {
+                    uri: uri.clone(),
+                    range: FULL_DOCUMENT_RANGE,
+                },
             };
 
+            // XXX: This is going to report all of the diagnostics for included files too, but with
+            // their ranges applied to the current file.
+            //
             diagnostics.push(Diagnostic {
                 severity: Some(DiagnosticSeverity::ERROR),
-                range,
+                range: loc.range,
                 message: err.pretty(),
                 source: Some("qvm".to_string()),
                 ..Default::default()
@@ -713,7 +711,7 @@ impl Backend {
             let mut document = document.lock().await;
             document.symbols = symbols
                 .into_iter()
-                .map(|s| (s.range.start.clone(), s))
+                .filter_map(|s| s.loc.range().map(|r| (r.start.clone(), s)))
                 .collect();
         }
         Ok(())
@@ -753,11 +751,13 @@ impl Backend {
             .range((Unbounded, Included(&loc)))
             .last()
             .map(|r| {
-                if r.1.range.end >= loc {
-                    Some(r.1.clone())
-                } else {
-                    None
+                if let Some(range) = r.1.loc.range() {
+                    if range.end >= loc {
+                        return Some(r.1.clone());
+                    }
                 }
+
+                return None;
             })
             .flatten())
     }
@@ -867,20 +867,6 @@ trait NormalizePosition<T> {
     fn normalize(&self) -> T;
 }
 
-impl NormalizePosition<Option<Range>> for SourceLocation {
-    fn normalize(&self) -> Option<Range> {
-        let (start, end) = match self.range() {
-            Some(loc) => loc,
-            None => return None, // In this case, we may want to send file-level diagnostics?
-        };
-        // The locations are 1-indexed, but LSP diagnostics are 0-indexed
-        Some(Range {
-            start: start.normalize(),
-            end: end.normalize(),
-        })
-    }
-}
-
 impl NormalizePosition<Position> for qvm::ast::Location {
     fn normalize(&self) -> Position {
         assert!(self.line > 0 && self.column > 0);
@@ -897,6 +883,21 @@ impl NormalizePosition<Range> for ast::Range {
         Range {
             start: self.start.normalize(),
             end: self.end.normalize(),
+        }
+    }
+}
+
+impl NormalizePosition<Option<lsp_types::Location>> for SourceLocation {
+    fn normalize(&self) -> Option<lsp_types::Location> {
+        let file = self.file();
+        let range = self.range();
+        if file.is_some() && range.is_some() {
+            Some(lsp_types::Location {
+                uri: Url::from_file_path(FilePath::new(&file.unwrap())).unwrap(),
+                range: range.unwrap().normalize(),
+            })
+        } else {
+            None
         }
     }
 }

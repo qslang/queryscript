@@ -27,11 +27,17 @@ impl SourceLocation {
     }
 
     // XXX can we delete this function?
-    pub fn range(&self) -> Option<(Location, Location)> {
+    pub fn range(&self) -> Option<Range> {
         Some(match self {
             SourceLocation::Unknown | SourceLocation::File(_) => return None,
-            SourceLocation::Single(_, l) => (l.clone(), l.clone()),
-            SourceLocation::Range(_, s, e) => (s.clone(), e.clone()),
+            SourceLocation::Single(_, l) => Range {
+                start: l.clone(),
+                end: l.clone(),
+            },
+            SourceLocation::Range(_, s, e) => Range {
+                start: s.clone(),
+                end: e.clone(),
+            },
         })
     }
 
@@ -152,7 +158,7 @@ impl Ident {
             sqlast::Ident::with_quote_unlocated('\"', self.value.clone()),
             self.loc
                 .range()
-                .map(|(start, end)| sqlast::Range { start, end }),
+                .map(|Range { start, end }| sqlast::Range { start, end }),
         )
     }
 
