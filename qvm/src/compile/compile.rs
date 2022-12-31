@@ -1133,7 +1133,11 @@ pub fn compile_schema_entry(
             };
 
             let mut names = SQLNames::new();
-            for name in schema.read()?.decls.keys() {
+            for (name, decl) in schema.read()?.decls.iter() {
+                match &decl.value {
+                    SchemaEntry::Expr(_) => {}
+                    SchemaEntry::Schema(_) | SchemaEntry::Type(_) => continue,
+                };
                 names.params.insert(
                     name.clone(),
                     compile_reference(
