@@ -8,6 +8,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use crate::compile;
+    use crate::compile::{Schema, SchemaRef};
     use crate::parser;
     use crate::runtime;
     use crate::types;
@@ -39,19 +40,38 @@ mod tests {
     ) -> BTreeMap<String, Box<dyn fmt::Debug>> {
         let mut result = BTreeMap::<String, Box<dyn fmt::Debug>>::new();
 
-        let compiler = compile::Compiler::new().expect("Failed to create compiler");
+        let contents = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                result.insert("parse_errors".to_string(), Box::new(vec![e]));
+                return result;
+            }
+        };
 
-        let mut schema_result = compiler.compile_schema_from_file(path);
+        let ast = match parser::parse_schema(path.to_str().unwrap(), &contents).as_result() {
+            Ok(ast) => ast,
+            Err(e) => {
+                result.insert("parse_errors".to_string(), Box::new(vec![e]));
+                return result;
+            }
+        };
+
+        let parsed_path = Path::new(path);
+        let file = parsed_path.to_str().unwrap().to_string();
+        let parent_path = parsed_path.parent();
+        let folder = match parent_path {
+            Some(p) => p.to_str().map(|f| f.to_string()),
+            None => None,
+        };
+
+        let compiler = compile::Compiler::new().expect("Failed to create compiler");
+        let schema = Schema::new(file, folder);
+        let mut schema_result = compiler.compile_schema_ast(schema.clone(), &ast);
 
         result.insert(
             "compile_errors".to_string(),
             Box::new(schema_result.errors.drain(..).collect::<Vec<_>>()),
         );
-
-        let schema = match schema_result.result {
-            Some(schema) => schema,
-            None => return result,
-        };
 
         let mut decls = BTreeMap::<String, Box<dyn fmt::Debug>>::new();
         for (name, decl) in &schema.read().unwrap().decls {
