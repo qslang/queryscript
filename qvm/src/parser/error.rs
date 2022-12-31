@@ -78,12 +78,25 @@ pub enum ParserError {
         loc: ErrorLocation,
     },
 
+    #[snafu(display("Unimplemented: {}", what))]
+    Unimplemented {
+        what: String,
+        backtrace: Option<Backtrace>,
+        loc: ErrorLocation,
+    },
+
     #[snafu(display("{}", sources.first().unwrap()))]
     Multiple {
         // This is assumed to be non-empty
         //
         sources: Vec<ParserError>,
     },
+}
+
+impl ParserError {
+    pub fn unimplemented(loc: ErrorLocation, what: &str) -> ParserError {
+        UnimplementedSnafu { loc, what }.build()
+    }
 }
 
 impl PrettyError for ParserError {
@@ -100,6 +113,7 @@ impl PrettyError for ParserError {
                 },
             ),
             ParserError::SQLParserError { loc, .. } => loc.clone(),
+            ParserError::Unimplemented { loc, .. } => loc.clone(),
             ParserError::Multiple { sources } => sources.first().unwrap().location(),
         }
     }

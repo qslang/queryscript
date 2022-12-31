@@ -294,6 +294,7 @@ pub enum StmtBody {
     Noop,
     Unparsed,
     Expr(Expr),
+    UnsafeExpr(Expr),
     Import {
         path: Path,
         list: ImportList,

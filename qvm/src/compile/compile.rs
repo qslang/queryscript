@@ -13,6 +13,7 @@ use crate::compile::error::*;
 use crate::compile::inference::*;
 use crate::compile::schema::*;
 use crate::compile::sql::*;
+use crate::types::AtomicType;
 use crate::{c_try, error::MultiResult, parser, parser::parse_schema};
 
 type CompileResult<T> = MultiResult<T, CompileError>;
@@ -805,7 +806,7 @@ pub fn declare_schema_entry(
     );
     let entries: Vec<(Ident, bool, SchemaEntry)> = match &stmt.body {
         ast::StmtBody::Noop | ast::StmtBody::Unparsed => Vec::new(),
-        ast::StmtBody::Expr(_) => Vec::new(),
+        ast::StmtBody::Expr(_) | ast::StmtBody::UnsafeExpr(_) => Vec::new(),
         ast::StmtBody::Import { path, list, .. } => {
             let imported = lookup_schema(compiler.clone(), schema.clone(), &path)?;
             if imported.read()?.args.is_some() {
@@ -1123,6 +1124,37 @@ pub fn compile_schema_entry(
         ast::StmtBody::Noop | ast::StmtBody::Unparsed => {}
         ast::StmtBody::Expr(expr) => {
             let compiled = compile_expr(compiler.clone(), schema.clone(), expr)?;
+            schema.write()?.exprs.push(Located::new(compiled, loc));
+        }
+        ast::StmtBody::UnsafeExpr(expr) => {
+            let body = match &expr.body {
+                ast::ExprBody::SQLQuery(sql) => SQLBody::Query(sql.clone()),
+                ast::ExprBody::SQLExpr(expr) => SQLBody::Expr(expr.clone()),
+            };
+
+            let mut names = SQLNames::new();
+            for name in schema.read()?.decls.keys() {
+                names.params.insert(
+                    name.clone(),
+                    compile_reference(
+                        compiler.clone(),
+                        schema.clone(),
+                        &vec![Ident {
+                            loc: SourceLocation::Unknown,
+                            value: name.clone(),
+                        }],
+                    )?,
+                );
+            }
+
+            let compiled = CTypedExpr {
+                type_: mkcref(MType::Atom(Located::new(
+                    AtomicType::Null,
+                    SourceLocation::Unknown,
+                ))),
+                expr: mkcref(Expr::SQL(Arc::new(SQL { names, body }))),
+            };
+
             schema.write()?.exprs.push(Located::new(compiled, loc));
         }
         ast::StmtBody::Import { .. } => {}

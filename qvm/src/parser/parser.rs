@@ -230,6 +230,25 @@ impl<'a> Parser<'a> {
             self.parse_import()
         } else if self.peek_keyword("select") {
             self.parse_query()
+        } else if self.consume_keyword("unsafe") {
+            let inner_result = self.parse_stmt(idx).as_result();
+            match inner_result {
+                Ok(Stmt {
+                    body: StmtBody::Expr(e),
+                    ..
+                }) => Ok(StmtBody::UnsafeExpr(e)),
+                Err(e) => Err(e),
+                _ => Err(ParserError::unimplemented(
+                    SourceLocation::Range(
+                        self.file.clone(),
+                        Range {
+                            start: start.clone(),
+                            end: self.prev_end_location().clone(),
+                        },
+                    ),
+                    "non-expression unsafe statements",
+                )),
+            }
         } else {
             self.parse_expr_stmt()
         };
@@ -255,6 +274,7 @@ impl<'a> Parser<'a> {
                     && !self.peek_keyword("type")
                     && !self.peek_keyword("import")
                     && !self.peek_keyword("select")
+                    && !self.peek_keyword("unsafe")
                     && self.peek_token().token != Token::SemiColon
                     && self.peek_token().token != Token::EOF
                 {
