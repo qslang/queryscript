@@ -19,6 +19,13 @@ pub enum RuntimeError {
         backtrace: Option<Backtrace>,
     },
 
+    #[snafu(display("SQL Engine returned a record batch with an invalid schema: expected {:?}, got {:?}. This can happen if the type is declared incorrectly or if there's a bug in the engine.", expected_type, actual_type))]
+    TypeMismatch {
+        expected_type: crate::types::Type,
+        actual_type: crate::types::Type,
+        backtrace: Option<Backtrace>,
+    },
+
     #[snafu(context(false))]
     TypesystemError {
         #[snafu(backtrace)]
@@ -69,6 +76,17 @@ impl RuntimeError {
 
     pub fn unimplemented(what: &str) -> RuntimeError {
         return UnimplementedSnafu { what }.build();
+    }
+
+    pub fn type_mismatch(
+        expected_type: crate::types::Type,
+        actual_type: crate::types::Type,
+    ) -> RuntimeError {
+        return TypeMismatchSnafu {
+            expected_type,
+            actual_type,
+        }
+        .build();
     }
 }
 

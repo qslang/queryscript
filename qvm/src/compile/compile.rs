@@ -811,13 +811,6 @@ fn compile_expr(
         let expr_type = CRef::new_unknown("unsafe expr");
         let resolve = schema_infer_expr_fn(schema.clone(), expr.clone(), expr_type.clone());
 
-        // XXX
-        // The problem is that we have no order or dependency guarantees, so this may run _before_ we queue up
-        // the external types for load(). We either need to somehow tell the compiler that we depend on those, or
-        // create some kind of crude global rank (e.g. all unsafe exprs get externally inferred last).
-        //
-        // XXX We should write a test that uses schema inference and also one that asserts (at runtime) that a user
-        // declared schema (perhaps with int vs. bigint) matches the thing spit out by duckdb at runtime.
         compiler.add_external_type(resolve, expr_type.clone(), ExternalTypeOrder::UnsafeExpr)?;
 
         Ok(CTypedExpr {

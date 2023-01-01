@@ -132,9 +132,13 @@ pub fn eval<'a>(
                 // TODO: This ownership model implies some necessary copying (below).
                 let rows = { ctx.sql_engine.eval(ctx, &query, sql_params).await? };
 
+                // Before returning, we perform some runtime checks that might only be necessary in debug mode:
+                // - For expressions, validate that the result is a single row and column
+                // - For expressions and queries, check that the RecordBatch's type matches the
+                //   expected type from the compiler.
+                let expected_type = typed_expr.type_.read()?;
                 match body {
                     schema::SQLBody::Expr(_) => {
-                        // TODO: These runtime checks may only be necessary in debug mode
                         if rows.num_batches() != 1 {
                             return fail!("Expected an expression to have exactly one row");
                         }
@@ -143,9 +147,31 @@ pub fn eval<'a>(
                         }
 
                         let row = &rows.batch(0).records()[0];
+                        let value = row.column(0).clone();
+                        let value_type = value.type_();
+                        if *expected_type != value_type {
+                            return Err(RuntimeError::type_mismatch(
+                                expected_type.clone(),
+                                value_type,
+                            ));
+                        }
                         Ok(row.column(0).clone())
                     }
                     schema::SQLBody::Query(_) | schema::SQLBody::Table(_) => {
+                        // Validate that the schema matches the expected type. If not, we have a serious problem
+                        // since we may interpret the record batch as a different type than expected.
+                        if rows.num_batches() > 0 {
+                            let rows_type = crate::types::Type::List(Box::new(
+                                crate::types::Type::Record(rows.schema()),
+                            ));
+                            if *expected_type != rows_type {
+                                return Err(RuntimeError::type_mismatch(
+                                    expected_type.clone(),
+                                    rows_type,
+                                ));
+                            }
+                        }
+
                         Ok(Value::Relation(rows))
                     }
                 }
