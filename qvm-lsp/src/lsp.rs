@@ -948,7 +948,7 @@ impl Backend {
             }
         };
 
-        let ctx = runtime::build_context(&schema_ref, runtime::SQLEngineType::DuckDB);
+        let ctx = runtime::Context::new(&schema_ref, runtime::SQLEngineType::DuckDB);
 
         // XXX We should change this log_internal_error to return an error to the webview
         let value = runtime::eval(&ctx, &expr)

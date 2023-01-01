@@ -18,6 +18,7 @@ const BUILTIN_TYPES: &'static [BuiltinType] = &[
     ("smallint", AtomicType::Int16),
     ("int", AtomicType::Int32),
     ("bigint", AtomicType::Int64),
+    ("hugeint", AtomicType::Decimal128(38, 0)), // XXX This is a hack because DuckDB's sum returns this
     ("float", AtomicType::Float32),
     ("double", AtomicType::Float64),
     //
@@ -49,13 +50,21 @@ const BUILTIN_TYPES: &'static [BuiltinType] = &[
     ("null", AtomicType::Null),
 ];
 
+// DuckDB's sum function follows the following rules:
+// 	sum(DECIMAL) -> DECIMAL
+//	sum(SMALLINT) -> HUGEINT
+//	sum(INTEGER) -> HUGEINT
+//	sum(BIGINT) -> HUGEINT
+//	sum(HUGEINT) -> HUGEINT
+//	sum(DOUBLE) -> DOUBLE
+
 const BUILTIN_FUNCTIONS: &'static str = "
 fn load<R>(file varchar, format varchar) -> External<[R]> = native;
 fn __native_identity<T>(t T) -> T = native;
 fn min<R>(value R) -> R = sql;
 fn max<R>(value R) -> R = sql;
 fn count<R>(value R) -> bigint = sql;
-fn sum<R>(value R) -> R = sql;
+fn sum<R>(value R) -> hugeint = sql;
 fn avg<R>(value R) -> double = sql;
 fn array_agg<R>(value R) -> [R] = sql;
 ";

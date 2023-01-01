@@ -104,7 +104,7 @@ mod tests {
         let expr = expr.to_runtime_type()?;
 
         let engine_type = runtime::SQLEngineType::DuckDB;
-        let async_ctx = crate::runtime::build_context(&schema, engine_type);
+        let async_ctx = crate::runtime::Context::new(&schema, engine_type);
         let async_expr = expr.clone();
 
         let value = rt.block_on(async move { runtime::eval(&async_ctx, &async_expr).await })?;

@@ -16,7 +16,7 @@ use crate::compile::inference::*;
 use crate::compile::inline::*;
 use crate::compile::schema::*;
 use crate::compile::util::InsertionOrderMap;
-use crate::types::{number::parse_numeric_type, AtomicType};
+use crate::types::{number::parse_numeric_type, AtomicType, Type};
 
 use super::compile::ExternalTypeOrder;
 
@@ -467,7 +467,6 @@ impl Constrainable for FieldMatch {}
 pub struct SQLScope {
     pub parent: Option<Arc<SQLScope>>,
     pub relations: BTreeMap<String, (CRef<MType>, SourceLocation)>,
-    pub multiple_rows: bool,
 }
 
 impl SQLScope {
@@ -475,7 +474,6 @@ impl SQLScope {
         SQLScope {
             parent,
             relations: BTreeMap::new(),
-            multiple_rows: true,
         }
     }
 
@@ -898,7 +896,7 @@ pub fn compile_order_by(
     let mut compiled_order_by = Vec::new();
     let mut compiled_opts = Vec::new();
     for ob in order_by {
-        compiled_order_by.push(compile_sqlarg(
+        compiled_order_by.push(compile_gb_ob_expr(
             compiler.clone(),
             schema.clone(),
             scope.clone(),
@@ -915,7 +913,7 @@ pub fn compile_order_by(
             for (expr, (asc, nulls_first)) in
                 compiled_order_by.into_iter().zip(compiled_opts.into_iter())
             {
-                let resolved_expr = expr.sql.await?;
+                let resolved_expr = expr.await?;
                 let resolved_expr = resolved_expr.read()?;
                 names.extend(resolved_expr.names.clone());
                 resolved_order_by.push(sqlast::OrderByExpr {
@@ -926,6 +924,31 @@ pub fn compile_order_by(
             }
 
             Ok(cwrap((names, resolved_order_by)))
+        }
+    })
+}
+
+pub fn compile_gb_ob_expr(
+    compiler: Compiler,
+    schema: Ref<Schema>,
+    scope: Ref<SQLScope>,
+    loc: &SourceLocation,
+    expr: &sqlast::Expr,
+) -> Result<CRef<SQL<CRef<MType>>>> {
+    let maybe_numeric_ref = match expr {
+        sqlast::Expr::Value(sqlast::Value::Number(n, _)) => n.parse::<u64>().ok().map(|_| SQL {
+            names: CSQLNames::new(),
+            body: SQLBody::Expr(expr.clone()),
+        }),
+        _ => None,
+    };
+
+    Ok(match maybe_numeric_ref {
+        Some(numeric_ref) => mkcref(numeric_ref),
+        _ => {
+            let compiled =
+                compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), &loc, expr)?;
+            compiled.sql
         }
     })
 }
@@ -1143,9 +1166,10 @@ pub fn compile_select(
 
             let mut group_by = Vec::new();
             for gb in &select.group_by {
-                let compiled =
-                    compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), &loc, gb)?;
-                let sql = compiled.sql.await?.read()?.clone();
+                let sql =
+                    compile_gb_ob_expr(compiler.clone(), schema.clone(), scope.clone(), &loc, gb)?
+                        .await?;
+                let sql = sql.read()?;
                 names.extend(sql.names.clone());
                 group_by.push(sql.body.as_expr());
             }
@@ -1448,7 +1472,8 @@ pub fn schema_infer_load_fn(
     inner_type: CRef<MType>,
 ) -> impl std::future::Future<Output = Result<()>> + Send + 'static {
     async move {
-        let ctx = crate::runtime::build_context(&schema, crate::runtime::SQLEngineType::DuckDB);
+        let ctx = crate::runtime::Context::new(&schema, crate::runtime::SQLEngineType::DuckDB)
+            .disable_typechecks();
         let mut runtime_args = Vec::new();
         for e in args {
             let runtime_expr = e.to_typed_expr().to_runtime_type().context(RuntimeSnafu {
@@ -1487,16 +1512,24 @@ pub fn compile_sqlexpr(
 
     let ret = match expr {
         sqlast::Expr::Value(v) => match v {
-            sqlast::Value::Number(n, _) => CTypedExpr {
-                type_: mkcref(MType::Atom(Located::new(
-                    parse_numeric_type(n).context(TypesystemSnafu { loc: loc.clone() })?,
-                    loc.clone(),
-                ))),
-                expr: mkcref(Expr::SQL(Arc::new(SQL {
-                    names: CSQLNames::new(),
-                    body: SQLBody::Expr(expr.clone()),
-                }))),
-            },
+            sqlast::Value::Number(n, _) => {
+                let numeric_type =
+                    parse_numeric_type(n).context(TypesystemSnafu { loc: loc.clone() })?;
+                let parser_data_type: ParserDataType = (&Type::Atom(numeric_type.clone()))
+                    .try_into()
+                    .context(TypesystemSnafu { loc: loc.clone() })?;
+
+                CTypedExpr {
+                    type_: mkcref(MType::Atom(Located::new(numeric_type, loc.clone()))),
+                    expr: mkcref(Expr::SQL(Arc::new(SQL {
+                        names: CSQLNames::new(),
+                        body: SQLBody::Expr(sqlast::Expr::Cast {
+                            expr: Box::new(expr.clone()),
+                            data_type: parser_data_type,
+                        }),
+                    }))),
+                }
+            }
             sqlast::Value::SingleQuotedString(_)
             | sqlast::Value::EscapedStringLiteral(_)
             | sqlast::Value::NationalStringLiteral(_)

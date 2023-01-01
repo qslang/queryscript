@@ -211,7 +211,7 @@ fn run_file(
         return Ok(());
     }
 
-    let ctx = qvm::runtime::build_context(&schema, engine_type);
+    let ctx = qvm::runtime::Context::new(&schema, engine_type);
     let locked_schema = schema.read()?;
     for expr in locked_schema.exprs.iter() {
         let expr = expr.to_runtime_type().context(RuntimeSnafu {

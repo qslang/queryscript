@@ -170,7 +170,7 @@ fn run_command(
             };
 
             if let Some(compiled) = compiled {
-                let ctx = qvm::runtime::build_context(&repl_schema, engine_type);
+                let ctx = qvm::runtime::Context::new(&repl_schema, engine_type);
                 let expr = compiled.to_runtime_type().context(RuntimeSnafu {
                     file: file.to_string(),
                 })?;

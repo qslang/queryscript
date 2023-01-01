@@ -1,5 +1,5 @@
 use futures::future::{BoxFuture, FutureExt};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use crate::compile::schema;
 use crate::{
@@ -7,7 +7,7 @@ use crate::{
     types::{Arc, Value},
 };
 
-use super::{context::Context, error::*, new_engine, sql::SQLParam, SQLEngineType};
+use super::{context::Context, error::*, sql::SQLParam};
 
 type TypeRef = schema::Ref<types::Type>;
 
@@ -38,15 +38,6 @@ pub async fn eval_params<'a>(
     }
 
     Ok(param_values)
-}
-
-pub fn build_context(schema: &schema::SchemaRef, engine_type: SQLEngineType) -> Context {
-    let schema = schema.read().unwrap();
-    Context {
-        folder: schema.folder.clone(),
-        values: BTreeMap::new(),
-        sql_engine: new_engine(engine_type),
-    }
 }
 
 pub fn eval<'a>(
@@ -149,7 +140,7 @@ pub fn eval<'a>(
                         let row = &rows.batch(0).records()[0];
                         let value = row.column(0).clone();
                         let value_type = value.type_();
-                        if *expected_type != value_type {
+                        if !ctx.disable_typechecks && *expected_type != value_type {
                             return Err(RuntimeError::type_mismatch(
                                 expected_type.clone(),
                                 value_type,
@@ -160,7 +151,7 @@ pub fn eval<'a>(
                     schema::SQLBody::Query(_) | schema::SQLBody::Table(_) => {
                         // Validate that the schema matches the expected type. If not, we have a serious problem
                         // since we may interpret the record batch as a different type than expected.
-                        if rows.num_batches() > 0 {
+                        if !ctx.disable_typechecks && rows.num_batches() > 0 {
                             let rows_type = crate::types::Type::List(Box::new(
                                 crate::types::Type::Record(rows.schema()),
                             ));

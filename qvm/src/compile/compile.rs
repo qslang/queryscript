@@ -730,7 +730,8 @@ pub fn schema_infer_expr_fn(
     inner_type: CRef<MType>,
 ) -> impl std::future::Future<Output = Result<()>> + Send + 'static {
     async move {
-        let ctx = crate::runtime::build_context(&schema, crate::runtime::SQLEngineType::DuckDB);
+        let ctx = crate::runtime::Context::new(&schema, crate::runtime::SQLEngineType::DuckDB)
+            .disable_typechecks();
 
         let typed_expr = CTypedExpr {
             expr: expr.clone(),
