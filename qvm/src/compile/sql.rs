@@ -18,6 +18,8 @@ use crate::compile::schema::*;
 use crate::compile::util::InsertionOrderMap;
 use crate::types::{number::parse_numeric_type, AtomicType};
 
+use super::compile::ExternalTypeOrder;
+
 const QVM_NAMESPACE: &str = "__qvm";
 
 #[derive(Clone, Debug)]
@@ -1924,7 +1926,11 @@ pub fn compile_sqlexpr(
                                     args.clone(),
                                     inner_type.get().clone(),
                                 );
-                                compiler.add_external_type(resolve, inner_type.get().clone())?;
+                                compiler.add_external_type(
+                                    resolve,
+                                    inner_type.get().clone(),
+                                    ExternalTypeOrder::Load,
+                                )?;
                             }
                             _ => {}
                         }

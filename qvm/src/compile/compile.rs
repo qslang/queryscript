@@ -1,5 +1,5 @@
 use snafu::prelude::*;
-use std::collections::{BTreeMap, BTreeSet, LinkedList};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, LinkedList};
 use std::fmt;
 use std::fs;
 use std::path::Path as FilePath;
@@ -18,12 +18,41 @@ use crate::{c_try, error::MultiResult, parser, parser::parse_schema};
 
 type CompileResult<T> = MultiResult<T, CompileError>;
 
+// This is a fairly crude hack that aims to "order" how we derive
+// external types. As currently implemented, it ensures that we run
+// load commands before we run unsafe expressions, so the latter can
+// depend on the former.
+#[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Ord, Eq)]
+pub enum ExternalTypeOrder {
+    Load,
+    UnsafeExpr,
+}
+
 #[derive(Debug)]
 pub struct ExternalTypeHandle {
     pub handle: tokio::task::JoinHandle<Result<()>>,
     pub inner_type: CRef<MType>,
     pub tx: tokio::sync::oneshot::Sender<bool>,
+    pub order: (ExternalTypeOrder, usize),
 }
+
+// Flip the ordering so that the heap is a min-heap
+impl Ord for ExternalTypeHandle {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other.order.cmp(&self.order)
+    }
+}
+impl PartialOrd for ExternalTypeHandle {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(other.order.cmp(&self.order))
+    }
+}
+impl PartialEq for ExternalTypeHandle {
+    fn eq(&self, other: &Self) -> bool {
+        self.order == other.order
+    }
+}
+impl Eq for ExternalTypeHandle {}
 
 #[derive(Debug)]
 pub struct CompilerData {
@@ -31,7 +60,8 @@ pub struct CompilerData {
     pub next_placeholder: usize,
     pub idle: Ref<tokio::sync::watch::Receiver<()>>,
     pub handles: LinkedList<tokio::task::JoinHandle<Result<()>>>,
-    pub external_types: LinkedList<ExternalTypeHandle>,
+    pub next_external_type: usize,
+    pub external_types: BinaryHeap<ExternalTypeHandle>,
     pub files: BTreeMap<String, String>,
 }
 
@@ -127,7 +157,8 @@ impl Compiler {
                 next_placeholder: 1,
                 idle: mkref(idle_rx),
                 handles: LinkedList::new(),
-                external_types: LinkedList::new(),
+                next_external_type: 1,
+                external_types: BinaryHeap::new(),
                 files: BTreeMap::new(),
             }),
             builtins: schema.clone(),
@@ -233,30 +264,35 @@ impl Compiler {
 
             // Claim the set external types we've accrued within the compiler to reset things.
             //
-            let mut external_types = LinkedList::new();
-            std::mem::swap(
-                &mut c_try!(result, self.data.write()).external_types,
-                &mut external_types,
-            );
+            let external_types = {
+                let mut ret = Vec::new();
+                let mut data = c_try!(result, self.data.write());
+                while let Some(et) = data.external_types.pop() {
+                    ret.push(et);
+                }
+                ret
+            };
 
             let mut unresolved = 0;
             for external_type in external_types {
                 // Check whether the type can be converted to a runtime type. If it errors
                 // out, then we know that the type is still unresolved.
-                if matches!(
-                    c_try!(
-                        result,
+                if !c_try!(result, external_type.inner_type.is_known())
+                    || matches!(
                         c_try!(
                             result,
-                            external_type.inner_type.must().context(RuntimeSnafu {
-                                loc: SourceLocation::Unknown
-                            })
+                            c_try!(
+                                result,
+                                external_type.inner_type.must().context(RuntimeSnafu {
+                                    loc: SourceLocation::Unknown
+                                })
+                            )
+                            .read()
                         )
-                        .read()
+                        .to_runtime_type(),
+                        Err(_)
                     )
-                    .to_runtime_type(),
-                    Err(_)
-                ) {
+                {
                     unresolved += 1;
                     match external_type.tx.send(true) {
                         Ok(()) => {}
@@ -343,6 +379,7 @@ impl Compiler {
         &self,
         f: impl std::future::Future<Output = Result<()>> + Send + 'static,
         inner_type: CRef<MType>,
+        order: ExternalTypeOrder,
     ) -> Result<()> {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
@@ -355,12 +392,15 @@ impl Compiler {
             Ok(())
         });
 
+        let next_external_type = data.next_external_type;
+        data.next_external_type += 1;
         let handle = ExternalTypeHandle {
             handle: cb,
             inner_type,
             tx,
+            order: (order, next_external_type),
         };
-        data.external_types.push_back(handle);
+        data.external_types.push(handle);
         Ok(())
     }
 
@@ -684,6 +724,41 @@ pub fn typecheck_path(type_: CRef<MType>, path: &[Ident]) -> Result<CRef<MType>>
     })
 }
 
+pub fn schema_infer_expr_fn(
+    schema: SchemaRef,
+    expr: CRef<Expr<CRef<MType>>>,
+    inner_type: CRef<MType>,
+) -> impl std::future::Future<Output = Result<()>> + Send + 'static {
+    async move {
+        let ctx = crate::runtime::build_context(&schema, crate::runtime::SQLEngineType::DuckDB);
+
+        let typed_expr = CTypedExpr {
+            expr: expr.clone(),
+            type_: mkcref(MType::Atom(Located::new(
+                AtomicType::Null,
+                SourceLocation::Unknown,
+            ))),
+        }
+        .to_runtime_type()
+        .context(RuntimeSnafu {
+            loc: SourceLocation::Unknown,
+        })?;
+
+        // XXX This should be doable without actually running the expression (e.g. applying limit 0)
+        let result = crate::runtime::eval(&ctx, &typed_expr)
+            .await
+            .context(RuntimeSnafu {
+                loc: SourceLocation::Unknown,
+            })?;
+
+        let inferred_type = result.type_();
+        let inferred_mtype = mkcref(MType::from_runtime_type(&inferred_type)?);
+
+        inner_type.unify(&inferred_mtype)?;
+        Ok(())
+    }
+}
+
 fn compile_expr(
     compiler: Compiler,
     schema: Ref<Schema>,
@@ -731,12 +806,23 @@ fn compile_expr(
             );
         }
 
+        let expr = mkcref(Expr::SQL(Arc::new(SQL { names, body })));
+
+        let expr_type = CRef::new_unknown("unsafe expr");
+        let resolve = schema_infer_expr_fn(schema.clone(), expr.clone(), expr_type.clone());
+
+        // XXX
+        // The problem is that we have no order or dependency guarantees, so this may run _before_ we queue up
+        // the external types for load(). We either need to somehow tell the compiler that we depend on those, or
+        // create some kind of crude global rank (e.g. all unsafe exprs get externally inferred last).
+        //
+        // XXX We should write a test that uses schema inference and also one that asserts (at runtime) that a user
+        // declared schema (perhaps with int vs. bigint) matches the thing spit out by duckdb at runtime.
+        compiler.add_external_type(resolve, expr_type.clone(), ExternalTypeOrder::UnsafeExpr)?;
+
         Ok(CTypedExpr {
-            type_: mkcref(MType::Atom(Located::new(
-                AtomicType::Null,
-                SourceLocation::Unknown,
-            ))),
-            expr: mkcref(Expr::SQL(Arc::new(SQL { names, body }))),
+            type_: mkcref(MType::External(Located::new(expr_type, loc.clone()))),
+            expr,
         })
     } else {
         match &expr.body {

@@ -75,7 +75,15 @@ mod tests {
         {
             let entry = entry.expect(format!("Could not read {}", dir.display()).as_str());
             let path = entry.path();
-            if path.is_file() && is_schema_file(path.extension().and_then(OsStr::to_str)) {
+            if path.is_file()
+                && is_schema_file(path.extension().and_then(OsStr::to_str))
+                && !entry
+                    .file_name()
+                    .as_os_str()
+                    .to_str()
+                    .unwrap()
+                    .contains("ignore")
+            {
                 let rel_path = path.strip_prefix(std::env::current_dir().unwrap()).unwrap();
                 println!("Running {}", rel_path.display());
                 test_schema(&rt, &rel_path);
