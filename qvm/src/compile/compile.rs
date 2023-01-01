@@ -684,10 +684,11 @@ pub fn typecheck_path(type_: CRef<MType>, path: &[Ident]) -> Result<CRef<MType>>
     })
 }
 
-pub fn compile_expr(
+fn compile_expr(
     compiler: Compiler,
     schema: Ref<Schema>,
     expr: &ast::Expr,
+    allowed_unsafe_references: &BTreeSet<String>,
 ) -> Result<CTypedExpr> {
     let loc = SourceLocation::Range(
         schema.read()?.file.clone(),
@@ -696,19 +697,62 @@ pub fn compile_expr(
             end: expr.end.clone(),
         },
     );
-    match &expr.body {
-        ast::ExprBody::SQLQuery(q) => {
-            Ok(compile_sqlquery(compiler.clone(), schema.clone(), &loc, q)?)
+
+    if expr.is_unsafe {
+        let body = match &expr.body {
+            ast::ExprBody::SQLQuery(sql) => SQLBody::Query(sql.clone()),
+            ast::ExprBody::SQLExpr(expr) => SQLBody::Expr(expr.clone()),
+        };
+
+        let mut names = SQLNames::new();
+        for (name, decl) in schema.read()?.decls.iter() {
+            // This check ensures that we don't accidentally recurse infinitely if we compile an expression
+            // in a file with unsafe declarations. Without this check, the unsafe declaration will try
+            // compiling a reference to itself. Note that as framed, it does not permit mutual recursion either
+            // (since we break out when we see our own decl).
+            if !allowed_unsafe_references.contains(name) {
+                continue;
+            }
+
+            match &decl.value {
+                SchemaEntry::Expr(_) => {}
+                SchemaEntry::Schema(_) | SchemaEntry::Type(_) => continue,
+            };
+            names.params.insert(
+                name.clone(),
+                compile_reference(
+                    compiler.clone(),
+                    schema.clone(),
+                    &vec![Ident {
+                        loc: SourceLocation::Unknown,
+                        value: name.clone(),
+                    }],
+                )?,
+            );
         }
-        ast::ExprBody::SQLExpr(e) => {
-            let scope = mkref(SQLScope::new(None));
-            Ok(compile_sqlexpr(
-                compiler.clone(),
-                schema.clone(),
-                scope,
-                &loc,
-                e,
-            )?)
+
+        Ok(CTypedExpr {
+            type_: mkcref(MType::Atom(Located::new(
+                AtomicType::Null,
+                SourceLocation::Unknown,
+            ))),
+            expr: mkcref(Expr::SQL(Arc::new(SQL { names, body }))),
+        })
+    } else {
+        match &expr.body {
+            ast::ExprBody::SQLQuery(q) => {
+                Ok(compile_sqlquery(compiler.clone(), schema.clone(), &loc, q)?)
+            }
+            ast::ExprBody::SQLExpr(e) => {
+                let scope = mkref(SQLScope::new(None));
+                Ok(compile_sqlexpr(
+                    compiler.clone(),
+                    schema.clone(),
+                    scope,
+                    &loc,
+                    e,
+                )?)
+            }
         }
     }
 }
@@ -759,15 +803,20 @@ fn compile_schema_ast(
     ast: &ast::Schema,
 ) -> CompileResult<()> {
     let mut result = CompileResult::new(());
+
+    let mut allowed_unsafe_references = BTreeSet::new();
+
     result.absorb(declare_schema_entries(
         compiler.clone(),
         schema.clone(),
         ast,
+        &mut allowed_unsafe_references,
     ));
     result.absorb(compile_schema_entries(
         compiler.clone(),
         schema.clone(),
         ast,
+        &mut allowed_unsafe_references,
     ));
     match gather_schema_externs(schema) {
         Ok(_) => {}
@@ -777,14 +826,15 @@ fn compile_schema_ast(
     result
 }
 
-pub fn declare_schema_entries(
+fn declare_schema_entries(
     compiler: Compiler,
     schema: Ref<Schema>,
     ast: &ast::Schema,
+    allowed_unsafe_references: &mut BTreeSet<String>,
 ) -> CompileResult<()> {
     let mut result = CompileResult::new(());
     for (idx, stmt) in ast.stmts.iter().enumerate() {
-        match declare_schema_entry(&compiler, &schema, stmt) {
+        match declare_schema_entry(&compiler, &schema, stmt, allowed_unsafe_references) {
             Ok(_) => {}
             Err(e) => result.add_error(Some(idx), e),
         }
@@ -792,10 +842,11 @@ pub fn declare_schema_entries(
     result
 }
 
-pub fn declare_schema_entry(
+fn declare_schema_entry(
     compiler: &Compiler,
     schema: &Ref<Schema>,
     stmt: &ast::Stmt,
+    allowed_unsafe_references: &mut BTreeSet<String>,
 ) -> Result<()> {
     let loc = SourceLocation::Range(
         schema.read()?.file.clone(),
@@ -806,7 +857,7 @@ pub fn declare_schema_entry(
     );
     let entries: Vec<(Ident, bool, SchemaEntry)> = match &stmt.body {
         ast::StmtBody::Noop | ast::StmtBody::Unparsed => Vec::new(),
-        ast::StmtBody::Expr(_) | ast::StmtBody::UnsafeExpr(_) => Vec::new(),
+        ast::StmtBody::Expr(_) => Vec::new(),
         ast::StmtBody::Import { path, list, .. } => {
             let imported = lookup_schema(compiler.clone(), schema.clone(), &path)?;
             if imported.read()?.args.is_some() {
@@ -949,6 +1000,10 @@ pub fn declare_schema_entry(
                         ));
                     }
                 }
+            }
+
+            for import in imports.iter() {
+                allowed_unsafe_references.insert(import.0.value.clone());
             }
 
             imports
@@ -1097,10 +1152,12 @@ pub fn compile_schema_entries(
     compiler: Compiler,
     schema: Ref<Schema>,
     ast: &ast::Schema,
+    allowed_unsafe_references: &mut BTreeSet<String>,
 ) -> CompileResult<()> {
     let mut result = CompileResult::new(());
+
     for (idx, stmt) in ast.stmts.iter().enumerate() {
-        match compile_schema_entry(&compiler, &schema, stmt) {
+        match compile_schema_entry(&compiler, &schema, stmt, allowed_unsafe_references) {
             Ok(_) => {}
             Err(e) => result.add_error(Some(idx), e),
         }
@@ -1108,10 +1165,11 @@ pub fn compile_schema_entries(
     result
 }
 
-pub fn compile_schema_entry(
+fn compile_schema_entry(
     compiler: &Compiler,
     schema: &Ref<Schema>,
     stmt: &ast::Stmt,
+    allowed_unsafe_references: &mut BTreeSet<String>,
 ) -> Result<()> {
     let loc = SourceLocation::Range(
         schema.read()?.file.clone(),
@@ -1123,42 +1181,12 @@ pub fn compile_schema_entry(
     match &stmt.body {
         ast::StmtBody::Noop | ast::StmtBody::Unparsed => {}
         ast::StmtBody::Expr(expr) => {
-            let compiled = compile_expr(compiler.clone(), schema.clone(), expr)?;
-            schema.write()?.exprs.push(Located::new(compiled, loc));
-        }
-        ast::StmtBody::UnsafeExpr(expr) => {
-            let body = match &expr.body {
-                ast::ExprBody::SQLQuery(sql) => SQLBody::Query(sql.clone()),
-                ast::ExprBody::SQLExpr(expr) => SQLBody::Expr(expr.clone()),
-            };
-
-            let mut names = SQLNames::new();
-            for (name, decl) in schema.read()?.decls.iter() {
-                match &decl.value {
-                    SchemaEntry::Expr(_) => {}
-                    SchemaEntry::Schema(_) | SchemaEntry::Type(_) => continue,
-                };
-                names.params.insert(
-                    name.clone(),
-                    compile_reference(
-                        compiler.clone(),
-                        schema.clone(),
-                        &vec![Ident {
-                            loc: SourceLocation::Unknown,
-                            value: name.clone(),
-                        }],
-                    )?,
-                );
-            }
-
-            let compiled = CTypedExpr {
-                type_: mkcref(MType::Atom(Located::new(
-                    AtomicType::Null,
-                    SourceLocation::Unknown,
-                ))),
-                expr: mkcref(Expr::SQL(Arc::new(SQL { names, body }))),
-            };
-
+            let compiled = compile_expr(
+                compiler.clone(),
+                schema.clone(),
+                expr,
+                &allowed_unsafe_references,
+            )?;
             schema.write()?.exprs.push(Located::new(compiled, loc));
         }
         ast::StmtBody::Import { .. } => {}
@@ -1264,7 +1292,12 @@ pub fn compile_schema_entry(
                     true,
                 ),
                 ast::FnBody::Expr(expr) => (
-                    compile_expr(compiler.clone(), inner_schema.clone(), expr)?,
+                    compile_expr(
+                        compiler.clone(),
+                        inner_schema.clone(),
+                        expr,
+                        &allowed_unsafe_references,
+                    )?,
                     false,
                 ),
             };
@@ -1318,6 +1351,8 @@ pub fn compile_schema_entry(
                     })?,
                 },
             )?;
+
+            allowed_unsafe_references.insert(name.value.clone());
         }
         ast::StmtBody::Let { name, type_, body } => {
             let lhs_type = if let Some(t) = type_ {
@@ -1325,7 +1360,12 @@ pub fn compile_schema_entry(
             } else {
                 MType::new_unknown(format!("typeof {}", name.value).as_str())
             };
-            let compiled = compile_expr(compiler.clone(), schema.clone(), &body)?;
+            let compiled = compile_expr(
+                compiler.clone(),
+                schema.clone(),
+                &body,
+                &allowed_unsafe_references,
+            )?;
             lhs_type.unify(&compiled.type_)?;
             unify_expr_decl(
                 compiler.clone(),
@@ -1336,6 +1376,8 @@ pub fn compile_schema_entry(
                     expr: compiled.expr,
                 },
             )?;
+
+            allowed_unsafe_references.insert(name.value.clone());
         }
         ast::StmtBody::Extern { name, type_ } => {
             unify_expr_decl(
@@ -1347,6 +1389,8 @@ pub fn compile_schema_entry(
                     expr: mkcref(Expr::Unknown),
                 },
             )?;
+
+            allowed_unsafe_references.insert(name.value.clone());
         }
     };
 

@@ -955,6 +955,10 @@ impl Backend {
             .await
             .map_err(log_internal_error)?;
 
+        // This is a bit of a hack to support unsafe expressions, which return a different type than what's
+        // reported from the compiler. Ideally, we should either assert or have an Unknown type.
+        let r#type = value.type_();
+
         // NOTE: Ideally we should be applying the limit to the query tree, but we don't have a
         // great way to do that (without unwrapping and mutating the compiled expression). We probably
         // want to add a transform feature to the compiler that allows us to inject transforms at certain
@@ -972,8 +976,6 @@ impl Backend {
                 other => other,
             };
         }
-
-        let r#type = expr.type_.read().map_err(log_internal_error)?.clone();
 
         Ok(RunExprResult { value, r#type })
     }

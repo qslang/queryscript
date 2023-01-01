@@ -228,27 +228,6 @@ impl<'a> Parser<'a> {
             self.parse_typedef()
         } else if self.consume_keyword("import") || export {
             self.parse_import()
-        } else if self.peek_keyword("select") {
-            self.parse_query()
-        } else if self.consume_keyword("unsafe") {
-            let inner_result = self.parse_stmt(idx).as_result();
-            match inner_result {
-                Ok(Stmt {
-                    body: StmtBody::Expr(e),
-                    ..
-                }) => Ok(StmtBody::UnsafeExpr(e)),
-                Err(e) => Err(e),
-                _ => Err(ParserError::unimplemented(
-                    SourceLocation::Range(
-                        self.file.clone(),
-                        Range {
-                            start: start.clone(),
-                            end: self.prev_end_location().clone(),
-                        },
-                    ),
-                    "non-expression unsafe statements",
-                )),
-            }
         } else {
             self.parse_expr_stmt()
         };
@@ -274,6 +253,7 @@ impl<'a> Parser<'a> {
                     && !self.peek_keyword("type")
                     && !self.peek_keyword("import")
                     && !self.peek_keyword("select")
+                    && !self.peek_keyword("with")
                     && !self.peek_keyword("unsafe")
                     && self.peek_token().token != Token::SemiColon
                     && self.peek_token().token != Token::EOF
@@ -549,36 +529,11 @@ impl<'a> Parser<'a> {
         Ok(StmtBody::Let { name, type_, body })
     }
 
-    pub fn parse_query(&mut self) -> Result<StmtBody> {
-        let start = self.peek_start_location();
-        let query = self
-            .sqlparser
-            .parse_query()
-            .context(self.range_context(&start))?;
-        self.expect_eos()?;
-        let end = self.prev_end_location();
-
-        Ok(StmtBody::Expr(Expr {
-            body: ExprBody::SQLQuery(query),
-            start,
-            end,
-        }))
-    }
-
     pub fn parse_expr_stmt(&mut self) -> Result<StmtBody> {
-        let start = self.peek_start_location();
-        let expr = self
-            .sqlparser
-            .parse_expr()
-            .context(self.range_context(&start))?;
+        let expr = self.parse_expr()?;
         self.expect_eos()?;
-        let end = self.prev_end_location();
 
-        Ok(StmtBody::Expr(Expr {
-            body: ExprBody::SQLExpr(expr),
-            start,
-            end,
-        }))
+        Ok(StmtBody::Expr(expr))
     }
 
     pub fn parse_typedef(&mut self) -> Result<StmtBody> {
@@ -689,7 +644,10 @@ impl<'a> Parser<'a> {
         let start = self.peek_start_location();
         self.sqlparser
             .autocomplete_tokens(&[Token::make_keyword("SELECT"), Token::make_keyword("WITH")]);
-        Ok(match self.peek_token().token {
+
+        let is_unsafe = self.consume_keyword("unsafe");
+
+        let body = match self.peek_token().token {
             Token::Word(Word {
                 value: _,
                 quote_style: _,
@@ -699,25 +657,22 @@ impl<'a> Parser<'a> {
                     .sqlparser
                     .parse_query()
                     .context(self.range_context(&start))?;
-                let end = self.prev_end_location();
-                Expr {
-                    body: ExprBody::SQLQuery(query),
-                    start,
-                    end,
-                }
+                ExprBody::SQLQuery(query)
             }
             _ => {
                 let expr = self
                     .sqlparser
                     .parse_expr()
                     .context(self.range_context(&start))?;
-                let end = self.prev_end_location();
-                Expr {
-                    body: ExprBody::SQLExpr(expr),
-                    start,
-                    end,
-                }
+                ExprBody::SQLExpr(expr)
             }
+        };
+
+        Ok(Expr {
+            body,
+            start,
+            end: self.prev_end_location(),
+            is_unsafe,
         })
     }
 }

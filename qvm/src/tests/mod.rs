@@ -45,7 +45,10 @@ mod tests {
                         body: ast::StmtBody::Expr(e),
                         ..
                     } => ast::Stmt {
-                        body: ast::StmtBody::UnsafeExpr(e.clone()),
+                        body: ast::StmtBody::Expr(ast::Expr {
+                            is_unsafe: true,
+                            ..e.clone()
+                        }),
                         ..stmt.clone()
                     },
                     o => o.clone(),

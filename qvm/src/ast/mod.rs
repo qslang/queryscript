@@ -273,6 +273,7 @@ pub struct Expr {
     pub body: ExprBody,
     pub start: Location,
     pub end: Location,
+    pub is_unsafe: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -294,7 +295,6 @@ pub enum StmtBody {
     Noop,
     Unparsed,
     Expr(Expr),
-    UnsafeExpr(Expr),
     Import {
         path: Path,
         list: ImportList,
