@@ -9,6 +9,7 @@ pub mod inline;
 pub mod schema;
 pub mod sql;
 pub mod traverse;
+mod unsafe_expr;
 mod util;
 
 pub use compile::{
