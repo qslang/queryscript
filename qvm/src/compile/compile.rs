@@ -645,6 +645,26 @@ pub fn resolve_type(
             resolve_type(compiler, schema, inner.as_ref())?,
             loc,
         )))),
+        ast::TypeBody::Generic(path, types) => {
+            // Since generic names are hardcoded right now, expect the name to be a single element.
+            // Eventually, this should be a decl lookup though.
+            let name = if path.len() == 1 {
+                path[0].value.to_lowercase()
+            } else {
+                return Err(CompileError::unimplemented(loc, "Multi-part generic names"));
+            };
+            let generic = Arc::new(match name.as_str() {
+                "sumagg" => super::generics::SumGeneric::new(),
+                _ => return Err(CompileError::no_such_entry(path.clone())),
+            }) as Arc<dyn Generic>;
+
+            let args = types
+                .iter()
+                .map(|t| resolve_type(compiler.clone(), schema.clone(), t))
+                .collect::<Result<Vec<_>>>()?;
+
+            Ok(mkcref(MType::Generic(Located::new((generic, args), loc))))
+        }
     }
 }
 

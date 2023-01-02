@@ -3,6 +3,7 @@ mod builtin_types;
 mod coerce;
 pub mod compile;
 pub mod error;
+mod generics;
 pub mod inference;
 pub mod inline;
 pub mod schema;

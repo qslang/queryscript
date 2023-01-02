@@ -247,6 +247,7 @@ pub enum TypeBody {
         excluded: Vec<Ident>,
     },
     External(Box<Type>),
+    Generic(Path, Vec<Type>),
 }
 
 #[derive(Clone, Debug)]

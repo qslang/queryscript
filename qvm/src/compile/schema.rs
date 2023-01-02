@@ -45,6 +45,11 @@ impl MField {
     }
 }
 
+pub trait Generic: Send + Sync + fmt::Debug {
+    fn to_runtime_type(&self, args: &Vec<Type>) -> runtime::error::Result<Type>;
+    fn unify(&self, args: &Vec<CRef<MType>>, other: &MType) -> Result<()>;
+}
+
 // Here, "M" means monomorphic.  MTypes can contain free variables in the form of the "Name" branch
 // below, but they can't contain universal types.  Universal types can only exist at the top-level
 // of a schema declaration, and so are represented within `SType` below.
@@ -57,6 +62,7 @@ pub enum MType {
     Fn(Located<MFnType>),
     Name(Located<Ident>),
     External(Located<CRef<MType>>),
+    Generic(Located<(Arc<dyn Generic>, Vec<CRef<MType>>)>),
 }
 
 impl MType {
@@ -100,6 +106,14 @@ impl MType {
                 runtime::error::fail!("Unresolved type name cannot exist at runtime: {:?}", self)
             }
             MType::External(inner_type) => inner_type.must()?.read()?.to_runtime_type(),
+            MType::Generic(inner) => {
+                let (generic, args) = inner.get();
+                let args = args
+                    .iter()
+                    .map(|a| Ok(a.must()?.read()?.to_runtime_type()?))
+                    .collect::<runtime::error::Result<Vec<_>>>()?;
+                generic.to_runtime_type(&args)
+            }
         }
     }
 
@@ -193,6 +207,20 @@ impl MType {
                 inner.substitute(variables)?,
                 inner.location().clone(),
             ))),
+            MType::Generic(inner) => {
+                let location = inner.location();
+                let (generic, args) = inner.get();
+
+                let args = args
+                    .iter()
+                    .map(|a| a.substitute(variables))
+                    .collect::<Result<Vec<_>>>()?;
+
+                mkcref(MType::Generic(Located::new(
+                    (generic.clone(), args),
+                    location.clone(),
+                )))
+            }
         };
 
         Ok(type_)
@@ -206,6 +234,7 @@ impl MType {
             MType::Fn(t) => t.location().clone(),
             MType::Name(t) => t.location().clone(),
             MType::External(t) => t.location().clone(),
+            MType::Generic(t) => t.location().clone(),
         }
     }
 }
@@ -319,6 +348,18 @@ impl fmt::Debug for MType {
                 t.fmt(f)?;
                 f.write_str(">")?;
             }
+            MType::Generic(t) => {
+                let (generic, args) = t.get();
+                generic.fmt(f)?;
+                f.write_str("<")?;
+                for (idx, arg) in args.iter().enumerate() {
+                    if idx > 0 {
+                        f.write_str(",")?;
+                    }
+                    arg.fmt(f)?;
+                }
+                f.write_str(">")?;
+            }
         }
         Ok(())
     }
@@ -326,7 +367,9 @@ impl fmt::Debug for MType {
 
 impl Constrainable for MType {
     fn unify(&self, other: &MType) -> Result<()> {
-        if !matches!(self, MType::External(..)) && matches!(other, MType::External(..)) {
+        if (!matches!(self, MType::External(..)) && matches!(other, MType::External(..)))
+            || (!matches!(self, MType::Generic(..)) && matches!(other, MType::Generic(..)))
+        {
             // If there is an external type, ensure it's on the LHS
             return other.unify(self);
         }
@@ -382,6 +425,10 @@ impl Constrainable for MType {
                     le.unify(&mkcref(other.clone()))?;
                 }
             },
+            MType::Generic(le) => {
+                let (generic, args) = le.get();
+                generic.unify(args, other)?;
+            }
         }
 
         Ok(())

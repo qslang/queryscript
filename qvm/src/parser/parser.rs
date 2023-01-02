@@ -563,7 +563,28 @@ impl<'a> Parser<'a> {
             self.expect_token(&Token::Gt)?;
             TypeBody::External(inner_type)
         } else {
-            TypeBody::Reference(self.parse_path(AUTOCOMPLETE_TYPE)?)
+            let type_name = self.parse_path(AUTOCOMPLETE_TYPE)?;
+            if self.consume_token(&Token::Lt) {
+                let mut args = Vec::new();
+                loop {
+                    args.push(self.parse_type()?);
+                    self.autocomplete_tokens(&[Token::Comma, Token::Gt]);
+                    match self.next_token().token {
+                        Token::Comma => {}
+                        Token::Gt => break,
+                        _ => {
+                            return unexpected_token!(
+                                self.file.clone(),
+                                self.peek_token(),
+                                "Expected: ',' | '>'"
+                            );
+                        }
+                    }
+                }
+                TypeBody::Generic(type_name, args)
+            } else {
+                TypeBody::Reference(type_name)
+            }
         };
 
         if self.consume_keyword("exclude") {
