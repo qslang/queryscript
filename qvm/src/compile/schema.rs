@@ -3,6 +3,7 @@ pub use arrow::datatypes::DataType as ArrowDataType;
 use colored::*;
 use snafu::prelude::*;
 use sqlparser::ast as sqlast;
+use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Debug};
 use std::sync::{Arc, RwLock};
@@ -46,8 +47,17 @@ impl MField {
 }
 
 pub trait Generic: Send + Sync + fmt::Debug {
-    fn to_runtime_type(&self, args: &Vec<Type>) -> runtime::error::Result<Type>;
+    fn as_any(&self) -> &dyn Any;
+
+    fn to_runtime_type(&self, args: Vec<Type>) -> runtime::error::Result<Type>;
     fn unify(&self, args: &Vec<CRef<MType>>, other: &MType) -> Result<()>;
+    fn get_rowtype(
+        &self,
+        _compiler: crate::compile::Compiler,
+        _args: &Vec<CRef<MType>>,
+    ) -> Result<Option<CRef<MType>>> {
+        Ok(None)
+    }
 }
 
 // Here, "M" means monomorphic.  MTypes can contain free variables in the form of the "Name" branch
@@ -61,7 +71,6 @@ pub enum MType {
     List(Located<CRef<MType>>),
     Fn(Located<MFnType>),
     Name(Located<Ident>),
-    External(Located<CRef<MType>>),
     Generic(Located<(Arc<dyn Generic>, Vec<CRef<MType>>)>),
 }
 
@@ -105,14 +114,13 @@ impl MType {
             MType::Name { .. } => {
                 runtime::error::fail!("Unresolved type name cannot exist at runtime: {:?}", self)
             }
-            MType::External(inner_type) => inner_type.must()?.read()?.to_runtime_type(),
             MType::Generic(inner) => {
                 let (generic, args) = inner.get();
                 let args = args
                     .iter()
                     .map(|a| Ok(a.must()?.read()?.to_runtime_type()?))
                     .collect::<runtime::error::Result<Vec<_>>>()?;
-                generic.to_runtime_type(&args)
+                generic.to_runtime_type(args)
             }
         }
     }
@@ -203,10 +211,6 @@ impl MType {
                 .get(&n.get().value)
                 .ok_or_else(|| CompileError::no_such_entry(vec![n.get().clone()]))?
                 .clone(),
-            MType::External(inner) => mkcref(MType::External(Located::new(
-                inner.substitute(variables)?,
-                inner.location().clone(),
-            ))),
             MType::Generic(inner) => {
                 let location = inner.location();
                 let (generic, args) = inner.get();
@@ -233,7 +237,6 @@ impl MType {
             MType::List(t) => t.location().clone(),
             MType::Fn(t) => t.location().clone(),
             MType::Name(t) => t.location().clone(),
-            MType::External(t) => t.location().clone(),
             MType::Generic(t) => t.location().clone(),
         }
     }
@@ -343,11 +346,6 @@ impl fmt::Debug for MType {
                 ret.fmt(f)?;
             }
             MType::Name(n) => n.value.fmt(f)?,
-            MType::External(t) => {
-                f.write_str("External<")?;
-                t.fmt(f)?;
-                f.write_str(">")?;
-            }
             MType::Generic(t) => {
                 let (generic, args) = t.get();
                 generic.fmt(f)?;
@@ -367,9 +365,7 @@ impl fmt::Debug for MType {
 
 impl Constrainable for MType {
     fn unify(&self, other: &MType) -> Result<()> {
-        if (!matches!(self, MType::External(..)) && matches!(other, MType::External(..)))
-            || (!matches!(self, MType::Generic(..)) && matches!(other, MType::Generic(..)))
-        {
+        if !matches!(self, MType::Generic(..)) && matches!(other, MType::Generic(..)) {
             // If there is an external type, ensure it's on the LHS
             return other.unify(self);
         }
@@ -417,14 +413,6 @@ impl Constrainable for MType {
                     format!("Encountered free type variable: {}", name.get().value).as_str(),
                 ))
             }
-            MType::External(le) => match other {
-                MType::External(re) => {
-                    le.unify(re)?;
-                }
-                other => {
-                    le.unify(&mkcref(other.clone()))?;
-                }
-            },
             MType::Generic(le) => {
                 let (generic, args) = le.get();
                 generic.unify(args, other)?;

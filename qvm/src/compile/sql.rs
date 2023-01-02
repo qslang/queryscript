@@ -12,6 +12,7 @@ use crate::compile::compile::{
     coerce, lookup_path, resolve_global_atom, typecheck_path, Compiler, SymbolKind,
 };
 use crate::compile::error::*;
+use crate::compile::generics::{is_generic, ExternalType};
 use crate::compile::inference::*;
 use crate::compile::inline::*;
 use crate::compile::schema::*;
@@ -79,7 +80,13 @@ pub fn get_rowtype(compiler: Compiler, relation: CRef<MType>) -> Result<CRef<MTy
         let locked = reltype.read()?;
         match &*locked {
             MType::List(inner) => Ok(inner.get().clone()),
-            MType::External(inner_type) => get_rowtype(compiler, inner_type.get().clone()),
+            MType::Generic(inner) => {
+                let (generic, args) = inner.get();
+                Ok(match generic.get_rowtype(compiler, args)? {
+                    Some(rowtype) => rowtype,
+                    None => relation.clone(),
+                })
+            }
             _ => Ok(relation.clone()),
         }
     })?)
@@ -1943,27 +1950,33 @@ pub fn compile_sqlexpr(
                             .context(RuntimeSnafu { loc: loc.clone() })?
                             .read()?
                         {
-                            MType::External(inner_type) => {
-                                // TODO We should place some metadata on the function, or have a whitelist
-                                // of functions that work this way, but for now, we simply special case the
-                                // load function
-                                if func_name.as_slice()[0].value != "load" {
-                                    return Err(CompileError::unimplemented(
-                                        loc.clone(),
-                                        "external types for non-load functions",
-                                    ));
-                                }
+                            MType::Generic(inner) => {
+                                let (generic, generic_args) = inner.get();
 
-                                let resolve = schema_infer_load_fn(
-                                    schema.clone(),
-                                    args.clone(),
-                                    inner_type.get().clone(),
-                                );
-                                compiler.add_external_type(
-                                    resolve,
-                                    inner_type.get().clone(),
-                                    ExternalTypeOrder::Load,
-                                )?;
+                                if is_generic::<ExternalType>(generic.as_ref()) {
+                                    let inner_type = generic_args[0].clone();
+
+                                    // TODO We should place some metadata on the function, or have a whitelist
+                                    // of functions that work this way, but for now, we simply special case the
+                                    // load function
+                                    if func_name.as_slice()[0].value != "load" {
+                                        return Err(CompileError::unimplemented(
+                                            loc.clone(),
+                                            "external types for non-load functions",
+                                        ));
+                                    }
+
+                                    let resolve = schema_infer_load_fn(
+                                        schema.clone(),
+                                        args.clone(),
+                                        inner_type.clone(),
+                                    );
+                                    compiler.add_external_type(
+                                        resolve,
+                                        inner_type.clone(),
+                                        ExternalTypeOrder::Load,
+                                    )?;
+                                }
                             }
                             _ => {}
                         }

@@ -50,14 +50,6 @@ const BUILTIN_TYPES: &'static [BuiltinType] = &[
     ("null", AtomicType::Null),
 ];
 
-// DuckDB's sum function follows the following rules:
-// 	sum(DECIMAL) -> DECIMAL
-//	sum(SMALLINT) -> HUGEINT
-//	sum(INTEGER) -> HUGEINT
-//	sum(BIGINT) -> HUGEINT
-//	sum(HUGEINT) -> HUGEINT
-//	sum(DOUBLE) -> DOUBLE
-
 const BUILTIN_FUNCTIONS: &'static str = "
 fn load<R>(file varchar, format varchar) -> External<[R]> = native;
 fn __native_identity<T>(t T) -> T = native;

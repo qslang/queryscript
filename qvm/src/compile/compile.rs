@@ -10,6 +10,7 @@ use crate::ast::{Range, SourceLocation, ToStrings};
 use crate::compile::builtin_types::{BUILTIN_LOC, GLOBAL_SCHEMA};
 use crate::compile::coerce::CoerceOp;
 use crate::compile::error::*;
+use crate::compile::generics::ExternalType;
 use crate::compile::inference::*;
 use crate::compile::schema::*;
 use crate::compile::sql::*;
@@ -681,10 +682,6 @@ pub fn resolve_type(
         ast::TypeBody::Exclude { .. } => {
             return Err(CompileError::unimplemented(loc, "Struct exclusions"));
         }
-        ast::TypeBody::External(inner) => Ok(mkcref(MType::External(Located::new(
-            resolve_type(compiler, schema, inner.as_ref())?,
-            loc,
-        )))),
         ast::TypeBody::Generic(path, types) => {
             // Since generic names are hardcoded right now, expect the name to be a single element.
             // Eventually, this should be a decl lookup though.
@@ -693,10 +690,11 @@ pub fn resolve_type(
             } else {
                 return Err(CompileError::unimplemented(loc, "Multi-part generic names"));
             };
-            let generic = Arc::new(match name.as_str() {
+            let generic = match name.as_str() {
+                "external" => super::generics::ExternalType::new(),
                 "sumagg" => super::generics::SumGeneric::new(),
                 _ => return Err(CompileError::no_such_entry(path.clone())),
-            }) as Arc<dyn Generic>;
+            };
 
             let args = types
                 .iter()
@@ -875,7 +873,10 @@ fn compile_expr(
         compiler.add_external_type(resolve, expr_type.clone(), ExternalTypeOrder::UnsafeExpr)?;
 
         Ok(CTypedExpr {
-            type_: mkcref(MType::External(Located::new(expr_type, loc.clone()))),
+            type_: mkcref(MType::Generic(Located::new(
+                (ExternalType::new(), vec![expr_type]),
+                loc.clone(),
+            ))),
             expr,
         })
     } else {

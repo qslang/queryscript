@@ -246,7 +246,6 @@ pub enum TypeBody {
         inner: Box<Type>,
         excluded: Vec<Ident>,
     },
-    External(Box<Type>),
     Generic(Path, Vec<Type>),
 }
 

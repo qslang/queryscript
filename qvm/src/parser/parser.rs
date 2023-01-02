@@ -557,11 +557,6 @@ impl<'a> Parser<'a> {
             TypeBody::List(Box::new(inner))
         } else if self.peek_token().token == Token::LBrace {
             self.parse_struct()?
-        } else if self.consume_keyword("external") {
-            self.expect_token(&Token::Lt)?;
-            let inner_type = Box::new(self.parse_type()?);
-            self.expect_token(&Token::Gt)?;
-            TypeBody::External(inner_type)
         } else {
             let type_name = self.parse_path(AUTOCOMPLETE_TYPE)?;
             if self.consume_token(&Token::Lt) {
