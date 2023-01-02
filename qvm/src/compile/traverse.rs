@@ -1,12 +1,11 @@
 use async_trait::async_trait;
 use sqlparser::ast::*;
-
-use crate::compile::error::Result;
-use crate::compile::schema;
-
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
+
+use crate::compile::error::Result;
+use crate::compile::schema;
 
 pub trait SQLVisitor {
     fn visit_sqlexpr(&self, _expr: &Expr) -> Option<Expr> {
@@ -17,7 +16,24 @@ pub trait SQLVisitor {
         None
     }
 
-    fn visit_sqlident(&self, _ident: &Ident) -> Option<Ident> {
+    fn visit_sqlpath(&self, _path: &Vec<Located<Ident>>) -> Option<Vec<Located<Ident>>> {
+        None
+    }
+
+    // NOTE: Most (all?) users should derive visit_sqlpath instead of visit_sqlident. There are
+    // some ambiguities in the parser where it will sometimes return an Ident or a CompoundIdent,
+    // but semantically these are just "paths" (e.g. foo vs. foo.bar). One example of _only_ defining
+    // visit_sqlident would be changing quote behavior. That said, we may want to remove this method
+    // from the trait, and just implement it in VisitSQL for Ident.
+    fn visit_sqlident(&self, ident: &Ident) -> Option<Ident> {
+        let path = vec![Located::new(ident.clone(), None)];
+        if let Some(mut path) = self.visit_sqlpath(&path) {
+            assert!(
+                path.len() == 1,
+                "visit_sqlpath should return a single element for a single ident",
+            );
+            return Some(path.swap_remove(0).into_inner());
+        }
         None
     }
 
@@ -91,7 +107,12 @@ impl<V: SQLVisitor> VisitSQL<V> for Expr {
         use Expr::*;
         match self {
             Identifier(x) => Identifier(x.visit_sql(visitor)),
-            CompoundIdentifier(v) => CompoundIdentifier(v.clone()),
+            CompoundIdentifier(v) => {
+                if let Some(v) = visitor.visit_sqlpath(v) {
+                    return CompoundIdentifier(v);
+                }
+                CompoundIdentifier(v.visit_sql(visitor))
+            }
             JsonAccess {
                 left,
                 operator,
@@ -604,6 +625,9 @@ impl<V: SQLVisitor> VisitSQL<V> for SelectItem {
 
 impl<V: SQLVisitor> VisitSQL<V> for ObjectName {
     fn visit_sql(&self, visitor: &V) -> Self {
+        if let Some(path) = visitor.visit_sqlpath(&self.0) {
+            return ObjectName(path);
+        }
         ObjectName(self.0.visit_sql(visitor))
     }
 }

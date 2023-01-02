@@ -1,5 +1,5 @@
 use crate::compile::traverse::{SQLVisitor, VisitSQL};
-use sqlparser::ast as sqlast;
+use sqlparser::{ast as sqlast, ast::Located};
 use std::collections::HashMap;
 
 pub trait Normalizer {
@@ -23,17 +23,36 @@ impl<'n, N> SQLVisitor for NormalizerVisitor<'n, N>
 where
     N: Normalizer + 'n + ?Sized,
 {
-    fn visit_sqlident(&self, ident: &sqlast::Ident) -> Option<sqlast::Ident> {
+    fn visit_sqlpath(
+        &self,
+        path: &Vec<Located<sqlast::Ident>>,
+    ) -> Option<Vec<Located<sqlast::Ident>>> {
         let params = self.normalizer.params();
-        Some(match params.get(&ident.value) {
-            Some(name) => sqlast::Ident {
-                value: name.clone(),
-                quote_style: None,
-            },
-            None => sqlast::Ident {
-                value: ident.value.clone(),
-                quote_style: self.normalizer.quote_style(),
-            },
-        })
+        if path.len() == 1 {
+            let ident = &path[0];
+            if let Some(name) = params.get(&ident.value) {
+                return Some(vec![Located::new(
+                    sqlast::Ident {
+                        value: name.clone(),
+                        quote_style: None,
+                    },
+                    ident.location().clone(),
+                )]);
+            }
+        }
+
+        Some(
+            path.iter()
+                .map(|ident| {
+                    Located::new(
+                        sqlast::Ident {
+                            value: ident.value.clone(),
+                            quote_style: self.normalizer.quote_style(),
+                        },
+                        ident.location().clone(),
+                    )
+                })
+                .collect(),
+        )
     }
 }
