@@ -18,10 +18,10 @@ use qvm::{
     compile,
     compile::{
         autocomplete::{loc_to_pos, pos_to_loc, AutoCompleter},
+        error::CompileError,
         schema::{CRef, Decl, MFnType, MType, SType, SchemaEntry},
         Compiler, Schema, SchemaRef,
     },
-    error::MultiError,
     parser::{error::PrettyError, parse_schema},
     runtime,
     types::Type as QVMType,
@@ -60,7 +60,7 @@ pub struct Document {
     pub uri: Url,
     pub version: Option<i32>,
     pub text: String,
-    pub schema: SchemaRef,
+    pub schema: Option<SchemaRef>,
     pub symbols: BTreeMap<Location, Symbol>,
 }
 
@@ -75,7 +75,7 @@ pub struct Backend {
     // either follow what the Microsoft example does or remove it.
     settings: Arc<RwLock<BTreeMap<String, Settings>>>,
 
-    documents: Arc<TokioRwLock<BTreeMap<String, Arc<TokioMutex<Document>>>>>,
+    documents: Arc<TokioRwLock<BTreeMap<Url, Arc<TokioMutex<Document>>>>>,
 
     // We use a mutex for the compiler, because we want to serialize compilation
     // (not sure if the compiler can interleave multiple compilations correctly,
@@ -94,8 +94,18 @@ impl Backend {
         .expect("failed to initialize QVM compiler (thread error)")
     }
 
-    pub fn new(client: Client, compiler: Arc<Mutex<Compiler>>) -> Backend {
-        Backend {
+    pub fn new(client: Client, compiler: Arc<Mutex<Compiler>>) -> Result<Backend> {
+        let documents = Arc::new(TokioRwLock::new(BTreeMap::new()));
+        compiler
+            .lock()
+            .map_err(log_internal_error)?
+            .on_schema(Some(Box::new(SchemaRecorder {
+                tokio_handle: tokio::runtime::Handle::current(),
+                client: client.clone(),
+                documents: documents.clone(),
+            })))
+            .map_err(log_internal_error)?;
+        let backend = Backend {
             client,
             configuration: Arc::new(RwLock::new(Configuration {
                 has_configuration_capability: false,
@@ -103,9 +113,10 @@ impl Backend {
                 has_diagnostic_related_information_capability: false,
             })),
             settings: Arc::new(RwLock::new(BTreeMap::new())),
-            documents: Arc::new(TokioRwLock::new(BTreeMap::new())),
+            documents,
             compiler,
-        }
+        };
+        Ok(backend)
     }
 
     pub fn add_custom_methods(service: LspServiceBuilder<Backend>) -> LspServiceBuilder<Backend> {
@@ -116,6 +127,15 @@ impl Backend {
 fn log_internal_error<E: std::fmt::Debug>(e: E) -> Error {
     eprintln!("Internal error: {:?}", e);
     Error::internal_error()
+}
+
+fn log_result<T, E: std::fmt::Debug>(r: std::result::Result<T, E>) {
+    match r {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("Internal error: {:?}", e);
+        }
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -242,7 +262,7 @@ impl LanguageServer for Backend {
         // NOTE: If we change this to INCREMENTAL we'll need to recompute the new document text
         let text = params.content_changes.swap_remove(0).text;
 
-        let _ = self.on_change(uri, text, Some(version)).await;
+        log_result(self.on_change(uri, text, Some(version)).await);
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
@@ -250,7 +270,7 @@ impl LanguageServer for Backend {
         let version = params.text_document.version;
         let text = params.text_document.text;
 
-        let _ = self.on_change(uri, text, Some(version)).await;
+        log_result(self.on_change(uri, text, Some(version)).await);
     }
 
     async fn did_change_watched_files(&self, _params: DidChangeWatchedFilesParams) {
@@ -418,7 +438,10 @@ impl LanguageServer for Backend {
 
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
         let uri = params.text_document.uri;
-        let schema = self.get_schema(&uri).await?;
+        let schema = match self.get_schema(&uri).await? {
+            Some(schema) => schema,
+            None => return Ok(None),
+        };
 
         let mut lenses = Vec::new();
         for (idx, expr) in schema
@@ -682,96 +705,23 @@ struct RunExprResult {
 }
 
 impl Backend {
-    async fn on_change(&self, uri: Url, text: String, version: Option<i32>) -> Result<()> {
-        let file = uri.path().to_string();
-
-        let folder = FilePath::new(uri.path())
-            .parent()
-            .map(|p| p.to_str().unwrap())
-            .map(String::from);
-
-        // Get the existing document or insert a new one, and lock it (while holding the write lock on documents).
-        let mut documents = self.documents.write().await;
-
-        let document = Document {
-            uri,
-            version,
-            text,
-            schema: Schema::new(file.clone(), folder),
-            symbols: BTreeMap::new(),
-        };
-
-        // We need to hold the write lock throughout the whole compilation process, because we don't
-        // want others to read the (uninitialized) schema. We do this by keeping the write lock on
-        // documents while locking the entry, and then release that lock before processing the document.
-        let mut document_entry = documents.entry(document.uri.to_string());
-        let mut document = match document_entry {
-            Entry::Vacant(entry) => {
-                let new_val = entry.insert(Arc::new(TokioMutex::new(document)));
-                let new_val = new_val.clone();
-                new_val.lock_owned().await
-            }
-            Entry::Occupied(ref mut entry) => {
-                let inner_entry = entry.get().clone();
-                let mut existing = inner_entry.lock_owned().await;
-                *existing = document;
-                existing
-            }
-        };
-
-        // Release the write lock on the documents map while we compile the document.
-        drop(documents);
-
-        let (diagnostics, symbols) = self.compile_document(&mut document).await?;
-        let uri = document.uri.clone();
-        drop(document);
-
-        self.register_symbols(symbols).await?;
-        self.client
-            .publish_diagnostics(uri, diagnostics, version)
-            .await;
-
-        Ok(())
-    }
-
-    async fn compile_document(
-        &self,
-        document: &mut Document,
-    ) -> Result<(Vec<Diagnostic>, BTreeMap<Url, Vec<Symbol>>)> {
-        let mut diagnostics = Vec::new();
-        let ast = match parse_schema(&document.uri.path(), &document.text).as_result() {
-            Ok(ast) => ast,
-            Err(err) => {
-                // XXX Fix this to send the error as a diagnostic (w/ the location)
-                for err in err.into_errors() {
-                    if let Some(loc) = err.location().normalize() {
-                        diagnostics.push(Diagnostic {
-                            severity: Some(DiagnosticSeverity::ERROR),
-                            range: loc.range,
-                            message: err.pretty(),
-                            source: Some("qvm".to_string()),
-                            ..Default::default()
-                        });
-                    }
-                }
-                return Ok((diagnostics, BTreeMap::new()));
-            }
-        };
-
-        let schema = document.schema.clone();
+    async fn on_change(&self, uri: Url, text: String, _version: Option<i32>) -> Result<()> {
         let compiler = self.compiler.clone();
-        let uri = document.uri.clone();
 
-        let (compile_result, symbols) = task::spawn_blocking({
-            let ast = ast.clone();
+        let symbols = task::spawn_blocking({
             move || {
                 let record_symbol = Box::new(SymbolRecorder::new());
+                let path = uri.to_file_path().map_err(log_internal_error)?;
+                let file = path.to_str().unwrap().to_string();
 
                 let compiler = compiler.lock().map_err(log_internal_error)?;
+                compiler
+                    .set_file_contents(file, text)
+                    .map_err(log_internal_error)?;
                 let orig_on_symbol = compiler
                     .on_symbol(Some(record_symbol))
                     .map_err(log_internal_error)?;
-                let result = compiler.compile_schema_ast(schema.clone(), &ast);
+                compiler.compile_schema_from_file(path.as_path());
                 let mut record_symbol = compiler
                     .on_symbol(orig_on_symbol)
                     .map_err(log_internal_error)?
@@ -782,94 +732,59 @@ impl Backend {
                     .unwrap()
                     .claim_symbols();
 
-                Ok((result, symbols))
+                Ok(symbols)
             }
         })
         .await
         .map_err(log_internal_error)??;
 
-        for (idx, err) in compile_result.errors {
-            let loc = match err.location().normalize() {
-                Some(loc) => Some(loc),
-                None => {
-                    if let Some(idx) = idx {
-                        let stmt = &ast.stmts[idx];
-                        let loc = SourceLocation::Range(
-                            uri.to_string(),
-                            ast::Range {
-                                start: stmt.start.clone(),
-                                end: stmt.end.clone(),
-                            },
-                        );
-                        loc.normalize()
-                    } else {
-                        None
-                    }
-                }
-            };
+        self.register_symbols(symbols).await?;
 
-            // If we don't have a range, just use the whole document.
-            let loc = match loc {
-                Some(loc) => loc,
-                None => lsp_types::Location {
-                    uri: uri.clone(),
-                    range: FULL_DOCUMENT_RANGE,
-                },
-            };
-
-            // XXX: This is going to report all of the diagnostics for included files too, but with
-            // their ranges applied to the current file.
-            //
-            diagnostics.push(Diagnostic {
-                severity: Some(DiagnosticSeverity::ERROR),
-                range: loc.range,
-                message: err.pretty(),
-                source: Some("qvm".to_string()),
-                ..Default::default()
-            });
-        }
-
-        Ok((diagnostics, symbols))
+        Ok(())
     }
 
     async fn register_symbols(&self, symbols: BTreeMap<Url, Vec<Symbol>>) -> Result<()> {
         for (uri, symbols) in symbols {
-            let document = self.get_document(&uri).await?;
-            let mut document = document.lock().await;
-            document.symbols = symbols
-                .into_iter()
-                .filter_map(|s| s.name.loc.range().map(|r| (r.start.clone(), s)))
-                .collect();
+            if let Some(document) = self.get_document(&uri).await? {
+                let mut document = document.lock().await;
+                document.symbols = symbols
+                    .into_iter()
+                    .filter_map(|s| s.name.loc.range().map(|r| (r.start.clone(), s.clone())))
+                    .collect();
+            }
         }
+
         Ok(())
     }
 
-    async fn get_document(&self, uri: &Url) -> Result<Arc<TokioMutex<Document>>> {
-        Ok(self
-            .documents
-            .read()
-            .await
-            .get(&uri.to_string())
-            .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?
-            .clone())
+    async fn get_document(&self, uri: &Url) -> Result<Option<Arc<TokioMutex<Document>>>> {
+        Ok(self.documents.read().await.get(uri).cloned())
     }
 
-    async fn get_schema(&self, uri: &Url) -> Result<SchemaRef> {
-        let doc = self.get_document(uri).await?;
-
-        let schema = doc.lock().await.schema.clone();
-        Ok(schema)
+    async fn get_schema(&self, uri: &Url) -> Result<Option<SchemaRef>> {
+        if let Some(doc) = self.get_document(uri).await? {
+            let schema = doc.lock().await.schema.clone();
+            Ok(schema)
+        } else {
+            Ok(None)
+        }
     }
 
     async fn get_text(&self, uri: &Url) -> Result<String> {
-        let doc = self.get_document(uri).await?;
+        let doc = self
+            .get_document(uri)
+            .await?
+            .ok_or(Error::invalid_params("Invalid document URI.".to_string()))?;
 
         let text = doc.lock().await.text.clone();
         Ok(text)
     }
 
     async fn get_symbol(&self, uri: Url, loc: Location) -> Result<Option<Symbol>> {
-        let doc = self.get_document(&uri).await?;
+        let doc = match self.get_document(&uri).await? {
+            Some(doc) => doc,
+            None => return Ok(None),
+        };
         let doc = doc.lock().await;
         use std::ops::Bound::{Included, Unbounded};
 
@@ -892,7 +807,10 @@ impl Backend {
     async fn run_expr(&self, params: RunExprParams) -> Result<RunExprResult> {
         let uri = Url::parse(&params.uri)
             .map_err(|_| Error::invalid_params("Invalid URI".to_string()))?;
-        let schema_ref = self.get_schema(&uri).await?;
+        let schema_ref = self
+            .get_schema(&uri)
+            .await?
+            .ok_or_else(|| Error::invalid_params("Document has not been compiled".to_string()))?;
 
         let limit = {
             let settings = self.settings.read().map_err(log_internal_error)?;
@@ -978,6 +896,105 @@ impl Backend {
         }
 
         Ok(RunExprResult { value, r#type })
+    }
+}
+
+struct SchemaRecorder {
+    tokio_handle: tokio::runtime::Handle,
+    client: Client,
+    documents: Arc<TokioRwLock<BTreeMap<Url, Arc<TokioMutex<Document>>>>>,
+}
+
+impl compile::OnSchema for SchemaRecorder {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    fn on_schema(
+        &mut self,
+        path: &FilePath,
+        text: &str,
+        ast: &ast::Schema,
+        schema: compile::schema::Ref<Schema>,
+        errors: &Vec<(Option<usize>, CompileError)>,
+    ) -> compile::error::Result<()> {
+        let documents = self.documents.clone();
+        let uri = Url::from_file_path(path).map_err(|_| {
+            CompileError::external(format!("bad path: {}", path.display()).as_str())
+        })?;
+        let text = text.to_string();
+        let client = self.client.clone();
+
+        let mut diagnostics = Vec::new();
+
+        for (idx, err) in errors {
+            let loc = match err.location().normalize() {
+                Some(loc) => Some(loc),
+                None => {
+                    if let Some(idx) = idx {
+                        let stmt = &ast.stmts[*idx];
+                        let loc = SourceLocation::Range(
+                            uri.to_string(),
+                            ast::Range {
+                                start: stmt.start.clone(),
+                                end: stmt.end.clone(),
+                            },
+                        );
+                        loc.normalize()
+                    } else {
+                        None
+                    }
+                }
+            };
+
+            // If we don't have a range, just use the whole document.
+            let loc = match loc {
+                Some(loc) => loc,
+                None => lsp_types::Location {
+                    uri: uri.clone(),
+                    range: FULL_DOCUMENT_RANGE,
+                },
+            };
+
+            if loc.uri == uri {
+                diagnostics.push(Diagnostic {
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    range: loc.range,
+                    message: err.pretty(),
+                    source: Some("qvm".to_string()),
+                    ..Default::default()
+                });
+            }
+        }
+
+        let handle_document = async move {
+            let mut documents = documents.write().await;
+            match documents.entry(uri.clone()) {
+                Entry::Occupied(mut e) => {
+                    let mut document = e.get_mut().lock().await;
+                    document.schema = Some(schema);
+                }
+                Entry::Vacant(e) => {
+                    e.insert(Arc::new(TokioMutex::new(Document {
+                        uri: uri.clone(),
+                        schema: Some(schema),
+                        version: None,
+                        text,
+                        symbols: BTreeMap::new(),
+                    })));
+                }
+            }
+
+            client.publish_diagnostics(uri, diagnostics, None).await;
+
+            Ok::<(), Error>(())
+        };
+        self.tokio_handle.spawn(async move {
+            log_result(handle_document.await);
+        });
+        Ok(())
     }
 }
 

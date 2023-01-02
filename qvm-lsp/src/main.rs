@@ -10,8 +10,9 @@ async fn main() {
 
     let compiler = Backend::build_compiler().await;
 
-    let (service, socket) =
-        Backend::add_custom_methods(LspService::build(|client| Backend::new(client, compiler)))
-            .finish();
+    let (service, socket) = Backend::add_custom_methods(LspService::build(|client| {
+        Backend::new(client, compiler).unwrap()
+    }))
+    .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
 }

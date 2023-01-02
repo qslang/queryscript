@@ -196,8 +196,7 @@ impl AutoCompleter {
                 return (0, Vec::new());
             }
         };
-        let mut parser = parser::Parser::new("<repl>", tokens, eof);
-        parser.parse_schema().ok();
+        let parser = parser::Parser::new("<repl>", tokens, eof);
 
         let (tok, suggestions) = parser.get_autocomplete(full_loc);
         let partial = match tok.token {

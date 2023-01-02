@@ -178,8 +178,8 @@ impl<V, E: MultiError> MultiResult<V, E> {
         }
     }
 
-    pub fn ok(self) -> V {
-        self.result
+    pub fn ok<'s>(&'s self) -> &'s V {
+        &self.result
     }
 }
 

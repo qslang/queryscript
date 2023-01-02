@@ -87,10 +87,24 @@ pub trait OnSymbol {
     ) -> Result<()>;
 }
 
+pub trait OnSchema {
+    fn as_any(&self) -> &dyn std::any::Any;
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+    fn on_schema(
+        &mut self,
+        path: &FilePath,
+        text: &str,
+        ast: &ast::Schema,
+        schema: Ref<Schema>,
+        errors: &Vec<(Option<usize>, CompileError)>,
+    ) -> Result<()>;
+}
+
 pub struct CompilerConfig {
     pub allow_native: bool,
     pub allow_inlining: bool,
     pub on_symbol: Option<Box<dyn OnSymbol + Send + Sync>>,
+    pub on_schema: Option<Box<dyn OnSchema + Send + Sync>>,
 }
 
 impl Default for CompilerConfig {
@@ -99,6 +113,7 @@ impl Default for CompilerConfig {
             allow_native: false,
             allow_inlining: true,
             on_symbol: None,
+            on_schema: None,
         }
     }
 }
@@ -199,6 +214,31 @@ impl Compiler {
         let on_symbol = &mut data.config.on_symbol;
         Ok(match on_symbol {
             Some(f) => f.on_symbol(name, kind, type_, def, decl)?,
+            None => {}
+        })
+    }
+
+    pub fn on_schema(
+        &self,
+        mut on_schema: Option<Box<dyn OnSchema + Send + Sync>>,
+    ) -> Result<Option<Box<dyn OnSchema + Send + Sync>>> {
+        std::mem::swap(&mut self.data.write()?.config.on_schema, &mut on_schema);
+        Ok(on_schema)
+    }
+
+    pub fn run_on_schema(
+        &self,
+        file: String,
+        ast: &ast::Schema,
+        schema: Ref<Schema>,
+        errors: &Vec<(Option<usize>, CompileError)>,
+    ) -> Result<()> {
+        let mut data = self.data.write()?;
+        let path = FilePath::new(&file);
+        let text = data.files.get(&file).unwrap().clone();
+        let on_schema = &mut data.config.on_schema;
+        Ok(match on_schema {
+            Some(f) => f.on_schema(path, text.as_str(), ast, schema, errors)?,
             None => {}
         })
     }
@@ -878,7 +918,13 @@ fn compile_schema_from_file(
         }
     };
 
-    result.replace(compile_schema(compiler.clone(), file, folder, &ast).map(|s| Some(s)));
+    result.replace(compile_schema(compiler.clone(), file.clone(), folder, &ast).map(|s| Some(s)));
+    if let Some(schema) = result.ok() {
+        c_try!(
+            result,
+            compiler.run_on_schema(file, &ast, schema.clone(), &result.errors)
+        );
+    }
     result
 }
 
