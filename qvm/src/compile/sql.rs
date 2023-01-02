@@ -12,7 +12,7 @@ use crate::compile::compile::{
     coerce, lookup_path, resolve_global_atom, typecheck_path, Compiler, SymbolKind,
 };
 use crate::compile::error::*;
-use crate::compile::generics::{is_generic, ExternalType};
+use crate::compile::generics::{as_generic, ExternalType};
 use crate::compile::inference::*;
 use crate::compile::inline::*;
 use crate::compile::schema::*;
@@ -80,13 +80,10 @@ pub fn get_rowtype(compiler: Compiler, relation: CRef<MType>) -> Result<CRef<MTy
         let locked = reltype.read()?;
         match &*locked {
             MType::List(inner) => Ok(inner.get().clone()),
-            MType::Generic(inner) => {
-                let (generic, args) = inner.get();
-                Ok(match generic.get_rowtype(compiler, args)? {
-                    Some(rowtype) => rowtype,
-                    None => relation.clone(),
-                })
-            }
+            MType::Generic(generic) => Ok(match generic.get_rowtype(compiler)? {
+                Some(rowtype) => rowtype,
+                None => relation.clone(),
+            }),
             _ => Ok(relation.clone()),
         }
     })?)
@@ -1950,11 +1947,10 @@ pub fn compile_sqlexpr(
                             .context(RuntimeSnafu { loc: loc.clone() })?
                             .read()?
                         {
-                            MType::Generic(inner) => {
-                                let (generic, generic_args) = inner.get();
-
-                                if is_generic::<ExternalType>(generic.as_ref()) {
-                                    let inner_type = generic_args[0].clone();
+                            MType::Generic(generic) => {
+                                if let Some(generic) = as_generic::<ExternalType>(generic.as_ref())
+                                {
+                                    let inner_type = generic.inner_type();
 
                                     // TODO We should place some metadata on the function, or have a whitelist
                                     // of functions that work this way, but for now, we simply special case the

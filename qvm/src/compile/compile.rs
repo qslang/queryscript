@@ -683,6 +683,11 @@ pub fn resolve_type(
             return Err(CompileError::unimplemented(loc, "Struct exclusions"));
         }
         ast::TypeBody::Generic(path, types) => {
+            let args = types
+                .iter()
+                .map(|t| resolve_type(compiler.clone(), schema.clone(), t))
+                .collect::<Result<Vec<_>>>()?;
+
             // Since generic names are hardcoded right now, expect the name to be a single element.
             // Eventually, this should be a decl lookup though.
             let name = if path.len() == 1 {
@@ -690,18 +695,14 @@ pub fn resolve_type(
             } else {
                 return Err(CompileError::unimplemented(loc, "Multi-part generic names"));
             };
+
             let generic = match name.as_str() {
-                "external" => super::generics::ExternalType::new(),
-                "sumagg" => super::generics::SumGeneric::new(),
+                "external" => super::generics::ExternalType::new(&loc, args)?,
+                "sumagg" => super::generics::SumGeneric::new(&loc, args)?,
                 _ => return Err(CompileError::no_such_entry(path.clone())),
             };
 
-            let args = types
-                .iter()
-                .map(|t| resolve_type(compiler.clone(), schema.clone(), t))
-                .collect::<Result<Vec<_>>>()?;
-
-            Ok(mkcref(MType::Generic(Located::new((generic, args), loc))))
+            Ok(mkcref(MType::Generic(Located::new(generic, loc))))
         }
     }
 }
@@ -874,7 +875,7 @@ fn compile_expr(
 
         Ok(CTypedExpr {
             type_: mkcref(MType::Generic(Located::new(
-                (ExternalType::new(), vec![expr_type]),
+                ExternalType::new(&loc, vec![expr_type])?,
                 loc.clone(),
             ))),
             expr,

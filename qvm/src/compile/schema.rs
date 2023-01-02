@@ -48,14 +48,13 @@ impl MField {
 
 pub trait Generic: Send + Sync + fmt::Debug {
     fn as_any(&self) -> &dyn Any;
+    fn name(&self) -> &str;
 
-    fn to_runtime_type(&self, args: Vec<Type>) -> runtime::error::Result<Type>;
-    fn unify(&self, args: &Vec<CRef<MType>>, other: &MType) -> Result<()>;
-    fn get_rowtype(
-        &self,
-        _compiler: crate::compile::Compiler,
-        _args: &Vec<CRef<MType>>,
-    ) -> Result<Option<CRef<MType>>> {
+    fn to_runtime_type(&self) -> runtime::error::Result<Type>;
+    fn substitute(&self, variables: &BTreeMap<String, CRef<MType>>) -> Result<Arc<dyn Generic>>;
+
+    fn unify(&self, other: &MType) -> Result<()>;
+    fn get_rowtype(&self, _compiler: crate::compile::Compiler) -> Result<Option<CRef<MType>>> {
         Ok(None)
     }
 }
@@ -71,7 +70,7 @@ pub enum MType {
     List(Located<CRef<MType>>),
     Fn(Located<MFnType>),
     Name(Located<Ident>),
-    Generic(Located<(Arc<dyn Generic>, Vec<CRef<MType>>)>),
+    Generic(Located<Arc<dyn Generic>>),
 }
 
 impl MType {
@@ -114,14 +113,7 @@ impl MType {
             MType::Name { .. } => {
                 runtime::error::fail!("Unresolved type name cannot exist at runtime: {:?}", self)
             }
-            MType::Generic(inner) => {
-                let (generic, args) = inner.get();
-                let args = args
-                    .iter()
-                    .map(|a| Ok(a.must()?.read()?.to_runtime_type()?))
-                    .collect::<runtime::error::Result<Vec<_>>>()?;
-                generic.to_runtime_type(args)
-            }
+            MType::Generic(generic) => generic.to_runtime_type(),
         }
     }
 
@@ -211,17 +203,10 @@ impl MType {
                 .get(&n.get().value)
                 .ok_or_else(|| CompileError::no_such_entry(vec![n.get().clone()]))?
                 .clone(),
-            MType::Generic(inner) => {
-                let location = inner.location();
-                let (generic, args) = inner.get();
-
-                let args = args
-                    .iter()
-                    .map(|a| a.substitute(variables))
-                    .collect::<Result<Vec<_>>>()?;
-
+            MType::Generic(generic) => {
+                let location = generic.location();
                 mkcref(MType::Generic(Located::new(
-                    (generic.clone(), args),
+                    generic.substitute(variables)?,
                     location.clone(),
                 )))
             }
@@ -347,16 +332,7 @@ impl fmt::Debug for MType {
             }
             MType::Name(n) => n.value.fmt(f)?,
             MType::Generic(t) => {
-                let (generic, args) = t.get();
-                generic.fmt(f)?;
-                f.write_str("<")?;
-                for (idx, arg) in args.iter().enumerate() {
-                    if idx > 0 {
-                        f.write_str(",")?;
-                    }
-                    arg.fmt(f)?;
-                }
-                f.write_str(">")?;
+                t.get().fmt(f)?;
             }
         }
         Ok(())
@@ -413,9 +389,8 @@ impl Constrainable for MType {
                     format!("Encountered free type variable: {}", name.get().value).as_str(),
                 ))
             }
-            MType::Generic(le) => {
-                let (generic, args) = le.get();
-                generic.unify(args, other)?;
+            MType::Generic(generic) => {
+                generic.unify(other)?;
             }
         }
 
