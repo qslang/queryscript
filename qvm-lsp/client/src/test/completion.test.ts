@@ -8,13 +8,18 @@ import * as assert from "assert";
 import { getDocUri, activate } from "./helper";
 
 suite("Should do completion", () => {
-	const docUri = getDocUri("completion.txt");
+	const docUri = getDocUri("trivial.tql");
 
-	test("Completes JS/TS in txt file", async () => {
-		await testCompletion(docUri, new vscode.Position(0, 0), {
+	test("Completes SELECT in tql file", async () => {
+		await testCompletion(docUri, new vscode.Position(0, 1), {
 			items: [
-				{ label: "JavaScript", kind: vscode.CompletionItemKind.Text },
-				{ label: "TypeScript", kind: vscode.CompletionItemKind.Text }
+				{ label: "SELECT", kind: vscode.CompletionItemKind.Text },
+			]
+		});
+
+		await testCompletion(docUri, new vscode.Position(2, 1), {
+			items: [
+				{ label: "SELECT", kind: vscode.CompletionItemKind.Text },
 			]
 		});
 	});
@@ -34,7 +39,7 @@ async function testCompletion(
 		position
 	)) as vscode.CompletionList;
 
-	assert.ok(actualCompletionList.items.length >= 2);
+	assert.ok(actualCompletionList.items.length >= 1);
 	expectedCompletionList.items.forEach((expectedItem, i) => {
 		const actualItem = actualCompletionList.items[i];
 		assert.equal(actualItem.label, expectedItem.label);

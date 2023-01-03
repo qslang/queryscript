@@ -330,7 +330,7 @@ impl LanguageServer for Backend {
             }
         }
 
-        let (start_pos, start_loc, line) = if let Some(stmt) = stmt {
+        let (start_pos, _start_loc, line) = if let Some(stmt) = stmt {
             let (start_pos, end_pos) = (
                 loc_to_pos(text.as_str(), stmt.start.clone()),
                 loc_to_pos(text.as_str(), stmt.end.clone()),

@@ -7,7 +7,7 @@
 			"name": "Launch VSCode Extension",
 			"runtimeExecutable": "${execPath}",
 			"args": [
-				"--extensionDevelopmentPath=${workspaceRoot}"
+				"--extensionDevelopmentPath=${workspaceRoot}/qvm-lsp"
 			],
 			"outFiles": [
 				"${workspaceRoot}/client/out/**/*.js"
@@ -20,9 +20,6 @@
 			"env": {
 				"SERVER_PATH": "${workspaceFolder}/target/debug/qvm-lsp"
 			},
-			"options": {
-				"cwd": "${workspaceFolder}/qvm-lsp"
-			}
 		},
 		{
 			"name": "Language Server E2E Test",
@@ -30,19 +27,17 @@
 			"request": "launch",
 			"runtimeExecutable": "${execPath}",
 			"args": [
-				"--extensionDevelopmentPath=${workspaceRoot}",
-				"--extensionTestsPath=${workspaceRoot}/client/out/test/index",
+				"--extensionDevelopmentPath=${workspaceRoot}/qvm-lsp",
+				"--extensionTestsPath=${workspaceRoot}/qvm-lsp/client/out/test/index",
 				"${workspaceRoot}/client/testFixture"
 			],
 			"outFiles": [
-				"${workspaceRoot}/client/out/test/**/*.js"
+				"${workspaceRoot}/qvm-lsp/client/out/test/**/*.js"
 			],
+			"autoAttachChildProcesses": true,
 			"env": {
 				"SERVER_PATH": "${workspaceRoot}/target/debug/qvm-lsp"
 			},
-			"options": {
-				"cwd": "${workspaceFolder}/qvm-lsp"
-			}
 		}
 	]
 }
