@@ -311,19 +311,25 @@ impl LanguageServer for Backend {
             .map(String::from);
 
         let text = self.get_text(&uri).await?;
+
         let loc = qvm::ast::Location {
             line: (position.line + 1) as u64,
             column: (position.character + 1) as u64,
         };
         let pos = loc_to_pos(text.as_str(), loc.clone());
+
+        // XXX We should use the schema from the document, not recompile it
         let schema_ast = parse_schema(file.as_str(), text.as_str()).result;
         let mut stmt = None;
         for s in &schema_ast.stmts {
             if &s.start > &loc {
                 break;
             }
-            stmt = Some(s);
+            if &loc <= &s.end {
+                stmt = Some(s);
+            }
         }
+
         let (start_pos, start_loc, line) = if let Some(stmt) = stmt {
             let (start_pos, end_pos) = (
                 loc_to_pos(text.as_str(), stmt.start.clone()),
@@ -335,10 +341,16 @@ impl LanguageServer for Backend {
                 text[start_pos..end_pos + 1].to_string(),
             )
         } else {
-            (pos, loc.clone(), String::new())
+            let line = if let Some(last_stmt) = schema_ast.stmts.last() {
+                text[loc_to_pos(text.as_str(), last_stmt.end.clone())..].to_string()
+            } else {
+                String::new()
+            };
+
+            // XXX I think (?) that the start position should be one behind the cursor's position.
+            (pos - 1, loc.clone(), line)
         };
 
-        eprintln!("Line: {} {}", start_pos, line);
         let compiler = self.compiler.clone();
         let (suggestion_pos, suggestions) = task::spawn_blocking({
             move || -> Result<_> {
@@ -350,21 +362,22 @@ impl LanguageServer for Backend {
                     schema,
                     Rc::new(RefCell::new(String::new())),
                 );
-                Ok(autocompleter.auto_complete(line.as_str(), pos - start_pos))
+                Ok(autocompleter.auto_complete(line.as_str(), pos - start_pos + 1))
             }
         })
         .await
         .map_err(log_internal_error)?
         .map_err(log_internal_error)?;
+
+        if start_pos + suggestion_pos >= text.len() {
+            // This happens when we haven't yet processed the last document change before trying to find
+            // completions while working on the end of a file. The position can be past the last character,
+            // which would cause pos_to_loc() and below to panic. Instead, we'll just wait for the next request
+            // to get completions.
+            return Ok(None);
+        }
+
         let suggestion_loc = pos_to_loc(text.as_str(), start_pos + suggestion_pos);
-        eprintln!(
-            "Location: {} {:?} {} {:?} {}",
-            start_pos,
-            start_loc,
-            suggestion_pos,
-            suggestion_loc,
-            loc_to_pos(text.as_str(), suggestion_loc.clone())
-        );
 
         Ok(Some(CompletionResponse::List(CompletionList {
             is_incomplete: true,
@@ -755,7 +768,34 @@ struct RunExprResult {
 }
 
 impl Backend {
-    async fn on_change(&self, uri: Url, text: String, _version: Option<i32>) -> Result<()> {
+    async fn on_change(&self, uri: Url, text: String, version: Option<i32>) -> Result<()> {
+        // I'm not sure what the exact semantics are, but I know that on_change() gets sent before other requests
+        // (e.g. completion), and everything relies on having up-to-date text, so we do a blocking update here
+        // on the text before other requests can run.
+        task::block_in_place({
+            let uri = uri.clone();
+            let text = text.clone();
+            move || {
+                let mut documents = self.documents.blocking_write();
+                match documents.entry(uri.clone()) {
+                    Entry::Vacant(e) => {
+                        e.insert(Arc::new(TokioMutex::new(Document {
+                            uri: uri,
+                            schema: None,
+                            version: version,
+                            text,
+                            symbols: BTreeMap::new(),
+                        })));
+                    }
+                    Entry::Occupied(mut e) => {
+                        let mut document = e.get_mut().blocking_lock();
+                        document.text = text;
+                        document.version = version;
+                    }
+                }
+            }
+        });
+
         let compiler = self.compiler.clone();
 
         let symbols = task::spawn_blocking({
@@ -789,7 +829,6 @@ impl Backend {
         .map_err(log_internal_error)??;
 
         self.register_symbols(symbols).await?;
-
         Ok(())
     }
 
@@ -1002,7 +1041,6 @@ impl compile::OnSchema for SchemaRecorder {
         let uri = Url::from_file_path(path).map_err(|_| {
             CompileError::external(format!("bad path: {}", path.display()).as_str())
         })?;
-        let text = text.to_string();
         let client = self.client.clone();
 
         let mut diagnostics = Vec::new();
@@ -1047,6 +1085,7 @@ impl compile::OnSchema for SchemaRecorder {
             }
         }
 
+        let text = text.to_string();
         let handle_document = async move {
             let mut documents = documents.write().await;
             match documents.entry(uri.clone()) {
