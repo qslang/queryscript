@@ -1,3 +1,5 @@
+ROOT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+
 all:
 	cd qvm-cli && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build
 
@@ -11,6 +13,9 @@ deps:
 	cd qvm-lsp && yarn install
 	cd qvm-lsp/client && yarn install
 	cd qvm-lsp/webview && yarn install
+
+refresh-test-data: ${VENV_PYTHON_PACKAGES}
+	source venv/bin/activate && nba-scraper ${ROOT_DIR}/qvm/tests/nba/data
 
 VENV_INITIALIZED := venv/.initialized
 
@@ -37,6 +42,3 @@ develop: ${VENV_PRE_COMMIT}
 
 fixup:
 	pre-commit run --all-files
-
-test:
-	python -m pytest -s -v ./tests/

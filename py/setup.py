@@ -14,6 +14,8 @@ with open(os.path.join(dir_name, "README.md"), "r", encoding="utf-8") as f:
 
 install_requires = [
     "nba_api",
+    "pandas",
+    "pyarrow",
 ]
 
 extras_require = {
