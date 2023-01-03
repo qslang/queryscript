@@ -1,4 +1,6 @@
+*.pyc
 *.swp
 *.swo
 target/
 .DS_Store
+venv
