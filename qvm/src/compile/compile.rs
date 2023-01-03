@@ -129,6 +129,12 @@ impl fmt::Debug for CompilerConfig {
     }
 }
 
+pub struct ParsedFile {
+    pub file: String,
+    pub folder: Option<String>,
+    pub ast: ast::Schema,
+}
+
 #[derive(Debug, Clone)]
 pub struct Compiler {
     runtime: Ref<tokio::runtime::Runtime>,
@@ -272,8 +278,22 @@ impl Compiler {
         let mut result = CompileResult::new(None);
         let runtime = c_try!(result, self.runtime.read());
         runtime.block_on(async {
-            result.replace(compile_schema_from_file(self.clone(), file_path));
+            let (compile_result, parsed_file) = compile_schema_from_file(self.clone(), file_path);
+            result.replace(compile_result);
             result.absorb(self.drive().await);
+
+            if let (Some(schema), Some(parsed_file)) = (result.ok(), parsed_file) {
+                c_try!(
+                    result,
+                    self.run_on_schema(
+                        parsed_file.file,
+                        &parsed_file.ast,
+                        schema.clone(),
+                        &result.errors
+                    )
+                );
+            }
+
             result
         })
     }
@@ -508,6 +528,7 @@ pub fn lookup_schema(
             let file_path = file_path_buf.as_path();
 
             let s = compile_schema_from_file(compiler.clone(), file_path)
+                .0
                 .as_result()?
                 .unwrap();
             (path.clone(), s.clone())
@@ -825,24 +846,21 @@ pub fn rebind_decl(_schema: SchemaInstance, decl: &Decl) -> Result<SchemaEntry> 
 fn compile_schema_from_file(
     compiler: Compiler,
     file_path: &FilePath,
-) -> CompileResult<Option<Ref<Schema>>> {
+) -> (CompileResult<Option<Ref<Schema>>>, Option<ParsedFile>) {
     let mut result = CompileResult::new(None);
+
     let (file, folder, ast) = match compiler.open_file(file_path) {
         Ok((file, folder, contents)) => (file, folder, contents),
         Err(e) => {
             result.add_error(None, e);
-            return result;
+            return (result, None);
         }
     };
 
-    result.replace(compile_schema(compiler.clone(), file.clone(), folder, &ast).map(|s| Some(s)));
-    if let Some(schema) = result.ok() {
-        c_try!(
-            result,
-            compiler.run_on_schema(file, &ast, schema.clone(), &result.errors)
-        );
-    }
-    result
+    result.replace(
+        compile_schema(compiler.clone(), file.clone(), folder.clone(), &ast).map(|s| Some(s)),
+    );
+    (result, Some(ParsedFile { file, folder, ast }))
 }
 
 fn compile_schema(
