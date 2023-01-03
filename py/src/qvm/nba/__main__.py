@@ -12,7 +12,7 @@ def main(args=None):
         args = sys.argv[1:]
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--start-season", type=int, default=2020)
+    parser.add_argument("--start-season", type=int, default=1980)
     parser.add_argument("--end-season", type=int, default=2022)
     parser.add_argument("--tmp-dir", type=str, default=tempfile.gettempdir())
     parser.add_argument("--verbose", "-v", default=False, action="store_true")

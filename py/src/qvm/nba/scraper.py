@@ -28,7 +28,7 @@ def nba_cache(fn):
         key = "_".join([fn.__name__] + [str(x) for x in args] + [str(x) for x in kwargs.values()]) + ".parquet"
         cache_path = os.path.join(tmp_dir, key)
         if os.path.exists(cache_path):
-            logger.debug(f"Loading from cache: {key}")
+            logger.info(f"Loading from cache: {key}")
             return pd.read_parquet(cache_path)
         ret = fn(*args, **kwargs)
         ret.to_parquet(cache_path)
@@ -60,6 +60,7 @@ SCRAPERS = {
 
 def scrape(start_season: int, end_season: int, datasets: set, tmp_dir: str, out_dir: str):
     for ds in datasets:
+        logger.info(f"Scraping {ds}")
         fn = SCRAPERS[ds]
         all_seasons = pd.concat([fn(season=season, tmp_dir=tmp_dir) for season in range(start_season, end_season + 1)])
         all_seasons.to_parquet(os.path.join(out_dir, f"{ds}.parquet"))
