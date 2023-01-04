@@ -1,6 +1,6 @@
 ROOT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
-all:
+all: ${VENV_PRE_COMMIT}
 	cd qvm-cli && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build
 
 lsp:
