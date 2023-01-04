@@ -10,7 +10,7 @@ use cxx::{CxxString, CxxVector};
 use duckdb::{ffi as cffi, Connection};
 use sqlparser::ast as sqlast;
 
-use crate::types::{Relation, Value};
+use crate::types::{arrow::ArrowRecordBatchRelation, Relation, Value};
 
 use crate::runtime::{
     error::{rt_unimplemented, Result},
@@ -158,10 +158,15 @@ impl DuckDBEngine {
             .collect();
 
         let mut stmt = conn.prepare(&query_string)?;
-        let rbs = Arc::new(
-            stmt.query_arrow(duckdb_params.as_slice())?
-                .collect::<Vec<RecordBatch>>(),
-        ) as Arc<dyn Relation>;
+
+        let query_result = stmt.query_arrow(duckdb_params.as_slice())?;
+
+        // NOTE: We could probably avoid collecting the whole result here and instead make
+        // ArrowRecordBatchRelation accept an iterator as input.
+        let rbs = ArrowRecordBatchRelation::new(
+            query_result.get_schema(),
+            Arc::new(query_result.collect::<Vec<RecordBatch>>()),
+        );
         Ok(rbs)
     }
 }

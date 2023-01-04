@@ -8,6 +8,7 @@ use arrow::{
     },
     datatypes::ArrowPrimitiveType,
 };
+use arrow_schema::SchemaRef as ArrowSchemaRef;
 
 use super::list::VecList;
 use super::record::VecRow;
@@ -15,21 +16,33 @@ use super::types::{try_arrow_fields_to_fields, Field, Type};
 use super::value::*;
 use std::sync::Arc;
 
-impl Relation for Vec<ArrowRecordBatch> {
-    fn schema(&self) -> Vec<Field> {
-        if self.len() == 0 {
-            panic!("Empty vector of record batches. Cannot derive schema.");
-        }
+#[derive(Debug, Clone)]
+pub struct ArrowRecordBatchRelation {
+    schema: ArrowSchemaRef,
+    batches: Arc<Vec<ArrowRecordBatch>>,
+}
 
-        self.batch(0).schema()
+impl ArrowRecordBatchRelation {
+    pub fn new(schema: ArrowSchemaRef, batches: Arc<Vec<ArrowRecordBatch>>) -> Arc<dyn Relation> {
+        Arc::new(Self { schema, batches })
+    }
+}
+
+impl Relation for ArrowRecordBatchRelation {
+    fn schema(&self) -> Vec<Field> {
+        let type_: Type = self.schema.as_ref().try_into().unwrap();
+        match type_ {
+            Type::Record(fields) => fields,
+            _ => panic!("Expected record type"),
+        }
     }
 
     fn num_batches(&self) -> usize {
-        self.len()
+        self.batches.len()
     }
 
     fn batch(&self, index: usize) -> &dyn RecordBatch {
-        &self[index]
+        &self.batches[index]
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -37,7 +50,7 @@ impl Relation for Vec<ArrowRecordBatch> {
     }
 
     fn as_arrow_recordbatch(self: Arc<Self>) -> Arc<Vec<ArrowRecordBatch>> {
-        self
+        self.batches.clone()
     }
 }
 

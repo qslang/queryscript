@@ -11,7 +11,7 @@ use std::sync::Arc;
 use crate::compile::schema;
 use crate::{
     types,
-    types::{FnValue, Value},
+    types::{arrow::ArrowRecordBatchRelation, FnValue, Value},
 };
 
 use super::{
@@ -183,7 +183,10 @@ impl LoadFileFn {
             Ok::<Arc<Vec<_>>, RuntimeError>(records)
         })?;
 
-        Ok(Value::Relation(records))
+        Ok(Value::Relation(ArrowRecordBatchRelation::new(
+            self.schema.clone(),
+            records,
+        )))
     }
 
     fn parse_args(ctx: &Context, args: Vec<Value>) -> Result<(FilePathBuf, Option<String>)> {
