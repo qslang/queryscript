@@ -6,7 +6,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path as FilePath;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, RwLock};
-use tokio::{sync::Mutex as TokioMutex, sync::RwLock as TokioRwLock, task};
+use tokio::{
+    sync::{
+        Mutex as TokioMutex, MutexGuard as TokioMutexGuard, Notify as TokioNotify,
+        RwLock as TokioRwLock,
+    },
+    task,
+};
 
 use tower_lsp::jsonrpc::{Error, Result};
 use tower_lsp::{lsp_types, lsp_types::*, LspServiceBuilder};
@@ -56,12 +62,19 @@ pub struct Symbol {
     pub references: BTreeSet<SourceLocation>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Document {
     pub uri: Url,
-    pub version: Option<i32>,
+
     pub text: String,
+    pub text_version: Option<i32>,
+
+    pub compiling_version: Option<i32>,
+
     pub schema: Option<SchemaRef>,
+    pub schema_version: Option<i32>,
+    pub schema_signal: Arc<TokioNotify>,
+
     pub symbols: BTreeMap<Location, Symbol>,
 }
 
@@ -500,7 +513,7 @@ impl LanguageServer for Backend {
 
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
         let uri = params.text_document.uri;
-        let schema = match self.get_schema(&uri).await? {
+        let schema = match self.get_schema(&uri, true).await? {
             Some(schema) => schema,
             None => return Ok(None),
         };
@@ -767,17 +780,21 @@ impl Backend {
                 match documents.entry(uri.clone()) {
                     Entry::Vacant(e) => {
                         e.insert(Arc::new(TokioMutex::new(Document {
-                            uri: uri,
-                            schema: None,
-                            version: version,
+                            uri,
                             text,
+                            text_version: version,
+                            compiling_version: version,
+                            schema: None,
+                            schema_version: None,
+                            schema_signal: Arc::new(TokioNotify::new()),
                             symbols: BTreeMap::new(),
                         })));
                     }
                     Entry::Occupied(mut e) => {
                         let mut document = e.get_mut().blocking_lock();
                         document.text = text;
-                        document.version = version;
+                        document.text_version = version;
+                        document.compiling_version = version;
                     }
                 }
             }
@@ -883,10 +900,26 @@ impl Backend {
         Ok(self.documents.read().await.get(uri).cloned())
     }
 
-    async fn get_schema(&self, uri: &Url) -> Result<Option<SchemaRef>> {
+    async fn get_schema(&self, uri: &Url, wait_for_compilation: bool) -> Result<Option<SchemaRef>> {
         if let Some(doc) = self.get_document(uri).await? {
-            let schema = doc.lock().await.schema.clone();
-            Ok(schema)
+            let mut document = doc.lock().await;
+
+            if wait_for_compilation {
+                let done_version = document.text_version;
+                loop {
+                    if document.schema_version == done_version {
+                        break;
+                    }
+
+                    let mutex = TokioMutexGuard::mutex(&document);
+                    let signal = document.schema_signal.clone();
+                    drop(document);
+                    signal.notified().await;
+                    document = mutex.lock().await;
+                }
+            }
+
+            Ok(document.schema.clone())
         } else {
             Ok(None)
         }
@@ -917,7 +950,7 @@ impl Backend {
         let uri = Url::parse(&params.uri)
             .map_err(|_| Error::invalid_params("Invalid URI".to_string()))?;
         let schema_ref = self
-            .get_schema(&uri)
+            .get_schema(&uri, true)
             .await?
             .ok_or_else(|| Error::invalid_params("Document has not been compiled".to_string()))?;
 
@@ -1024,7 +1057,7 @@ impl compile::OnSchema for SchemaRecorder {
     fn on_schema(
         &mut self,
         path: &FilePath,
-        text: &str,
+        _text: &str,
         ast: &ast::Schema,
         schema: compile::schema::Ref<Schema>,
         errors: &Vec<(Option<usize>, CompileError)>,
@@ -1077,23 +1110,14 @@ impl compile::OnSchema for SchemaRecorder {
             }
         }
 
-        let text = text.to_string();
         let handle_document = async move {
             let mut documents = documents.write().await;
-            match documents.entry(uri.clone()) {
-                Entry::Occupied(mut e) => {
-                    let mut document = e.get_mut().lock().await;
-                    document.schema = Some(schema);
-                }
-                Entry::Vacant(e) => {
-                    e.insert(Arc::new(TokioMutex::new(Document {
-                        uri: uri.clone(),
-                        schema: Some(schema),
-                        version: None,
-                        text,
-                        symbols: BTreeMap::new(),
-                    })));
-                }
+            let mut document = documents.get_mut(&uri).unwrap().lock().await;
+
+            document.schema = Some(schema);
+            if document.compiling_version.is_some() {
+                document.schema_version = document.compiling_version;
+                document.compiling_version = None;
             }
 
             client.publish_diagnostics(uri, diagnostics, None).await;
