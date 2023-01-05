@@ -2,7 +2,7 @@ use crate::ast::Pretty;
 pub use arrow::datatypes::DataType as ArrowDataType;
 use colored::*;
 use snafu::prelude::*;
-use sqlparser::ast as sqlast;
+use sqlparser::ast::{self as sqlast, WildcardAdditionalOptions};
 use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Debug};
@@ -599,7 +599,7 @@ impl SQLBody {
                     limit: None,
                     offset: None,
                     fetch: None,
-                    lock: None,
+                    locks: Vec::new(),
                 }))
             }
         }
@@ -623,9 +623,14 @@ impl SQLBody {
                 // The result of the inner subquery is a relation of rows, each with a record field
                 // called "value".  This extra subquery splats the fields of "value" onto the top
                 // level of the query.
-                vec![sqlast::SelectItem::QualifiedWildcard(sqlast::ObjectName(
-                    vec![ident("value".to_string())],
-                ))],
+                vec![sqlast::SelectItem::QualifiedWildcard(
+                    sqlast::ObjectName(vec![ident("value".to_string())]),
+                    WildcardAdditionalOptions {
+                        opt_exclude: None,
+                        opt_except: None,
+                        opt_rename: None,
+                    },
+                )],
                 vec![sqlast::TableWithJoins {
                     // In order to get around a binder bug in duckdb, we have to put the unnest
                     // call in a project list instead of as a table factor.  This results in a set

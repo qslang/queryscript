@@ -1,5 +1,6 @@
 use lazy_static::lazy_static;
 use snafu::prelude::*;
+use sqlparser::ast::WildcardAdditionalOptions;
 use sqlparser::{ast as sqlast, ast::DataType as ParserDataType};
 use std::borrow::Cow;
 use std::collections::{btree_map, BTreeMap, BTreeSet};
@@ -130,7 +131,7 @@ pub fn select_from(
         limit: None,
         offset: None,
         fetch: None,
-        lock: None,
+        locks: Vec::new(),
     }
 }
 
@@ -149,7 +150,11 @@ pub fn select_no_from(
 
 pub fn select_star_from(relation: sqlast::TableFactor) -> sqlast::Query {
     select_from(
-        vec![sqlast::SelectItem::Wildcard],
+        vec![sqlast::SelectItem::Wildcard(WildcardAdditionalOptions {
+            opt_exclude: None,
+            opt_except: None,
+            opt_rename: None,
+        })],
         vec![sqlast::TableWithJoins {
             relation,
             joins: Vec::new(),
@@ -957,6 +962,19 @@ pub fn compile_gb_ob_expr(
     })
 }
 
+fn check_options(loc: &SourceLocation, o: &sqlast::WildcardAdditionalOptions) -> Result<()> {
+    if let Some(_) = o.opt_except {
+        return Err(CompileError::unimplemented(loc.clone(), "Wildcard EXCEPT"));
+    }
+    if let Some(_) = o.opt_exclude {
+        return Err(CompileError::unimplemented(loc.clone(), "Wildcard EXCLUDE"));
+    }
+    if let Some(_) = o.opt_rename {
+        return Err(CompileError::unimplemented(loc.clone(), "Wildcard RENAME"));
+    }
+    Ok(())
+}
+
 pub fn compile_select(
     compiler: Compiler,
     schema: Ref<Schema>,
@@ -1037,10 +1055,14 @@ pub fn compile_select(
                         sql: compiled.sql,
                     }])
                 }
-                sqlast::SelectItem::Wildcard | sqlast::SelectItem::QualifiedWildcard { .. } => {
+                sqlast::SelectItem::Wildcard(..) | sqlast::SelectItem::QualifiedWildcard { .. } => {
                     let qualifier = match p {
-                        sqlast::SelectItem::Wildcard => None,
-                        sqlast::SelectItem::QualifiedWildcard(qualifier) => {
+                        sqlast::SelectItem::Wildcard(options) => {
+                            check_options(loc, options)?;
+                            None
+                        }
+                        sqlast::SelectItem::QualifiedWildcard(qualifier, options) => {
+                            check_options(loc, options)?;
                             if qualifier.0.len() != 1 {
                                 return Err(CompileError::unimplemented(
                                     loc.clone(),
@@ -1267,7 +1289,7 @@ pub fn compile_sqlquery(
         return Err(CompileError::unimplemented(loc.clone(), "FETCH"));
     }
 
-    if query.lock.is_some() {
+    if query.locks.len() > 0 {
         return Err(CompileError::unimplemented(
             loc.clone(),
             "FOR { UPDATE | SHARE }",
@@ -1320,7 +1342,7 @@ pub fn compile_sqlquery(
                                 limit,
                                 offset,
                                 fetch: None,
-                                lock: None,
+                                locks: Vec::new(),
                             }),
                         }))))
                     }
@@ -1334,6 +1356,7 @@ pub fn compile_sqlquery(
         )),
         sqlast::SetExpr::Values(_) => Err(CompileError::unimplemented(loc.clone(), "VALUES")),
         sqlast::SetExpr::Insert(_) => Err(CompileError::unimplemented(loc.clone(), "INSERT")),
+        sqlast::SetExpr::Table(_) => Err(CompileError::unimplemented(loc.clone(), "TABLE")),
     }
 }
 
@@ -1538,6 +1561,8 @@ pub fn compile_sqlexpr(
             | sqlast::Value::EscapedStringLiteral(_)
             | sqlast::Value::NationalStringLiteral(_)
             | sqlast::Value::HexStringLiteral(_)
+            | sqlast::Value::UnQuotedString(_)
+            | sqlast::Value::DollarQuotedString(_)
             | sqlast::Value::DoubleQuotedString(_) => CTypedExpr {
                 type_: resolve_global_atom(compiler.clone(), "string")?,
                 expr: mkcref(Expr::SQL(Arc::new(SQL {

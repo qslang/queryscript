@@ -93,7 +93,7 @@ impl<V: SQLVisitor> VisitSQL<V> for Query {
                 percent: f.percent,
                 quantity: f.quantity.visit_sql(visitor),
             }),
-            lock: self.lock.clone(),
+            locks: self.locks.clone(),
         }
     }
 }
@@ -324,6 +324,16 @@ impl<V: SQLVisitor> VisitSQL<V> for Expr {
             Subquery(q) => Subquery(q.visit_sql(visitor)),
             ArraySubquery(q) => ArraySubquery(q.visit_sql(visitor)),
             ListAgg(la) => ListAgg(la.visit_sql(visitor)),
+            ArrayAgg(aa) => ArrayAgg(aa.visit_sql(visitor)),
+            MatchAgainst {
+                columns,
+                match_value,
+                opt_search_modifier,
+            } => MatchAgainst {
+                columns: columns.visit_sql(visitor),
+                match_value: match_value.clone(),
+                opt_search_modifier: opt_search_modifier.clone(),
+            },
             GroupingSets(gs) => GroupingSets(gs.visit_sql(visitor)),
             Cube(c) => Cube(c.visit_sql(visitor)),
             Rollup(r) => Rollup(r.visit_sql(visitor)),
@@ -408,6 +418,18 @@ impl<V: SQLVisitor> VisitSQL<V> for ListAgg {
     }
 }
 
+impl<V: SQLVisitor> VisitSQL<V> for ArrayAgg {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        ArrayAgg {
+            distinct: self.distinct,
+            expr: self.expr.visit_sql(visitor),
+            order_by: self.order_by.visit_sql(visitor),
+            limit: self.limit.visit_sql(visitor),
+            within_group: self.within_group,
+        }
+    }
+}
+
 impl<V: SQLVisitor> VisitSQL<V> for ListAggOnOverflow {
     fn visit_sql(&self, visitor: &V) -> Self {
         use ListAggOnOverflow::*;
@@ -429,19 +451,23 @@ impl<V: SQLVisitor> VisitSQL<V> for SetExpr {
             Query(q) => Query(q.visit_sql(visitor)),
             SetOperation {
                 op,
-                all,
+                set_quantifier,
                 left,
                 right,
             } => SetOperation {
                 op: op.clone(),
-                all: all.clone(),
+                set_quantifier: set_quantifier.clone(),
                 left: left.visit_sql(visitor),
                 right: right.visit_sql(visitor),
             },
-            Values(sqlparser::ast::Values(v)) => {
-                Values(sqlparser::ast::Values(v.visit_sql(visitor)))
+            Values(sqlparser::ast::Values { explicit_row, rows }) => {
+                Values(sqlparser::ast::Values {
+                    explicit_row: *explicit_row,
+                    rows: rows.visit_sql(visitor),
+                })
             }
             Insert(_) => panic!("Unimplemented: INSERT statements"),
+            Table(t) => Table(t.visit_sql(visitor)),
         }
     }
 }
@@ -475,6 +501,16 @@ impl<V: SQLVisitor> VisitSQL<V> for Select {
     }
 }
 
+impl<V: SQLVisitor> VisitSQL<V> for Table {
+    fn visit_sql(&self, _visitor: &V) -> Self {
+        // TODO: Maybe these should be thought of as idents, or a path?
+        Table {
+            table_name: self.table_name.clone(),
+            schema_name: self.schema_name.clone(),
+        }
+    }
+}
+
 impl<V: SQLVisitor> VisitSQL<V> for TableWithJoins {
     fn visit_sql(&self, visitor: &V) -> Self {
         TableWithJoins {
@@ -501,6 +537,10 @@ impl<V: SQLVisitor> VisitSQL<V> for JoinOperator {
             RightOuter(c) => RightOuter(c.visit_sql(visitor)),
             FullOuter(c) => FullOuter(c.visit_sql(visitor)),
             CrossJoin => CrossJoin,
+            LeftSemi(c) => LeftSemi(c.visit_sql(visitor)),
+            RightSemi(c) => RightSemi(c.visit_sql(visitor)),
+            LeftAnti(c) => LeftAnti(c.visit_sql(visitor)),
+            RightAnti(c) => RightAnti(c.visit_sql(visitor)),
             CrossApply => CrossApply,
             OuterApply => OuterApply,
         }
@@ -617,8 +657,58 @@ impl<V: SQLVisitor> VisitSQL<V> for SelectItem {
                 expr: expr.visit_sql(visitor),
                 alias: alias.visit_sql(visitor),
             },
-            QualifiedWildcard(name) => QualifiedWildcard(name.visit_sql(visitor)),
-            Wildcard => Wildcard,
+            QualifiedWildcard(name, options) => {
+                QualifiedWildcard(name.visit_sql(visitor), options.visit_sql(visitor))
+            }
+            Wildcard(options) => Wildcard(options.visit_sql(visitor)),
+        }
+    }
+}
+
+impl<V: SQLVisitor> VisitSQL<V> for WildcardAdditionalOptions {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        WildcardAdditionalOptions {
+            opt_exclude: self.opt_exclude.visit_sql(visitor),
+            opt_except: self.opt_except.visit_sql(visitor),
+            opt_rename: self.opt_rename.visit_sql(visitor),
+        }
+    }
+}
+
+impl<V: SQLVisitor> VisitSQL<V> for ExcludeSelectItem {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        use ExcludeSelectItem::*;
+        match self {
+            Single(name) => Single(name.visit_sql(visitor)),
+            Multiple(names) => Multiple(names.visit_sql(visitor)),
+        }
+    }
+}
+
+impl<V: SQLVisitor> VisitSQL<V> for ExceptSelectItem {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        ExceptSelectItem {
+            first_element: self.first_element.visit_sql(visitor),
+            additional_elements: self.additional_elements.visit_sql(visitor),
+        }
+    }
+}
+
+impl<V: SQLVisitor> VisitSQL<V> for RenameSelectItem {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        use RenameSelectItem::*;
+        match self {
+            Single(name) => Single(name.visit_sql(visitor)),
+            Multiple(names) => Multiple(names.visit_sql(visitor)),
+        }
+    }
+}
+
+impl<V: SQLVisitor> VisitSQL<V> for IdentWithAlias {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        IdentWithAlias {
+            ident: self.ident.visit_sql(visitor),
+            alias: self.alias.visit_sql(visitor), // NOTE: We may not want to visit the alias
         }
     }
 }

@@ -398,6 +398,15 @@ impl TryInto<ArrowDataType> for &Type {
     }
 }
 
+fn time_unit_precision(tu: &TimeUnit) -> u64 {
+    match tu {
+        TimeUnit::Second => 0,
+        TimeUnit::Millisecond => 3,
+        TimeUnit::Microsecond => 6,
+        TimeUnit::Nanosecond => 9,
+    }
+}
+
 // NOTE: Arrow supports the opposite conversion (ArrowDataType -> ParserDataType)
 // in the convert_simple_data_type() function
 impl TryInto<ParserDataType> for &Type {
@@ -422,13 +431,14 @@ impl TryInto<ParserDataType> for &Type {
             Atom(Float16) => ParserDataType::Float(None),
             Atom(Float32) => ParserDataType::Float(None),
             Atom(Float64) => ParserDataType::Double,
-            Atom(Timestamp(_tu, tz)) => {
-                ParserDataType::Timestamp(tz.as_ref().map_or(ParserTz::None, |_| ParserTz::Tz))
-            }
+            Atom(Timestamp(tu, tz)) => ParserDataType::Timestamp(
+                Some(time_unit_precision(tu)),
+                tz.as_ref().map_or(ParserTz::None, |_| ParserTz::Tz),
+            ),
             Atom(Date32) => ParserDataType::Date,
-            Atom(Date64) => ParserDataType::Datetime,
-            Atom(Time32(_)) => ParserDataType::Time(ParserTz::None),
-            Atom(Time64(_)) => ParserDataType::Time(ParserTz::None),
+            Atom(Date64) => ParserDataType::Datetime(None),
+            Atom(Time32(u)) => ParserDataType::Time(Some(time_unit_precision(u)), ParserTz::None),
+            Atom(Time64(u)) => ParserDataType::Time(Some(time_unit_precision(u)), ParserTz::None),
             Atom(Interval(_)) => ParserDataType::Interval,
             Atom(Binary) => ParserDataType::Varbinary(None),
             Atom(FixedSizeBinary(len)) => ParserDataType::Binary(Some(*len as u64)),

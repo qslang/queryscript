@@ -2048,15 +2048,15 @@ checksum = "43b2853a4d09f215c24cc5489c992ce46052d359b5109343cbafbf26bc62f8a3"
 
 [[package]]
 name = "simple_logger"
-version = "2.3.0"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48047e77b528151aaf841a10a9025f9459da80ba820e425ff7eb005708a76dc7"
+checksum = "e190a521c2044948158666916d9e872cbb9984f755e9bb3b5b75a836205affcd"
 dependencies = [
  "atty",
  "colored",
  "log",
  "time",
- "winapi",
+ "windows-sys",
 ]
 
 [[package]]
@@ -2105,7 +2105,7 @@ checksum = "45456094d1983e2ee2a18fdfebce3189fa451699d0502cb8e3b49dba5ba41451"
 
 [[package]]
 name = "sqlparser"
-version = "0.26.0"
+version = "0.30.0"
 dependencies = [
  "bigdecimal",
  "log",
@@ -2114,6 +2114,16 @@ dependencies = [
  "serde",
  "serde_json",
  "simple_logger",
+ "sqlparser_derive",
+]
+
+[[package]]
+name = "sqlparser_derive"
+version = "0.1.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
