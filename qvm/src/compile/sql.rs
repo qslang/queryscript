@@ -1717,6 +1717,47 @@ pub fn compile_sqlexpr(
                 })?,
             }
         }
+        sqlast::Expr::UnaryOp { op, expr } => {
+            let op = op.clone();
+            let cexpr = compile_sqlarg(
+                compiler.clone(),
+                schema.clone(),
+                scope.clone(),
+                loc,
+                expr.as_ref(),
+            )?;
+            use sqlast::UnaryOperator::*;
+            let type_ = match op {
+                Plus | Minus => {
+                    // NOTE: There is some logic varies per SQL engine about which types are
+                    // accepted in the + and - unary operators. Ideally, we throw a compiler error
+                    // here, depending on the engine.
+                    cexpr.type_.clone()
+                }
+                Not => resolve_global_atom(compiler.clone(), "bool")?,
+                _ => {
+                    return Err(CompileError::unimplemented(
+                        loc.clone(),
+                        format!("Unary operator: {}", op).as_str(),
+                    ));
+                }
+            };
+            CTypedExpr {
+                type_,
+                expr: compiler.async_cref(async move {
+                    let expr = cexpr.sql.await?;
+                    let expr = expr.read()?;
+
+                    Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                        names: expr.names.clone(),
+                        body: SQLBody::Expr(sqlast::Expr::UnaryOp {
+                            op,
+                            expr: Box::new(expr.body.as_expr()),
+                        }),
+                    }))))
+                })?,
+            }
+        }
         sqlast::Expr::Case {
             operand,
             conditions,
