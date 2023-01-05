@@ -3,6 +3,7 @@ use snafu::prelude::*;
 use crate::ast;
 use crate::ast::ToIdents;
 use crate::compile;
+use crate::compile::error::*;
 use crate::compile::schema;
 use crate::parser;
 
@@ -62,7 +63,14 @@ impl AutoCompleter {
     }
 }
 
-pub fn pos_to_loc(text: &str, pos: usize) -> parser::Location {
+pub fn pos_to_loc(text: &str, pos: usize) -> Result<parser::Location> {
+    if pos > text.len() {
+        return Err(CompileError::internal(
+            compile::error::ErrorLocation::Unknown,
+            "Text index is out of bounds",
+        ));
+    }
+
     let line: u64 = (text[..pos]
         .as_bytes()
         .iter()
@@ -73,16 +81,21 @@ pub fn pos_to_loc(text: &str, pos: usize) -> parser::Location {
         Some(nl) => pos - nl,
         None => pos + 1,
     } as u64;
-    parser::Location { line, column }
+    Ok(parser::Location { line, column })
 }
 
-pub fn loc_to_pos(text: &str, loc: parser::Location) -> usize {
-    text.split('\n').collect::<Vec<_>>()[..(loc.line - 1) as usize]
-        .iter()
-        .map(|l| l.len() + 1)
-        .sum::<usize>()
-        + loc.column as usize
-        - 1
+pub fn loc_to_pos(text: &str, loc: parser::Location) -> Result<usize> {
+    let lines = text.split('\n').collect::<Vec<_>>();
+    let line_idx = (loc.line - 1) as usize;
+    let column_idx = (loc.column - 1) as usize;
+    if line_idx >= lines.len() || column_idx >= lines[line_idx].len() {
+        return Err(CompileError::internal(
+            compile::error::ErrorLocation::Unknown,
+            "Text location is out of bounds",
+        ));
+    }
+
+    Ok(lines[..line_idx].iter().map(|l| l.len() + 1).sum::<usize>() + column_idx)
 }
 
 fn parse_longest_path(texts: &Vec<ast::Ident>) -> Vec<ast::Located<ast::Ident>> {
@@ -109,7 +122,7 @@ fn get_imported_decls<E: schema::Entry>(
     compiler: compile::Compiler,
     schema: schema::Ref<schema::Schema>,
     path: &Vec<ast::Located<ast::Ident>>,
-) -> compile::Result<Vec<ast::Ident>> {
+) -> Result<Vec<ast::Ident>> {
     let (schema, _, remainder) =
         compile::lookup_path::<E>(compiler, schema.clone(), path, true, true)?;
     if remainder.len() > 0 {
@@ -126,7 +139,7 @@ fn get_imported_decls<E: schema::Entry>(
 fn get_schema_paths(
     schema: schema::Ref<schema::Schema>,
     path: &Vec<ast::Ident>,
-) -> compile::Result<Vec<String>> {
+) -> Result<Vec<String>> {
     if let Some(folder) = schema.read()?.folder.clone() {
         let mut folder = Path::new(&folder).to_path_buf();
         folder.extend(path.iter().map(|s| s.to_string()));
@@ -157,7 +170,7 @@ fn get_record_fields(
     compiler: compile::Compiler,
     schema: schema::Ref<schema::Schema>,
     path: &ast::Path,
-) -> compile::Result<Vec<ast::Ident>> {
+) -> Result<Vec<ast::Ident>> {
     let expr = compile::compile_reference(compiler.clone(), schema.clone(), path)?;
     let type_ = expr
         .type_
@@ -180,6 +193,16 @@ fn get_record_fields(
 
 impl AutoCompleter {
     pub fn auto_complete(&self, line: &str, pos: usize) -> (usize, Vec<ast::Ident>) {
+        match self.try_auto_complete(line, pos) {
+            Ok(r) => r,
+            Err(e) => {
+                (&mut *self.stats.borrow_mut()).msg = format!("{}", e);
+                return (0, Vec::new());
+            }
+        }
+    }
+
+    pub fn try_auto_complete(&self, line: &str, pos: usize) -> Result<(usize, Vec<ast::Ident>)> {
         (&mut *self.stats.borrow_mut()).tried += 1;
 
         let mut full = self.curr_buffer.borrow().clone();
@@ -187,15 +210,9 @@ impl AutoCompleter {
         full.push_str(&line);
 
         let full_pos = start_pos + pos;
-        let full_loc = pos_to_loc(full.as_str(), full_pos);
+        let full_loc = pos_to_loc(full.as_str(), full_pos)?;
 
-        let (tokens, eof) = match parser::tokenize("<repl>", &full) {
-            Ok(r) => r,
-            Err(e) => {
-                (&mut *self.stats.borrow_mut()).msg = format!("{}", e);
-                return (0, Vec::new());
-            }
-        };
+        let (tokens, eof) = parser::tokenize("<repl>", &full)?;
         let parser = parser::Parser::new("<repl>", tokens, eof);
 
         let (tok, suggestions) = parser.get_autocomplete(full_loc);
@@ -204,11 +221,13 @@ impl AutoCompleter {
             _ => "".to_string(),
         };
         let suggestion_loc = tok.location.clone();
-        let suggestion_pos = loc_to_pos(full.as_str(), suggestion_loc);
+        let suggestion_pos = loc_to_pos(full.as_str(), suggestion_loc)?;
 
         if suggestion_pos < start_pos {
-            (&mut *self.stats.borrow_mut()).msg = format!("failed before");
-            return (0, Vec::new());
+            return Err(CompileError::internal(
+                ErrorLocation::Unknown,
+                "failed before",
+            ));
         }
 
         let mut ident_types = BTreeMap::<char, Vec<ast::Ident>>::new();
@@ -316,6 +335,6 @@ impl AutoCompleter {
 
         (&mut *self.stats.borrow_mut()).completed += 1;
 
-        (suggestion_pos - start_pos, filtered)
+        Ok((suggestion_pos - start_pos, filtered))
     }
 }

@@ -295,3 +295,18 @@ pub struct Stmt {
 pub struct Schema {
     pub stmts: Vec<Stmt>,
 }
+
+impl Schema {
+    pub fn find_stmt(&self, loc: Location) -> Option<Stmt> {
+        let mut stmt = None;
+        for s in &self.stmts {
+            if &s.start > &loc {
+                break;
+            }
+            if &loc <= &s.end {
+                stmt = Some(s.clone());
+            }
+        }
+        return stmt;
+    }
+}

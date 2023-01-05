@@ -329,39 +329,24 @@ impl LanguageServer for Backend {
             line: (position.line + 1) as u64,
             column: (position.character + 1) as u64,
         };
-        let pos = loc_to_pos(text.as_str(), loc.clone());
+        let pos = loc_to_pos(text.as_str(), loc.clone()).map_err(log_internal_error)?;
 
         // XXX We should use the schema from the document, not recompile it
         let schema_ast = parse_schema(file.as_str(), text.as_str()).result;
-        let mut stmt = None;
-        for s in &schema_ast.stmts {
-            if &s.start > &loc {
-                break;
-            }
-            if &loc <= &s.end {
-                stmt = Some(s);
-            }
-        }
+        let stmt = schema_ast.find_stmt(loc.clone());
 
-        let (start_pos, _start_loc, line) = if let Some(stmt) = stmt {
+        let (start_pos, line) = if let Some(stmt) = stmt {
             let (start_pos, end_pos) = (
-                loc_to_pos(text.as_str(), stmt.start.clone()),
-                loc_to_pos(text.as_str(), stmt.end.clone()),
+                loc_to_pos(text.as_str(), stmt.start.clone()).map_err(log_internal_error)?,
+                loc_to_pos(text.as_str(), stmt.end.clone()).map_err(log_internal_error)?,
             );
-            (
-                start_pos,
-                stmt.start.clone(),
-                text[start_pos..end_pos + 1].to_string(),
-            )
+            (start_pos, text[start_pos..end_pos + 1].to_string())
+        } else if let Some(last_stmt) = schema_ast.stmts.last() {
+            let end_pos =
+                loc_to_pos(text.as_str(), last_stmt.end.clone()).map_err(log_internal_error)?;
+            (end_pos + 1, text[end_pos + 1..].to_string())
         } else {
-            let line = if let Some(last_stmt) = schema_ast.stmts.last() {
-                text[loc_to_pos(text.as_str(), last_stmt.end.clone())..].to_string()
-            } else {
-                String::new()
-            };
-
-            // XXX I think (?) that the start position should be one behind the cursor's position.
-            (pos - 1, loc.clone(), line)
+            (pos, String::new())
         };
 
         let compiler = self.compiler.clone();
@@ -375,7 +360,7 @@ impl LanguageServer for Backend {
                     schema,
                     Rc::new(RefCell::new(String::new())),
                 );
-                Ok(autocompleter.auto_complete(line.as_str(), pos - start_pos + 1))
+                Ok(autocompleter.auto_complete(line.as_str(), pos - start_pos))
             }
         })
         .await
@@ -390,7 +375,8 @@ impl LanguageServer for Backend {
             return Ok(None);
         }
 
-        let suggestion_loc = pos_to_loc(text.as_str(), start_pos + suggestion_pos);
+        let suggestion_loc =
+            pos_to_loc(text.as_str(), start_pos + suggestion_pos).map_err(log_internal_error)?;
 
         Ok(Some(CompletionResponse::List(CompletionList {
             is_incomplete: true,
