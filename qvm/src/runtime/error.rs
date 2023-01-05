@@ -33,7 +33,7 @@ pub enum RuntimeError {
     },
 
     #[snafu(context(false))]
-    ArrowErrror {
+    ArrowError {
         source: arrow::error::ArrowError,
         backtrace: Option<Backtrace>,
     },
@@ -87,6 +87,15 @@ impl RuntimeError {
             actual_type,
         }
         .build();
+    }
+}
+
+impl Into<arrow::error::ArrowError> for RuntimeError {
+    fn into(self) -> arrow::error::ArrowError {
+        match self {
+            RuntimeError::ArrowError { source, .. } => source,
+            _ => arrow::error::ArrowError::ExternalError(Box::new(self)),
+        }
     }
 }
 

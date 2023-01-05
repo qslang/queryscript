@@ -68,7 +68,7 @@ impl Normalizer for DuckDBNormalizer {
 
 #[derive(Debug, Clone)]
 pub struct ArrowRelation {
-    pub relation: Arc<Vec<RecordBatch>>,
+    pub relation: Arc<dyn Relation>,
     pub schema: ArrowSchemaRef,
 }
 
@@ -112,7 +112,7 @@ impl DuckDBEngine {
                     relations.insert(
                         key.clone(),
                         ArrowRelation {
-                            relation: r.clone().as_arrow_recordbatch(),
+                            relation: r.clone(),
                             schema: Arc::new((&param.type_).try_into()?),
                         },
                     );
@@ -304,11 +304,11 @@ impl Iterator for VecRecordBatchReader {
     fn next(
         &mut self,
     ) -> Option<Result<arrow::record_batch::RecordBatch, arrow::error::ArrowError>> {
-        let rbs = self.data.relation.as_ref();
-        if self.idx >= rbs.len() {
+        let rbs = &self.data.relation;
+        if self.idx >= rbs.num_batches() {
             None
         } else {
-            let batch = &rbs[self.idx];
+            let batch = rbs.batch(self.idx).as_arrow_recordbatch();
             self.idx += 1;
 
             Some(match &self.projection {

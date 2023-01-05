@@ -107,10 +107,6 @@ pub trait Relation: fmt::Debug + Send + Sync {
 
     fn num_batches(&self) -> usize;
     fn batch(&self, index: usize) -> &dyn RecordBatch;
-
-    // We expect to have one such function for each in-memory execution
-    // format we support. To start, this is just Apache Arrow (columnar).
-    fn as_arrow_recordbatch(self: Arc<Self>) -> Arc<Vec<ArrowRecordBatch>>;
 }
 
 pub trait RecordBatch: fmt::Debug + Send + Sync {
@@ -118,6 +114,7 @@ pub trait RecordBatch: fmt::Debug + Send + Sync {
     fn as_any(&self) -> &dyn Any;
 
     fn records(&self) -> Vec<Arc<dyn Record>>;
+    fn as_arrow_recordbatch(&self) -> &ArrowRecordBatch;
 }
 
 clone_trait_object!(FnValue);

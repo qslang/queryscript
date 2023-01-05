@@ -20,7 +20,7 @@ pub trait SQLEngine: std::fmt::Debug + Send + Sync {
     ) -> Result<Arc<dyn Relation>>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SQLParam {
     pub name: String,
     pub value: Value,

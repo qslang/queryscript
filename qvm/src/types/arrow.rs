@@ -48,10 +48,6 @@ impl Relation for ArrowRecordBatchRelation {
     fn as_any(&self) -> &dyn Any {
         self
     }
-
-    fn as_arrow_recordbatch(self: Arc<Self>) -> Arc<Vec<ArrowRecordBatch>> {
-        self.batches.clone()
-    }
 }
 
 impl RecordBatch for ArrowRecordBatch {
@@ -78,6 +74,10 @@ impl RecordBatch for ArrowRecordBatch {
                 )
             })
             .collect()
+    }
+
+    fn as_arrow_recordbatch(&self) -> &ArrowRecordBatch {
+        self
     }
 }
 

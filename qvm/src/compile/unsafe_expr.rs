@@ -149,16 +149,36 @@ pub fn compile_unsafe_expr(
     loc: &SourceLocation,
 ) -> Result<CTypedExpr> {
     let name_collector = NameCollector::new(compiler.clone(), schema.clone());
-    let body = match &expr_body {
-        ast::ExprBody::SQLQuery(sql) => SQLBody::Query(sql.visit_sql(&name_collector)),
-        ast::ExprBody::SQLExpr(expr) => SQLBody::Expr(expr.visit_sql(&name_collector)),
+    let (runnable_body, inference_body) = match &expr_body {
+        ast::ExprBody::SQLQuery(sql) => {
+            let transformed = sql.visit_sql(&name_collector);
+
+            let mut limit_0 = transformed.clone();
+            limit_0.limit = Some(sqlast::Expr::Value(sqlast::Value::Number(
+                "0".to_string(),
+                false,
+            )));
+
+            (SQLBody::Query(transformed.clone()), SQLBody::Query(limit_0))
+        }
+        ast::ExprBody::SQLExpr(expr) => {
+            let transformed = SQLBody::Expr(expr.visit_sql(&name_collector));
+            (transformed.clone(), transformed)
+        }
     };
 
     let names = name_collector.names.into_inner();
-    let expr = mkcref(Expr::SQL(Arc::new(SQL { names, body })));
+    let expr = mkcref(Expr::SQL(Arc::new(SQL {
+        names: names.clone(),
+        body: runnable_body,
+    })));
+    let inference_expr = mkcref(Expr::SQL(Arc::new(SQL {
+        names: names,
+        body: inference_body,
+    })));
 
     let expr_type = CRef::new_unknown("unsafe expr");
-    let resolve = schema_infer_expr_fn(schema.clone(), expr.clone(), expr_type.clone());
+    let resolve = schema_infer_expr_fn(schema.clone(), inference_expr, expr_type.clone());
 
     compiler.add_external_type(resolve, expr_type.clone(), ExternalTypeOrder::UnsafeExpr)?;
 
