@@ -10,6 +10,7 @@ use crate::compile::coerce::CoerceOp;
 use crate::compile::error::*;
 use crate::compile::inference::*;
 use crate::compile::schema::*;
+use crate::compile::scope::SQLScope;
 use crate::compile::sql::*;
 use crate::compile::unsafe_expr::compile_unsafe_expr;
 use crate::{
@@ -818,11 +819,15 @@ fn compile_expr(compiler: Compiler, schema: Ref<Schema>, expr: &ast::Expr) -> Re
         compile_unsafe_expr(compiler, schema, &expr.body, &loc)
     } else {
         match &expr.body {
-            ast::ExprBody::SQLQuery(q) => {
-                Ok(compile_sqlquery(compiler.clone(), schema.clone(), &loc, q)?)
-            }
+            ast::ExprBody::SQLQuery(q) => Ok(compile_sqlquery(
+                compiler.clone(),
+                schema.clone(),
+                None,
+                &loc,
+                q,
+            )?),
             ast::ExprBody::SQLExpr(e) => {
-                let scope = mkref(SQLScope::new(None));
+                let scope = SQLScope::new(None);
                 Ok(compile_sqlexpr(
                     compiler.clone(),
                     schema.clone(),

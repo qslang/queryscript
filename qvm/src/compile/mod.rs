@@ -7,6 +7,7 @@ mod generics;
 pub mod inference;
 pub mod inline;
 pub mod schema;
+mod scope;
 pub mod sql;
 pub mod traverse;
 mod unsafe_expr;

@@ -3,7 +3,7 @@ use snafu::prelude::*;
 use sqlparser::ast::WildcardAdditionalOptions;
 use sqlparser::{ast as sqlast, ast::DataType as ParserDataType};
 use std::borrow::Cow;
-use std::collections::{btree_map, BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
@@ -17,7 +17,7 @@ use crate::compile::generics::{as_generic, ExternalType};
 use crate::compile::inference::*;
 use crate::compile::inline::*;
 use crate::compile::schema::*;
-use crate::compile::util::InsertionOrderMap;
+use crate::compile::scope::{AvailableReferences, SQLScope};
 use crate::types::{number::parse_numeric_type, AtomicType, Type};
 
 use super::compile::ExternalTypeOrder;
@@ -197,8 +197,8 @@ pub fn compile_sqlreference(
         1 => {
             let name = sqlpath[0].value.clone();
 
-            if let Some((relation_type, relation_loc)) = scope.read()?.relations.get(&name) {
-                let type_ = get_rowtype(compiler.clone(), relation_type.clone())?;
+            if let Some((relation_type, relation_loc)) = scope.read()?.get_relation(&name)? {
+                let type_ = get_rowtype(compiler.clone(), relation_type)?;
                 let expr = mkcref(Expr::SQL(Arc::new(SQL {
                     names: CSQLNames::from_unbound(sqlpath),
                     body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
@@ -207,7 +207,7 @@ pub fn compile_sqlreference(
                     path[0].clone(),
                     SymbolKind::Field,
                     mkcref(type_.clone().into()),
-                    relation_loc.clone(),
+                    relation_loc,
                     None,
                 )?;
                 return Ok(CTypedExpr { type_, expr });
@@ -218,7 +218,7 @@ pub fn compile_sqlreference(
                         .get_available_references(compiler.clone(), &loc, None)?;
 
                 let tse = available.then({
-                    move |available: Ref<InsertionOrderMap<String, FieldMatch>>| {
+                    move |available: Ref<AvailableReferences>| {
                         if let Some(fm) = available.read()?.get(&name) {
                             if let Some(type_) = fm.type_.clone() {
                                 let sqlpath =
@@ -268,9 +268,10 @@ pub fn compile_sqlreference(
 
             // If the relation can't be found in the scope, just fall through
             //
-            if let Some((relation_type, relation_loc)) = scope.read()?.relations.get(&relation_name)
+            if let Some((relation_type, relation_loc)) =
+                scope.read()?.get_relation(&relation_name)?
             {
-                let rowtype = get_rowtype(compiler.clone(), relation_type.clone())?;
+                let rowtype = get_rowtype(compiler.clone(), relation_type)?;
                 let type_ = typecheck_path(rowtype, vec![path[1].clone()].as_slice())?;
                 let expr = mkcref(Expr::SQL(Arc::new(SQL {
                     names: CSQLNames::from_unbound(&sqlpath),
@@ -280,7 +281,7 @@ pub fn compile_sqlreference(
                     path[1].clone(),
                     SymbolKind::Value,
                     mkcref(type_.clone().into()),
-                    relation_loc.clone(),
+                    relation_loc,
                     None,
                 )?;
                 return Ok(CTypedExpr { type_, expr });
@@ -442,7 +443,7 @@ pub fn compile_sqlarg(
     intern_cref_placeholder(compiler.clone(), "param".to_string(), compiled)
 }
 
-type CSQLNames = SQLNames<CRef<MType>>;
+pub type CSQLNames = SQLNames<CRef<MType>>;
 
 pub fn combine_crefs<T: 'static + Constrainable>(all: Vec<CRef<T>>) -> Result<CRef<Vec<Ref<T>>>> {
     let mut ret = mkcref(Vec::new());
@@ -463,138 +464,6 @@ pub fn combine_sqlnames(all: &Vec<Ref<SQL<CRef<MType>>>>) -> Result<CSQLNames> {
     }
     Ok(ret)
 }
-
-#[derive(Clone, Debug)]
-pub struct FieldMatch {
-    pub relation: Ident,
-    pub field: Ident,
-    pub type_: Option<CRef<MType>>,
-}
-impl Constrainable for FieldMatch {}
-
-#[derive(Clone, Debug)]
-pub struct SQLScope {
-    pub parent: Option<Arc<SQLScope>>,
-    pub relations: BTreeMap<String, (CRef<MType>, SourceLocation)>,
-}
-
-impl SQLScope {
-    pub fn new(parent: Option<Arc<SQLScope>>) -> SQLScope {
-        SQLScope {
-            parent,
-            relations: BTreeMap::new(),
-        }
-    }
-
-    pub fn empty() -> Ref<SQLScope> {
-        mkref(Self::new(None))
-    }
-
-    pub fn get_available_references(
-        &self,
-        compiler: Compiler,
-        _loc: &SourceLocation,
-        relation: Option<String>,
-    ) -> Result<CRef<InsertionOrderMap<String, FieldMatch>>> {
-        combine_crefs(
-            self.relations
-                .iter()
-                .filter(|(n, _)| match &relation {
-                    Some(r) => *n == r,
-                    None => true,
-                })
-                .map(|(n, (te, loc))| {
-                    let n = Ident::with_location(loc.clone(), n.clone());
-                    get_rowtype(compiler.clone(), te.clone())?.then(move |rowtype: Ref<MType>| {
-                        let rowtype = rowtype.read()?.clone();
-                        match &rowtype {
-                            MType::Record(fields) => Ok(mkcref(
-                                fields
-                                    .iter()
-                                    .map(|field| FieldMatch {
-                                        relation: n.clone(),
-                                        field: field.name.clone(),
-                                        type_: Some(field.type_.clone()),
-                                    })
-                                    .collect(),
-                            )),
-                            _ => Ok(mkcref(vec![FieldMatch {
-                                relation: n.clone(),
-                                field: n.clone(),
-                                type_: Some(mkcref(rowtype)),
-                            }])),
-                        }
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?,
-        )?
-        .then(|relations: Ref<Vec<Ref<Vec<FieldMatch>>>>| {
-            let mut ret = InsertionOrderMap::<String, FieldMatch>::new();
-            for a in &*relations.read()? {
-                for b in &*a.read()? {
-                    if let Some(existing) = ret.get_mut(&b.field.value) {
-                        existing.type_ = None;
-                    } else {
-                        ret.insert(b.field.value.clone(), b.clone());
-                    }
-                }
-            }
-            Ok(mkcref(ret))
-        })
-    }
-
-    pub fn remove_bound_references(
-        &self,
-        compiler: Compiler,
-        names: CSQLNames,
-    ) -> Result<CRef<CSQLNames>> {
-        let relations = self.relations.clone();
-        compiler.async_cref({
-            let compiler = compiler.clone();
-            async move {
-                let mut names = names.clone();
-                for (relation, (type_, _)) in &relations {
-                    names.unbound.remove(&vec![relation.clone()]);
-                    let rowtype = get_rowtype(compiler.clone(), type_.clone())?.await?;
-                    match &*rowtype.read()? {
-                        MType::Record(fields) => {
-                            for field in fields.iter() {
-                                names
-                                    .unbound
-                                    .remove(&vec![relation.clone(), field.name.value.clone()]);
-                                names.unbound.remove(&vec![field.name.value.clone()]);
-                            }
-                        }
-                        _ => {}
-                    };
-                }
-                Ok(mkcref(names))
-            }
-        })
-    }
-
-    pub fn add_reference(
-        &mut self,
-        name: &String,
-        loc: &SourceLocation,
-        type_: CRef<MType>,
-    ) -> Result<()> {
-        match self.relations.entry(name.clone()) {
-            btree_map::Entry::Occupied(_) => {
-                return Err(CompileError::duplicate_entry(vec![Ident::with_location(
-                    loc.clone(),
-                    name.clone(),
-                )]))
-            }
-            btree_map::Entry::Vacant(e) => {
-                e.insert((type_, loc.clone()));
-            }
-        };
-        Ok(())
-    }
-}
-
-impl Constrainable for SQLScope {}
 
 pub fn compile_relation(
     compiler: &Compiler,
@@ -692,7 +561,13 @@ pub fn compile_relation(
             }
 
             // NOTE: Once we thread locations through the parse tree, we should use the location here.
-            let subquery = compile_sqlquery(compiler.clone(), schema.clone(), loc, subquery)?;
+            let subquery = compile_sqlquery(
+                compiler.clone(),
+                schema.clone(),
+                Some(scope.clone()),
+                loc,
+                subquery,
+            )?;
 
             let (loc, name) = match alias {
                 Some(a) => (
@@ -862,13 +737,14 @@ pub fn compile_table_with_joins(
 pub fn compile_from(
     compiler: &Compiler,
     schema: &Ref<Schema>,
+    parent_scope: Option<Ref<SQLScope>>,
     loc: &SourceLocation,
     from: &Vec<sqlast::TableWithJoins>,
 ) -> Result<(
     Ref<SQLScope>,
     CRef<CWrap<(CSQLNames, Vec<sqlast::TableWithJoins>)>>,
 )> {
-    let scope = SQLScope::empty();
+    let scope = SQLScope::new(parent_scope);
     let from = match from.len() {
         0 => cwrap((CSQLNames::new(), Vec::new())),
         _ => {
@@ -978,6 +854,7 @@ fn check_options(loc: &SourceLocation, o: &sqlast::WildcardAdditionalOptions) ->
 pub fn compile_select(
     compiler: Compiler,
     schema: Ref<Schema>,
+    parent_scope: Option<Ref<SQLScope>>,
     loc: &SourceLocation,
     select: &sqlast::Select,
 ) -> Result<(
@@ -1017,7 +894,7 @@ pub fn compile_select(
         return Err(CompileError::unimplemented(loc.clone(), "QUALIFY"));
     }
 
-    let (scope, from) = compile_from(&compiler, &schema, loc, &select.from)?;
+    let (scope, from) = compile_from(&compiler, &schema, parent_scope.clone(), loc, &select.from)?;
 
     let exprs = select
         .projection
@@ -1080,9 +957,9 @@ pub fn compile_select(
                             .get_available_references(compiler.clone(), loc, qualifier)?;
                     available.then({
                         let loc = loc.clone();
-                        move |available: Ref<InsertionOrderMap<String, FieldMatch>>| {
+                        move |available: Ref<AvailableReferences>| {
                             let mut ret = Vec::new();
-                            for (_, m) in available.read()?.iter() {
+                            for (_, m) in available.read()?.current_level().unwrap().iter() {
                                 let type_ = match &m.type_ {
                                     Some(t) => t.clone(),
                                     None => {
@@ -1244,6 +1121,7 @@ pub async fn finish_sqlexpr(
 pub fn compile_sqlquery(
     compiler: Compiler,
     schema: Ref<Schema>,
+    parent_scope: Option<Ref<SQLScope>>,
     loc: &SourceLocation,
     query: &sqlast::Query,
 ) -> Result<CTypedExpr> {
@@ -1298,7 +1176,8 @@ pub fn compile_sqlquery(
 
     match query.body.as_ref() {
         sqlast::SetExpr::Select(s) => {
-            let (scope, type_, select) = compile_select(compiler.clone(), schema.clone(), loc, s)?;
+            let (scope, type_, select) =
+                compile_select(compiler.clone(), schema.clone(), parent_scope, loc, s)?;
 
             Ok(CTypedExpr {
                 type_,
@@ -1349,7 +1228,9 @@ pub fn compile_sqlquery(
                 })?,
             })
         }
-        sqlast::SetExpr::Query(q) => compile_sqlquery(compiler.clone(), schema.clone(), loc, q),
+        sqlast::SetExpr::Query(q) => {
+            compile_sqlquery(compiler.clone(), schema.clone(), parent_scope, loc, q)
+        }
         sqlast::SetExpr::SetOperation { .. } => Err(CompileError::unimplemented(
             loc.clone(),
             "UNION | EXCEPT | INTERSECT",
@@ -2276,6 +2157,79 @@ pub fn compile_sqlexpr(
                     }))))
                 })?,
             }
+        }
+        sqlast::Expr::Subquery(query) => {
+            let query = intern_cref_placeholder(
+                compiler.clone(),
+                "param".to_string(),
+                compile_sqlquery(
+                    compiler.clone(),
+                    schema.clone(),
+                    Some(scope.clone()),
+                    loc,
+                    query.as_ref(),
+                )?,
+            )?;
+
+            let loc = loc.clone();
+            let type_ = compiler.async_cref(async move {
+                let query_type = query.type_.await?;
+                let query_type = query_type.read()?.clone();
+
+                let inner_record = match &query_type {
+                    MType::List(t) => {
+                        let inner_type = t.get().await?;
+                        let inner_type = inner_type.read()?;
+                        match &*inner_type {
+                            MType::Record(r) => Some(r.clone()),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+
+                let inner_record = match inner_record {
+                    Some(i) => i,
+                    None => {
+                        return Err(CompileError::internal(
+                            loc.clone(),
+                            format!(
+                                "Subselect expected to return a list of records (not {:?})",
+                                query_type
+                            )
+                            .as_str(),
+                        ))
+                    }
+                };
+
+                let first_field = if inner_record.get().len() == 1 {
+                    inner_record.get()[0].clone()
+                } else {
+                    return Err(CompileError::scalar_subselect(
+                        inner_record.location().clone(),
+                        format!(
+                            "should return a single field (not {})",
+                            inner_record.get().len()
+                        )
+                        .as_str(),
+                    ));
+                };
+
+                Ok(first_field.type_)
+            })?;
+
+            let expr = compiler.async_cref(async {
+                let inner_query = query.sql.await?;
+                let inner_query = inner_query.read()?;
+                Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                    names: inner_query.names.clone(),
+                    body: SQLBody::Expr(sqlast::Expr::Subquery(Box::new(
+                        inner_query.body.as_query(),
+                    ))),
+                }))))
+            })?;
+
+            CTypedExpr { type_, expr }
         }
         sqlast::Expr::CompoundIdentifier(sqlpath) => {
             compile_sqlreference(compiler.clone(), schema.clone(), scope.clone(), sqlpath)?

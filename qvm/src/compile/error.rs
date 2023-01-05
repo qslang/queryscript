@@ -115,6 +115,13 @@ pub enum CompileError {
         backtrace: Option<Backtrace>,
     },
 
+    #[snafu(display("Invalid scalar subselect: {}", what))]
+    ScalarSubselectError {
+        what: String,
+        backtrace: Option<Backtrace>,
+        loc: ErrorLocation,
+    },
+
     #[snafu(display("{}", sources.first().unwrap()))]
     Multiple {
         // This is assumed to be non-empty
@@ -169,6 +176,14 @@ impl CompileError {
     pub fn import_error(path: ast::Path, what: &str) -> CompileError {
         return ImportSnafu {
             path,
+            what: what.to_string(),
+        }
+        .build();
+    }
+
+    pub fn scalar_subselect(loc: ErrorLocation, what: &str) -> CompileError {
+        return ScalarSubselectSnafu {
+            loc,
             what: what.to_string(),
         }
         .build();
@@ -243,6 +258,7 @@ impl PrettyError for CompileError {
             CompileError::WrongType { lhs, .. } => lhs.location(),
             CompileError::CoercionError { loc, .. } => loc.clone(),
             CompileError::ImportError { path, .. } => path_location(path),
+            CompileError::ScalarSubselectError { loc, .. } => loc.clone(),
             CompileError::Multiple { sources } => sources.first().unwrap().location(),
         }
     }
