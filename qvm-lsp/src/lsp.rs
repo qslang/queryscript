@@ -317,11 +317,10 @@ impl LanguageServer for Backend {
         let position = params.text_document_position.position;
         let uri = params.text_document_position.text_document.uri.clone();
         let file = uri.path().to_string();
-
-        let folder = FilePath::new(uri.path())
-            .parent()
-            .map(|p| p.to_str().unwrap())
-            .map(String::from);
+        let schema = match self.get_schema(&uri, false).await? {
+            Some(schema) => schema,
+            None => return Ok(None),
+        };
 
         let text = self.get_text(&uri).await?;
 
@@ -331,7 +330,9 @@ impl LanguageServer for Backend {
         };
         let pos = loc_to_pos(text.as_str(), loc.clone()).map_err(log_internal_error)?;
 
-        // XXX We should use the schema from the document, not recompile it
+        // Reparse the schema so that we're using the most up-to-date AST, even if compilation is
+        // active and the schema in the document is out of date.
+        //
         let schema_ast = parse_schema(file.as_str(), text.as_str()).result;
         let stmt = schema_ast.find_stmt(loc.clone());
 
@@ -353,8 +354,6 @@ impl LanguageServer for Backend {
         let (suggestion_pos, suggestions) = task::spawn_blocking({
             move || -> Result<_> {
                 let compiler = compiler.lock().map_err(log_internal_error)?;
-                let schema = Schema::new(file, folder);
-                compiler.compile_schema_ast(schema.clone(), &schema_ast);
                 let autocompleter = AutoCompleter::new(
                     compiler.clone(),
                     schema,
