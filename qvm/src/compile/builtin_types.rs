@@ -7,6 +7,8 @@ use crate::compile::inference::mkcref;
 use crate::compile::schema::{Decl, Located, MType, Ref, Schema, SchemaEntry};
 use crate::types::{AtomicType, TimeUnit};
 
+pub use crate::compile::generics::GLOBAL_GENERICS;
+
 // TODO: Add support for types with arguments
 type BuiltinType = (&'static str, AtomicType);
 const BUILTIN_TYPES: &'static [BuiltinType] = &[
@@ -52,7 +54,7 @@ const BUILTIN_TYPES: &'static [BuiltinType] = &[
 
 const BUILTIN_FUNCTIONS: &'static str = "
 fn load<R>(file varchar, format varchar) -> External<[R]> = native;
-fn __native_identity<T>(t T) -> T = native;
+fn __native_identity<T>(value T) -> T = native;
 fn min<R>(value R) -> R = sql;
 fn max<R>(value R) -> R = sql;
 fn count<R>(value R) -> bigint = sql;
@@ -63,10 +65,10 @@ fn strptime<R>(value text, fmt string) -> timestamp = sql;
 
 lazy_static! {
     pub static ref BUILTIN_LOC: SourceLocation = SourceLocation::File("<builtin>".to_string());
-    static ref BUILTIN_TYPE_DECLS: Vec<(String, Decl)> = BUILTIN_TYPES
+    static ref BUILTIN_TYPE_DECLS: Vec<(Ident, Decl)> = BUILTIN_TYPES
         .iter()
         .map(|(name, type_)| (
-            name.to_string(),
+            name.to_string().into(),
             Decl {
                 public: true,
                 extern_: false,

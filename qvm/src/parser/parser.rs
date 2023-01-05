@@ -279,36 +279,24 @@ impl<'a> Parser<'a> {
         result
     }
 
-    pub fn parse_ident(&mut self) -> Result<Ident> {
+    pub fn parse_ident(&mut self) -> Result<Located<Ident>> {
         let start = self.peek_start_location();
         let end = self.peek_end_location();
-        let token = self.next_token();
-        let loc = SourceLocation::Range(
-            self.file.clone(),
-            Range {
-                start: start.clone(),
-                end,
-            },
-        );
-        match token.token {
-            Token::Word(w) => Ok(Ident::with_location(loc, w.value)),
-            Token::DoubleQuotedString(s) => Ok(Ident::with_location(loc, s)),
-            token => unexpected_token!(
-                self.file.clone(),
-                TokenWithLocation {
-                    token,
-                    location: start
-                },
-                "Expected: WORD | DOUBLE_QUOTED_STRING"
-            ),
-        }
+
+        let ident = self.sqlparser.parse_identifier().context(SQLParserSnafu {
+            loc: SourceLocation::Range(self.file.clone(), Range { start, end }),
+        })?;
+
+        let loc = SourceLocation::from_file_range(self.file.clone(), ident.location().clone());
+
+        Ok(Ident::from_sqlident(loc, ident.into_inner()))
     }
 
     pub fn parse_path(&mut self, kind: char) -> Result<Path> {
-        let mut path = Vec::<Ident>::new();
+        let mut path = Vec::<Located<Ident>>::new();
         loop {
             self.autocomplete_tokens(&[Token::make_word(
-                sqlast::ObjectName(path.iter().map(Ident::to_sqlident).collect())
+                sqlast::ObjectName(path.iter().map(ToSqlIdent::to_sqlident).collect())
                     .to_string()
                     .as_str(),
                 Some(kind),
@@ -337,7 +325,7 @@ impl<'a> Parser<'a> {
         Ok(StmtBody::Extern { name, type_ })
     }
 
-    pub fn parse_idents(&mut self) -> Result<Vec<Ident>> {
+    pub fn parse_idents(&mut self) -> Result<Vec<Located<Ident>>> {
         let mut ret = Vec::new();
         let mut expect_ident = true;
         loop {

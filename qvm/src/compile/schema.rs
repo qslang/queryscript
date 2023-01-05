@@ -3,25 +3,25 @@ pub use arrow::datatypes::DataType as ArrowDataType;
 use colored::*;
 use snafu::prelude::*;
 use sqlparser::ast::{self as sqlast, WildcardAdditionalOptions};
-use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Debug};
 use std::sync::{Arc, RwLock};
 
 use crate::ast;
+pub use crate::ast::Located;
 use crate::ast::SourceLocation;
 use crate::compile::{
     coerce::{coerce_types, CoerceOp},
     error::*,
+    generics::Generic,
     inference::{mkcref, Constrainable, Constrained},
-    sql::{ident, select_from, select_no_from, select_star_from, with_table_alias},
+    sql::{select_from, select_no_from, select_star_from, with_table_alias},
 };
 use crate::runtime;
 use crate::types::{AtomicType, Field, FnType, Type};
 
 pub use crate::compile::inference::CRef;
-
-pub type Ident = ast::Ident;
+pub use ast::Ident;
 
 #[derive(Debug, Clone)]
 pub struct MField {
@@ -43,19 +43,6 @@ impl MField {
             type_,
             nullable: true,
         }
-    }
-}
-
-pub trait Generic: Send + Sync + fmt::Debug {
-    fn as_any(&self) -> &dyn Any;
-    fn name(&self) -> &str;
-
-    fn to_runtime_type(&self) -> runtime::error::Result<Type>;
-    fn substitute(&self, variables: &BTreeMap<String, CRef<MType>>) -> Result<Arc<dyn Generic>>;
-
-    fn unify(&self, other: &MType) -> Result<()>;
-    fn get_rowtype(&self, _compiler: crate::compile::Compiler) -> Result<Option<CRef<MType>>> {
-        Ok(None)
     }
 }
 
@@ -86,7 +73,7 @@ impl MType {
                     .iter()
                     .map(|f| {
                         Ok(Field {
-                            name: f.name.value.clone(),
+                            name: f.name.clone(),
                             type_: f.type_.must()?.read()?.to_runtime_type()?,
                             nullable: f.nullable,
                         })
@@ -102,7 +89,7 @@ impl MType {
                     .iter()
                     .map(|a| {
                         Ok(Field {
-                            name: a.name.value.clone(),
+                            name: a.name.clone(),
                             type_: a.type_.must()?.read()?.to_runtime_type()?,
                             nullable: a.nullable,
                         })
@@ -128,7 +115,7 @@ impl MType {
                     .iter()
                     .map(|f| {
                         Ok(MField {
-                            name: Ident::without_location(f.name.clone()),
+                            name: f.name.clone(),
                             type_: mkcref(MType::from_runtime_type(&f.type_)?),
                             nullable: f.nullable,
                         })
@@ -146,7 +133,7 @@ impl MType {
                         .iter()
                         .map(|a| {
                             Ok(MField {
-                                name: Ident::without_location(a.name.clone()),
+                                name: a.name.clone(),
                                 type_: mkcref(MType::from_runtime_type(&a.type_)?),
                                 nullable: a.nullable,
                             })
@@ -159,7 +146,7 @@ impl MType {
         }
     }
 
-    pub fn substitute(&self, variables: &BTreeMap<String, CRef<MType>>) -> Result<CRef<MType>> {
+    pub fn substitute(&self, variables: &BTreeMap<Ident, CRef<MType>>) -> Result<CRef<MType>> {
         let type_ = match self {
             MType::Atom(a) => mkcref(MType::Atom(a.clone())),
             MType::Record(fields) => mkcref(MType::Record(Located::new(
@@ -200,8 +187,8 @@ impl MType {
                 )))
             }
             MType::Name(n) => variables
-                .get(&n.get().value)
-                .ok_or_else(|| CompileError::no_such_entry(vec![n.get().clone()]))?
+                .get(n.get())
+                .ok_or_else(|| CompileError::no_such_entry(vec![n.clone()]))?
                 .clone(),
             MType::Generic(generic) => {
                 let location = generic.location();
@@ -296,7 +283,7 @@ impl<'a> fmt::Debug for DebugMFields<'a> {
             if f.alternate() {
                 f.write_str("\t")?;
             }
-            f.write_str(self.0[i].name.value.as_str())?;
+            f.write_str(self.0[i].name.as_str())?;
             f.write_str(" ")?;
             self.0[i].type_.fmt(f)?;
             if !self.0[i].nullable {
@@ -330,7 +317,7 @@ impl fmt::Debug for MType {
                 f.write_str(" -> ")?;
                 ret.fmt(f)?;
             }
-            MType::Name(n) => n.value.fmt(f)?,
+            MType::Name(n) => n.get().fmt(f)?,
             MType::Generic(t) => {
                 t.get().fmt(f)?;
             }
@@ -386,7 +373,7 @@ impl Constrainable for MType {
             MType::Name(name) => {
                 return Err(CompileError::internal(
                     name.location().clone(),
-                    format!("Encountered free type variable: {}", name.get().value).as_str(),
+                    format!("Encountered free type variable: {}", name.get()).as_str(),
                 ))
             }
             MType::Generic(generic) => {
@@ -436,7 +423,7 @@ impl Constrainable for Located<Vec<MField>> {
         }
 
         for i in 0..self.len() {
-            if self[i].name.value != other[i].name.value {
+            if self[i].name != other[i].name {
                 return Err(err());
             }
 
@@ -452,7 +439,7 @@ impl Constrainable for Located<Vec<MField>> {
 }
 
 impl CRef<MType> {
-    pub fn substitute(&self, variables: &BTreeMap<String, CRef<MType>>) -> Result<CRef<MType>> {
+    pub fn substitute(&self, variables: &BTreeMap<Ident, CRef<MType>>) -> Result<CRef<MType>> {
         match &*self.read()? {
             Constrained::Known(t) => t.read()?.substitute(variables),
             Constrained::Unknown { .. } => Ok(self.clone()),
@@ -480,7 +467,7 @@ pub type Ref<T> = Arc<RwLock<T>>;
 //
 #[derive(Clone)]
 pub struct SType {
-    pub variables: BTreeSet<String>,
+    pub variables: BTreeSet<Ident>,
     pub body: CRef<MType>,
 }
 
@@ -492,7 +479,7 @@ impl SType {
         })
     }
 
-    pub fn new_poly(body: CRef<MType>, variables: BTreeSet<String>) -> CRef<SType> {
+    pub fn new_poly(body: CRef<MType>, variables: BTreeSet<Ident>) -> CRef<SType> {
         mkcref(SType { variables, body })
     }
 }
@@ -544,8 +531,8 @@ impl SchemaInstance {
 
 pub type Value = crate::types::Value;
 
-pub type Params<TypeRef> = BTreeMap<String, TypedExpr<TypeRef>>;
-pub type UnboundPaths = BTreeSet<Vec<String>>;
+pub type Params<TypeRef> = BTreeMap<Ident, TypedExpr<TypeRef>>;
+pub type UnboundPaths = BTreeSet<Vec<Ident>>;
 
 #[derive(Clone)]
 pub enum SQLBody {
@@ -566,11 +553,11 @@ impl SQLBody {
                         top: None,
                         projection: vec![sqlast::SelectItem::ExprWithAlias {
                             expr: sqlast::Expr::Function(sqlast::Function {
-                                name: sqlast::ObjectName(vec![ident("array_agg".to_string())]),
+                                name: sqlast::ObjectName(vec![sqlast::Ident::new("array_agg")]),
                                 args: vec![sqlast::FunctionArg::Unnamed(
-                                    sqlast::FunctionArgExpr::Expr(sqlast::Expr::Identifier(ident(
-                                        "subquery".to_string(),
-                                    ))),
+                                    sqlast::FunctionArgExpr::Expr(sqlast::Expr::Identifier(
+                                        sqlast::Ident::new("subquery"),
+                                    )),
                                 )],
                                 over: None,
                                 distinct: false,
@@ -581,7 +568,7 @@ impl SQLBody {
                         into: None,
                         from: vec![sqlast::TableWithJoins {
                             relation: self.as_table(Some(sqlast::TableAlias {
-                                name: ident("subquery".to_string()),
+                                name: sqlast::Ident::new("subquery"),
                                 columns: Vec::new(),
                             })),
                             joins: Vec::new(),
@@ -624,7 +611,7 @@ impl SQLBody {
                 // called "value".  This extra subquery splats the fields of "value" onto the top
                 // level of the query.
                 vec![sqlast::SelectItem::QualifiedWildcard(
-                    sqlast::ObjectName(vec![ident("value".to_string())]),
+                    sqlast::ObjectName(vec![sqlast::Ident::new("value".to_string())]),
                     WildcardAdditionalOptions {
                         opt_exclude: None,
                         opt_except: None,
@@ -638,7 +625,9 @@ impl SQLBody {
                     //
                     relation: SQLBody::Query(select_no_from(
                         sqlast::Expr::Function(sqlast::Function {
-                            name: sqlast::ObjectName(vec![ident("unnest".to_string())]),
+                            name: sqlast::ObjectName(vec![sqlast::Ident::new(
+                                "unnest".to_string(),
+                            )]),
                             args: vec![sqlast::FunctionArg::Unnamed(
                                 sqlast::FunctionArgExpr::Expr(expr.clone()),
                             )],
@@ -646,10 +635,10 @@ impl SQLBody {
                             distinct: false,
                             special: false,
                         }),
-                        Some(ident("value".to_string())),
+                        Some(sqlast::Ident::new("value".to_string())),
                     ))
                     .as_table(Some(sqlast::TableAlias {
-                        name: ident("unnest".to_string()),
+                        name: sqlast::Ident::new("unnest".to_string()),
                         columns: Vec::new(),
                     })),
                     joins: Vec::new(),
@@ -701,7 +690,7 @@ where
     pub fn from_unbound(sqlpath: &Vec<sqlast::Located<sqlast::Ident>>) -> SQLNames<TypeRef> {
         SQLNames {
             params: BTreeMap::new(),
-            unbound: BTreeSet::from([sqlpath.iter().map(|i| i.value.clone()).collect()]),
+            unbound: BTreeSet::from([sqlpath.iter().map(|i| i.value.clone().into()).collect()]),
         }
     }
 
@@ -800,8 +789,8 @@ where
     SchemaEntry(STypedExpr),
     Fn(FnExpr<TypeRef>),
     FnCall(FnCallExpr<TypeRef>),
-    NativeFn(String),
-    ContextRef(String),
+    NativeFn(Ident),
+    ContextRef(Ident),
     Unknown,
 }
 
@@ -955,7 +944,7 @@ pub struct Decl {
     pub public: bool,
     pub extern_: bool,
     pub fn_arg: bool,
-    pub name: Ident,
+    pub name: Located<Ident>,
     pub value: SchemaEntry,
 }
 
@@ -997,8 +986,6 @@ pub struct ImportedSchema {
     pub schema: SchemaRef,
 }
 
-pub type Located<T> = sqlast::Located<T, SourceLocation>;
-
 impl<T> Pretty for Located<T> {
     fn pretty(&self) -> String {
         self.location().pretty()
@@ -1010,9 +997,9 @@ pub struct Schema {
     pub file: String,
     pub folder: Option<String>,
     pub parent_scope: Option<Ref<Schema>>,
-    pub externs: BTreeMap<String, CRef<MType>>,
-    pub decls: BTreeMap<String, Located<Decl>>,
-    pub imports: BTreeMap<Vec<String>, Ref<ImportedSchema>>,
+    pub externs: BTreeMap<Ident, CRef<MType>>,
+    pub decls: BTreeMap<Ident, Located<Decl>>,
+    pub imports: BTreeMap<Vec<Ident>, Ref<ImportedSchema>>,
     pub exprs: Vec<Located<CTypedExpr>>,
 }
 

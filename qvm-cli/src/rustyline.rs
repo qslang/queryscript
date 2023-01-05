@@ -34,8 +34,8 @@ impl Completer for RustylineHelper {
             suggestions
                 .into_iter()
                 .map(|s| Pair {
-                    display: s.clone(),
-                    replacement: s,
+                    display: s.to_string(),
+                    replacement: s.to_string(),
                 })
                 .collect(),
         ))

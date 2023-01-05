@@ -48,7 +48,7 @@ const DEFAULT_SETTINGS: Settings = Settings {
 
 #[derive(Debug, Clone)]
 pub struct Symbol {
-    pub name: ast::Ident,
+    pub name: ast::Located<ast::Ident>,
     pub kind: compile::SymbolKind,
     pub type_: CRef<SType>,
     pub def: SourceLocation,
@@ -73,7 +73,7 @@ impl Document {
             .range_mut((Unbounded, Included(&loc)))
             .last()
             .map(|r| {
-                if let Some(range) = r.1.name.loc.range() {
+                if let Some(range) = r.1.name.location().range() {
                     if range.end >= loc {
                         return Some(r.1);
                     }
@@ -384,13 +384,13 @@ impl LanguageServer for Backend {
             items: suggestions
                 .iter()
                 .map(|s| CompletionItem {
-                    label: s.clone(),
+                    label: s.to_string(),
                     text_edit: Some(CompletionTextEdit::Edit(TextEdit {
                         range: Range {
                             start: suggestion_loc.normalize(),
                             end: position,
                         },
-                        new_text: s.clone(),
+                        new_text: s.to_string(),
                     })),
                     ..Default::default()
                 })
@@ -425,7 +425,7 @@ impl LanguageServer for Backend {
                 }));
             }
 
-            Ok(symbol.name.loc.range().map(|range| Hover {
+            Ok(symbol.name.location().range().map(|range| Hover {
                 contents: HoverContents::Array(contents),
                 range: Some(range.normalize()),
             }))
@@ -544,7 +544,7 @@ impl LanguageServer for Backend {
             let command = Command {
                 title: "Preview".to_string(),
                 command: "runExpr.start".to_string(),
-                arguments: Some(vec![json!(uri), json!(RunExprType::Expr(name.clone()))]),
+                arguments: Some(vec![json!(uri), json!(RunExprType::Expr(name.to_string()))]),
             };
 
             lenses.push(CodeLens {
@@ -557,7 +557,7 @@ impl LanguageServer for Backend {
     }
 }
 
-fn get_fn_type(type_: CRef<SType>) -> Result<Option<(MFnType, BTreeSet<String>)>> {
+fn get_fn_type(type_: CRef<SType>) -> Result<Option<(MFnType, BTreeSet<ast::Ident>)>> {
     if type_.is_known().map_err(log_internal_error)? {
         let type_ = type_.must().map_err(log_internal_error)?;
         let type_ = type_.read().map_err(log_internal_error)?;
@@ -583,7 +583,7 @@ fn format_symbol(symbol: &Symbol) -> Result<String> {
         compile::SymbolKind::Value => {
             if let Some((mfn, variables)) = get_fn_type(symbol.type_.clone())? {
                 parts.push("fn ".into());
-                parts.push(symbol.name.value.clone());
+                parts.push(symbol.name.get().into());
                 if variables.len() > 0 {
                     parts.push("<".into());
                     for (i, v) in variables.into_iter().enumerate() {
@@ -591,14 +591,14 @@ fn format_symbol(symbol: &Symbol) -> Result<String> {
                             parts.push(", ".into());
                         }
 
-                        parts.push(v);
+                        parts.push(v.to_string());
                     }
                     parts.push(">".into());
                 }
                 parts.push("(\n".into());
                 for f in mfn.args.into_iter() {
                     parts.push("\t".into());
-                    parts.push(f.name.into());
+                    parts.push(f.name.to_string());
                     parts.push(" ".into());
                     parts.push(format!("{:#?}", f.type_).replace("\n", "\n\t"));
                     parts.push(",\n".into());
@@ -607,19 +607,19 @@ fn format_symbol(symbol: &Symbol) -> Result<String> {
                 parts.push(format!("{:#?}", mfn.ret));
             } else {
                 parts.push("let ".into());
-                parts.push(symbol.name.value.clone());
+                parts.push(symbol.name.get().into());
                 parts.push(" ".into());
                 parts.push(format!("{:#?}", symbol.type_));
             }
         }
         compile::SymbolKind::Type => {
             parts.push("type ".into());
-            parts.push(symbol.name.value.clone());
+            parts.push(symbol.name.get().into());
             parts.push(" ".into());
             parts.push(format!("{:#?}", symbol.type_));
         }
         compile::SymbolKind::Argument | compile::SymbolKind::Field => {
-            parts.push(symbol.name.value.clone());
+            parts.push(symbol.name.get().into());
             parts.push(" ".into());
             parts.push(format!("{:#?}", symbol.type_));
         }
@@ -714,13 +714,13 @@ impl compile::OnSymbol for SymbolRecorder {
     }
     fn on_symbol(
         &mut self,
-        name: ast::Ident,
+        name: ast::Located<ast::Ident>,
         kind: compile::SymbolKind,
         type_: CRef<SType>,
         def: SourceLocation,
         decl: Option<Decl>,
     ) -> compile::Result<()> {
-        let file = name.loc.file();
+        let file = name.location().file();
         if let Some(file) = file {
             let uri = match Url::from_file_path(FilePath::new(&file)) {
                 Ok(uri) => uri,
@@ -846,7 +846,7 @@ impl Backend {
                     continue;
                 }
                 let start = range.unwrap().start.clone();
-                let ref_loc = symbol.name.loc.clone();
+                let ref_loc = symbol.name.location().clone();
 
                 match references.entry(uri.unwrap()) {
                     Entry::Vacant(e) => {
@@ -866,7 +866,12 @@ impl Backend {
                 let mut document = document.lock().await;
                 document.symbols = symbols
                     .into_iter()
-                    .filter_map(|s| s.name.loc.range().map(|r| (r.start.clone(), s.clone())))
+                    .filter_map(|s| {
+                        s.name
+                            .location()
+                            .range()
+                            .map(|r| (r.start.clone(), s.clone()))
+                    })
                     .collect();
             }
         }
@@ -944,7 +949,7 @@ impl Backend {
                 RunExprType::Expr(expr) => {
                     let decl = &schema
                         .decls
-                        .get(&expr)
+                        .get(&expr.clone().into())
                         .ok_or_else(|| {
                             Error::invalid_params(format!(
                                 "Invalid expression (not found): {}",

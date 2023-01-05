@@ -267,7 +267,7 @@ impl FnValue for LoadFileFn {
     fn fn_type(&self) -> types::FnType {
         types::FnType {
             args: vec![types::Field {
-                name: "file".to_string(),
+                name: "file".into(),
                 type_: types::Type::Atom(types::AtomicType::Utf8),
                 nullable: false,
             }],

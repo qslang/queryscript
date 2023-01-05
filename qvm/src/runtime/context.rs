@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use super::sql::{new_engine, SQLEngine, SQLEngineType};
+use crate::ast::Ident;
 use crate::compile::schema;
 use crate::types::Value;
 
@@ -9,7 +10,7 @@ use crate::types::Value;
 #[derive(Clone, Debug)]
 pub struct Context {
     pub folder: Option<String>,
-    pub values: BTreeMap<String, Value>,
+    pub values: BTreeMap<Ident, Value>,
     pub sql_engine: Arc<dyn SQLEngine>,
     pub disable_typechecks: bool,
 }

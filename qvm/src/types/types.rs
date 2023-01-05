@@ -7,6 +7,7 @@ use sqlparser::ast::{
 };
 
 use super::error::{ts_fail, ts_unimplemented, Result};
+use crate::ast::Ident;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
@@ -35,13 +36,13 @@ pub struct FnType {
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Field {
-    pub name: String,
+    pub name: Ident,
     pub type_: Type,
     pub nullable: bool,
 }
 
 impl Field {
-    pub fn new_nullable(name: String, type_: Type) -> Field {
+    pub fn new_nullable(name: Ident, type_: Type) -> Field {
         Field {
             name,
             type_,
@@ -463,7 +464,7 @@ pub fn try_arrow_fields_to_fields(fields: &Vec<ArrowField>) -> Result<Vec<Field>
         .iter()
         .map(|f| {
             Ok(Field {
-                name: f.name().clone(),
+                name: f.name().clone().into(),
                 type_: f.data_type().try_into()?,
                 nullable: f.is_nullable(),
             })
@@ -489,7 +490,7 @@ impl TryInto<ArrowField> for &Field {
     type Error = super::error::TypesystemError;
     fn try_into(self) -> Result<ArrowField> {
         Ok(ArrowField::new(
-            &self.name,
+            self.name.as_str(),
             (&self.type_).try_into()?,
             self.nullable,
         ))

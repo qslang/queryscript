@@ -12,8 +12,8 @@ use crate::compile::util::InsertionOrderMap;
 
 #[derive(Clone, Debug)]
 pub struct FieldMatch {
-    pub relation: Ident,
-    pub field: Ident,
+    pub relation: Located<Ident>,
+    pub field: Located<Ident>,
     pub type_: Option<CRef<MType>>,
 }
 impl Constrainable for FieldMatch {}
@@ -21,7 +21,7 @@ impl Constrainable for FieldMatch {}
 #[derive(Clone, Debug)]
 pub struct SQLScope {
     parent: Option<Ref<SQLScope>>,
-    relations: BTreeMap<String, (CRef<MType>, SourceLocation)>,
+    relations: BTreeMap<Ident, (CRef<MType>, SourceLocation)>,
 }
 
 impl SQLScope {
@@ -36,7 +36,7 @@ impl SQLScope {
         Self::new(None)
     }
 
-    pub fn get_relation(&self, name: &str) -> Result<Option<(CRef<MType>, SourceLocation)>> {
+    pub fn get_relation(&self, name: &Ident) -> Result<Option<(CRef<MType>, SourceLocation)>> {
         Ok(match self.relations.get(name) {
             Some((t, loc)) => Some((t.clone(), loc.clone())),
             None => match &self.parent {
@@ -50,7 +50,7 @@ impl SQLScope {
         &self,
         compiler: Compiler,
         loc: &SourceLocation,
-        relation: Option<String>,
+        relation: Option<Ident>,
     ) -> Result<CRef<AvailableReferences>> {
         let crelations = combine_crefs(
             self.relations
@@ -69,7 +69,7 @@ impl SQLScope {
                                     .iter()
                                     .map(|field| FieldMatch {
                                         relation: n.clone(),
-                                        field: field.name.clone(),
+                                        field: Ident::without_location(field.name.clone()),
                                         type_: Some(field.type_.clone()),
                                     })
                                     .collect(),
@@ -103,15 +103,15 @@ impl SQLScope {
                 None => AvailableReferences::empty(),
             };
 
-            let mut references = InsertionOrderMap::<String, FieldMatch>::new();
+            let mut references = InsertionOrderMap::<Ident, FieldMatch>::new();
             let relations = crelations.await?;
 
             for a in &*relations.read()? {
                 for b in &*a.read()? {
-                    if let Some(existing) = references.get_mut(&b.field.value) {
+                    if let Some(existing) = references.get_mut(&b.field) {
                         existing.type_ = None;
                     } else {
-                        references.insert(b.field.value.clone(), b.clone());
+                        references.insert(b.field.get().clone(), b.clone());
                     }
                 }
             }
@@ -139,8 +139,8 @@ impl SQLScope {
                             for field in fields.iter() {
                                 names
                                     .unbound
-                                    .remove(&vec![relation.clone(), field.name.value.clone()]);
-                                names.unbound.remove(&vec![field.name.value.clone()]);
+                                    .remove(&vec![relation.clone(), field.name.clone()]);
+                                names.unbound.remove(&vec![field.name.clone()]);
                             }
                         }
                         _ => {}
@@ -153,7 +153,7 @@ impl SQLScope {
 
     pub fn add_reference(
         &mut self,
-        name: &String,
+        name: &Ident,
         loc: &SourceLocation,
         type_: CRef<MType>,
     ) -> Result<()> {
@@ -176,7 +176,7 @@ impl Constrainable for SQLScope {}
 
 #[derive(Debug, Clone)]
 pub struct AvailableReferences {
-    scopes: Vec<InsertionOrderMap<String, FieldMatch>>,
+    scopes: Vec<InsertionOrderMap<Ident, FieldMatch>>,
 }
 
 impl AvailableReferences {
@@ -184,11 +184,11 @@ impl AvailableReferences {
         AvailableReferences { scopes: vec![] }
     }
 
-    fn push(&mut self, scope: InsertionOrderMap<String, FieldMatch>) {
+    fn push(&mut self, scope: InsertionOrderMap<Ident, FieldMatch>) {
         self.scopes.push(scope);
     }
 
-    pub fn get(&self, name: &String) -> Option<&FieldMatch> {
+    pub fn get(&self, name: &Ident) -> Option<&FieldMatch> {
         for scope in self.scopes.iter().rev() {
             if let Some(field) = scope.get(name) {
                 return Some(field);
@@ -197,7 +197,7 @@ impl AvailableReferences {
         None
     }
 
-    pub fn current_level(&self) -> Option<&InsertionOrderMap<String, FieldMatch>> {
+    pub fn current_level(&self) -> Option<&InsertionOrderMap<Ident, FieldMatch>> {
         self.scopes.last()
     }
 }

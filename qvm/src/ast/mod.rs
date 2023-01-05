@@ -1,5 +1,6 @@
 use colored::*;
 pub use sqlparser::ast as sqlast;
+use std::borrow::Cow;
 
 pub use sqlparser::{location::Range, tokenizer::Location};
 
@@ -133,45 +134,160 @@ impl Pretty for SourceLocation {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Ident {
-    pub loc: SourceLocation,
-    pub value: String,
+pub type Located<T> = sqlast::Located<T, SourceLocation>;
+
+// Look into https://crates.io/crates/unicase
+#[derive(Clone)]
+pub struct Ident(String);
+
+impl AsRef<String> for Ident {
+    fn as_ref(&self) -> &String {
+        &self.0
+    }
+}
+
+impl AsRef<str> for Ident {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Into<String> for &Ident {
+    fn into(self) -> String {
+        self.0.clone()
+    }
+}
+
+impl AsRef<std::ffi::OsStr> for Ident {
+    fn as_ref(&self) -> &std::ffi::OsStr {
+        self.0.as_ref()
+    }
+}
+
+impl Into<sqlast::Ident> for &Ident {
+    fn into(self) -> sqlast::Ident {
+        sqlast::Ident::with_quote_unlocated('\"', self.0.clone())
+    }
+}
+
+impl From<String> for Ident {
+    fn from(s: String) -> Ident {
+        Ident(s)
+    }
+}
+
+impl From<&str> for Ident {
+    fn from(s: &str) -> Ident {
+        Ident(s.to_string())
+    }
+}
+
+fn quoted_string_to_ident(value: Cow<String>, quote_style: &Option<char>) -> Ident {
+    Ident(match quote_style {
+        Some(_) => value.into_owned(),
+        None => value.into_owned(), // .to_lowercase(),
+    })
+}
+
+impl From<crate::parser::Word> for Ident {
+    fn from(w: crate::parser::Word) -> Ident {
+        quoted_string_to_ident(Cow::Owned(w.value), &w.quote_style)
+    }
+}
+
+impl From<sqlast::Ident> for Ident {
+    fn from(w: sqlast::Ident) -> Ident {
+        quoted_string_to_ident(Cow::Owned(w.value), &w.quote_style)
+    }
+}
+
+impl From<&sqlast::Ident> for Ident {
+    fn from(w: &sqlast::Ident) -> Ident {
+        quoted_string_to_ident(Cow::Borrowed(&w.value), &w.quote_style)
+    }
+}
+
+impl std::fmt::Display for Ident {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::fmt::Debug for Ident {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+}
+
+// NOTE: This is where we can implement case-insensitivity
+impl PartialOrd for Ident {
+    fn partial_cmp(&self, other: &Ident) -> Option<std::cmp::Ordering> {
+        self.0.to_lowercase().partial_cmp(&other.0.to_lowercase())
+    }
+}
+
+impl Ord for Ident {
+    fn cmp(&self, other: &Ident) -> std::cmp::Ordering {
+        self.0.to_lowercase().cmp(&other.0.to_lowercase())
+    }
+}
+
+impl PartialEq for Ident {
+    fn eq(&self, other: &Ident) -> bool {
+        self.0.to_lowercase() == other.0.to_lowercase()
+    }
+}
+impl Eq for Ident {}
+
+impl std::hash::Hash for Ident {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.to_lowercase().hash(state)
+    }
 }
 
 impl Ident {
-    pub fn with_location(loc: SourceLocation, value: String) -> Ident {
-        Ident { loc, value }
+    pub fn with_location<T: Into<Ident>>(loc: SourceLocation, value: T) -> Located<Ident> {
+        Located::new(value.into(), loc)
     }
 
-    pub fn without_location(value: String) -> Ident {
-        Ident {
-            loc: SourceLocation::Unknown,
-            value,
-        }
+    pub fn without_location<T: Into<Ident>>(value: T) -> Located<Ident> {
+        Located::new(value.into(), SourceLocation::Unknown)
     }
 
-    pub fn to_sqlident(&self) -> sqlast::Located<sqlast::Ident> {
+    pub fn from_sqlident(loc: SourceLocation, ident: sqlast::Ident) -> Located<Ident> {
+        Ident::with_location(loc, Into::<Ident>::into(ident))
+    }
+
+    pub fn replace_location(&self, loc: SourceLocation) -> Located<Ident> {
+        Ident::with_location(loc, self.clone())
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.as_ref()
+    }
+
+    // XXX Remove
+    pub fn to_lowercase(&self) -> Ident {
+        Ident(self.0.to_lowercase())
+    }
+}
+
+pub trait ToSqlIdent {
+    fn to_sqlident(&self) -> sqlast::Located<sqlast::Ident>;
+}
+
+impl ToSqlIdent for Located<Ident> {
+    fn to_sqlident(&self) -> sqlast::Located<sqlast::Ident> {
         sqlast::Located::new(
-            sqlast::Ident::with_quote_unlocated('\"', self.value.clone()),
-            self.loc
+            self.get().into(),
+            self.location()
                 .range()
                 .map(|Range { start, end }| sqlast::Range { start, end }),
         )
     }
-
-    pub fn replace_location(&self, loc: SourceLocation) -> Ident {
-        Ident::with_location(loc, self.value.clone())
-    }
 }
 
-impl Into<String> for Ident {
-    fn into(self) -> String {
-        self.value
-    }
-}
-
-pub type Path = Vec<Ident>;
+pub type Path = Vec<Located<Ident>>;
 
 impl Pretty for Path {
     fn pretty(&self) -> String {
@@ -183,13 +299,13 @@ impl Pretty for Path {
     }
 }
 
-pub trait ToStrings {
-    fn to_strings(&self) -> Vec<String>;
+pub trait ToIdents {
+    fn to_idents(&self) -> Vec<Ident>;
 }
 
-impl ToStrings for Path {
-    fn to_strings(&self) -> Vec<String> {
-        self.iter().map(|i| i.value.clone()).collect()
+impl ToIdents for Path {
+    fn to_idents(&self) -> Vec<Ident> {
+        self.iter().map(|i| i.get().clone()).collect()
     }
 }
 
@@ -201,12 +317,9 @@ impl ToPath for Vec<sqlast::Located<sqlast::Ident>> {
     fn to_path(&self, file: String) -> Path {
         self.iter()
             .map(|p| {
-                Ident::with_location(
+                Ident::from_sqlident(
                     SourceLocation::from_file_range(file.clone(), p.location().clone()),
-                    match p.quote_style {
-                        Some(_) => p.value.clone(), // Preserve the case if the string is quoted
-                        None => p.value.to_lowercase(),
-                    },
+                    p.get().clone(),
                 )
             })
             .collect()
@@ -221,13 +334,13 @@ impl ToPath for sqlast::ObjectName {
 
 #[derive(Clone, Debug)]
 pub struct NameAndType {
-    pub name: Ident,
+    pub name: Located<Ident>,
     pub def: Type,
 }
 
 #[derive(Clone, Debug)]
 pub struct NameAndExpr {
-    pub name: Ident,
+    pub name: Located<Ident>,
     pub expr: Option<Expr>,
 }
 
@@ -244,7 +357,7 @@ pub enum TypeBody {
     List(Box<Type>),
     Exclude {
         inner: Box<Type>,
-        excluded: Vec<Ident>,
+        excluded: Vec<Located<Ident>>,
     },
     Generic(Path, Vec<Type>),
 }
@@ -258,7 +371,7 @@ pub struct Type {
 
 #[derive(Clone, Debug)]
 pub struct FnArg {
-    pub name: Ident,
+    pub name: Located<Ident>,
     pub type_: Type,
 }
 
@@ -302,19 +415,19 @@ pub enum StmtBody {
     },
     TypeDef(NameAndType),
     FnDef {
-        name: Ident,
-        generics: Vec<Ident>,
+        name: Located<Ident>,
+        generics: Vec<Located<Ident>>,
         args: Vec<FnArg>,
         ret: Option<Type>,
         body: FnBody,
     },
     Let {
-        name: Ident,
+        name: Located<Ident>,
         type_: Option<Type>,
         body: Expr,
     },
     Extern {
-        name: Ident,
+        name: Located<Ident>,
         type_: Type,
     },
 }

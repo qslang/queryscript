@@ -205,19 +205,19 @@ impl CompileError {
     }
 }
 
-pub fn path_location(path: &Vec<ast::Ident>) -> ErrorLocation {
+pub fn path_location(path: &Vec<ast::Located<ast::Ident>>) -> ErrorLocation {
     if path.len() == 0 {
         return ErrorLocation::Unknown;
     }
 
-    let (start_file, start) = match &path[0].loc {
+    let (start_file, start) = match path[0].location() {
         ErrorLocation::Range(file, range) => (file, Some(&range.start)),
         ErrorLocation::Single(file, _) => (file, None),
         ErrorLocation::File(file) => (file, None),
         ErrorLocation::Unknown => return ErrorLocation::Unknown,
     };
 
-    let (end_file, end) = match &path[path.len() - 1].loc {
+    let (end_file, end) = match &path[path.len() - 1].location() {
         ErrorLocation::Range(file, range) => (file, Some(&range.end)),
         ErrorLocation::Single(file, _) => (file, None),
         ErrorLocation::File(file) => (file, None),

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::compile::compile::ExternalTypeOrder;
 use crate::compile::error::*;
-use crate::compile::generics::ExternalType;
+use crate::compile::generics::{ExternalType, GenericConstructor};
 use crate::compile::inference::mkcref;
 use crate::compile::schema::*;
 use crate::compile::sql::compile_reference;
@@ -62,20 +62,17 @@ impl SQLVisitor for NameCollector {
                 // Because we're not compiling, we can't rely on our own parameter logic to string together
                 // references to the same expression. Furthermore, our parameters are strings (not paths), so
                 // we can really only do this replacement for single-length paths.
-                let name = if ast_path.len() == 1 {
-                    ast_path[0].value.clone()
+                let name = if path.len() == 1 {
+                    path[0].clone()
                 } else {
                     return None;
                 };
-                self.names.borrow_mut().params.insert(name.clone(), expr);
+                self.names
+                    .borrow_mut()
+                    .params
+                    .insert(name.get().into(), expr);
 
-                Some(vec![sqlast::Located::new(
-                    sqlast::Ident {
-                        value: name,
-                        quote_style: None,
-                    },
-                    path[0].location().clone(),
-                )])
+                Some(vec![name])
             }
             Err(_) => None,
         }

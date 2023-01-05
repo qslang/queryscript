@@ -7,7 +7,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
-use crate::ast::{SourceLocation, ToPath};
 use crate::compile::coerce::CoerceOp;
 use crate::compile::compile::{
     coerce, lookup_path, resolve_global_atom, typecheck_path, Compiler, SymbolKind,
@@ -19,6 +18,10 @@ use crate::compile::inline::*;
 use crate::compile::schema::*;
 use crate::compile::scope::{AvailableReferences, SQLScope};
 use crate::types::{number::parse_numeric_type, AtomicType, Type};
+use crate::{
+    ast,
+    ast::{SourceLocation, ToPath, ToSqlIdent},
+};
 
 use super::compile::ExternalTypeOrder;
 
@@ -35,14 +38,14 @@ pub struct TypedSQL {
 //
 #[derive(Clone, Debug)]
 pub struct CTypedNameAndSQL {
-    pub name: Ident,
+    pub name: Located<Ident>,
     pub type_: CRef<MType>,
     pub sql: CRef<SQL<CRef<MType>>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct NameAndSQL {
-    pub name: Ident,
+    pub name: Located<Ident>,
     pub sql: Arc<SQL<CRef<MType>>>,
 }
 
@@ -90,20 +93,8 @@ pub fn get_rowtype(compiler: Compiler, relation: CRef<MType>) -> Result<CRef<MTy
     })?)
 }
 
-pub fn valid_ident(value: &str) -> bool {
-    // TODO: This should use the tokenizer instead
-    //
-    value.len() > 0
-        && value.chars().all(char::is_alphanumeric)
-        && !value.chars().next().unwrap().is_numeric()
-}
-
-pub fn ident(value: String) -> sqlast::Located<sqlast::Ident> {
-    if valid_ident(value.as_str()) {
-        sqlast::Ident::new(value)
-    } else {
-        sqlast::Ident::with_quote('"', value)
-    }
+pub fn param_ident(value: String) -> sqlast::Located<sqlast::Ident> {
+    sqlast::Ident::new(value)
 }
 
 pub fn select_from(
@@ -185,6 +176,7 @@ pub fn compile_sqlreference(
     sqlpath: &Vec<sqlast::Located<sqlast::Ident>>,
 ) -> Result<CTypedExpr> {
     let file = schema.read()?.file.clone();
+    let sqlpath = sqlpath.clone();
     let path = sqlpath.to_path(file.clone());
     let loc = path_location(&path);
     match sqlpath.len() {
@@ -195,12 +187,13 @@ pub fn compile_sqlreference(
             ));
         }
         1 => {
-            let name = sqlpath[0].value.clone();
+            let name = sqlpath[0].clone();
+            let name_ident: Ident = path[0].get().clone();
 
-            if let Some((relation_type, relation_loc)) = scope.read()?.get_relation(&name)? {
+            if let Some((relation_type, relation_loc)) = scope.read()?.get_relation(&name_ident)? {
                 let type_ = get_rowtype(compiler.clone(), relation_type)?;
                 let expr = mkcref(Expr::SQL(Arc::new(SQL {
-                    names: CSQLNames::from_unbound(sqlpath),
+                    names: CSQLNames::from_unbound(&sqlpath),
                     body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
                 })));
                 compiler.run_on_symbol(
@@ -219,15 +212,14 @@ pub fn compile_sqlreference(
 
                 let tse = available.then({
                     move |available: Ref<AvailableReferences>| {
-                        if let Some(fm) = available.read()?.get(&name) {
+                        if let Some(fm) = available.read()?.get(&name_ident) {
                             if let Some(type_) = fm.type_.clone() {
-                                let sqlpath =
-                                    vec![ident(fm.relation.value.clone()), ident(name.clone())];
+                                let sqlpath = vec![fm.relation.to_sqlident(), name.clone()];
                                 compiler.run_on_symbol(
                                     path[0].clone(),
                                     SymbolKind::Field,
                                     mkcref(type_.clone().into()),
-                                    fm.relation.loc.clone(),
+                                    fm.relation.location().clone(),
                                     None,
                                 )?;
                                 Ok(mkcref(TypedExpr {
@@ -240,9 +232,9 @@ pub fn compile_sqlreference(
                                     }))),
                                 }))
                             } else {
-                                Err(CompileError::duplicate_entry(vec![Ident::with_location(
+                                Err(CompileError::duplicate_entry(vec![Ident::from_sqlident(
                                     loc.clone(),
-                                    name.clone(),
+                                    name.get().clone(),
                                 )]))
                             }
                         } else {
@@ -264,7 +256,7 @@ pub fn compile_sqlreference(
             }
         }
         2 => {
-            let relation_name = sqlpath[0].value.clone();
+            let relation_name = sqlpath[0].get().into();
 
             // If the relation can't be found in the scope, just fall through
             //
@@ -303,7 +295,7 @@ pub fn compile_sqlreference(
 pub fn compile_reference(
     compiler: Compiler,
     schema: Ref<Schema>,
-    path: &Vec<Ident>,
+    path: &ast::Path,
 ) -> Result<TypedExpr<CRef<MType>>> {
     let (_, decl, remainder) = lookup_path(
         compiler.clone(),
@@ -339,7 +331,7 @@ pub fn compile_reference(
             let (placeholder_name, placeholder) =
                 intern_nonsql_placeholder(compiler.clone(), "param", &top_level_ref)?;
             let mut full_name = vec![placeholder_name.clone()];
-            full_name.extend(remainder.clone().into_iter().map(|n| ident(n.value)));
+            full_name.extend(remainder.clone().into_iter().map(|n| n.to_sqlident()));
 
             let expr = Arc::new(Expr::SQL(Arc::new(SQL {
                 names: placeholder.names.clone(),
@@ -360,7 +352,7 @@ pub fn compile_reference(
             ident.clone(),
             kind,
             stype.clone(),
-            decl.name.loc.clone(),
+            decl.name.location().clone(),
             Some(decl.get().clone()),
         )?;
     }
@@ -396,13 +388,15 @@ pub fn intern_nonsql_placeholder(
             let placeholder_name = "@".to_string() + compiler.next_placeholder(kind)?.as_str();
 
             Ok((
-                ident(placeholder_name.clone()),
+                param_ident(placeholder_name.clone()),
                 Arc::new(SQL {
                     names: SQLNames {
-                        params: Params::from([(placeholder_name.clone(), expr.clone())]),
+                        params: Params::from([(placeholder_name.clone().into(), expr.clone())]),
                         unbound: BTreeSet::new(),
                     },
-                    body: SQLBody::Expr(sqlast::Expr::Identifier(ident(placeholder_name.clone()))),
+                    body: SQLBody::Expr(sqlast::Expr::Identifier(param_ident(
+                        placeholder_name.clone(),
+                    ))),
                 }),
             ))
         }
@@ -509,7 +503,7 @@ pub fn compile_relation(
             list_type.unify(&relation.type_)?;
 
             let name = match alias {
-                Some(a) => a.name.value.clone(),
+                Some(a) => a.name.clone(),
                 None => name
                     .0
                     .last()
@@ -519,7 +513,6 @@ pub fn compile_relation(
                             "Table name must have at least one part",
                         )
                     })?
-                    .value
                     .clone(),
             };
 
@@ -527,18 +520,20 @@ pub fn compile_relation(
 
             scope
                 .write()?
-                .add_reference(&name, &loc, relation.type_.clone())?;
+                .add_reference(&name.get().into(), &loc, relation.type_.clone())?;
 
             let placeholder_name =
                 QVM_NAMESPACE.to_string() + compiler.next_placeholder("rel")?.as_str();
-            from_names.params.insert(placeholder_name.clone(), relation);
+            from_names
+                .params
+                .insert(placeholder_name.clone().into(), relation);
 
             cwrap((
                 from_names,
                 sqlast::TableFactor::Table {
-                    name: sqlast::ObjectName(vec![ident(placeholder_name)]),
+                    name: sqlast::ObjectName(vec![param_ident(placeholder_name)]),
                     alias: Some(sqlast::TableAlias {
-                        name: ident(name.to_string()),
+                        name: name.clone(),
                         columns: Vec::new(),
                     }),
                     args: None,
@@ -576,17 +571,17 @@ pub fn compile_relation(
                         .as_ref()
                         .map(|r| SourceLocation::from_file_range(file.clone(), Some(r.clone())))
                         .unwrap_or(loc.clone()),
-                    a.name.value.clone(),
+                    a.name.clone(),
                 ),
                 None => (
                     loc.clone(),
-                    compiler.next_placeholder("anonymous_subquery")?,
+                    param_ident(compiler.next_placeholder("anonymous_subquery")?),
                 ),
             };
 
             scope
                 .write()?
-                .add_reference(&name, &loc, subquery.type_.clone())?;
+                .add_reference(&name.get().into(), &loc, subquery.type_.clone())?;
 
             let loc = loc.clone();
             let lateral = *lateral;
@@ -608,7 +603,7 @@ pub fn compile_relation(
                         lateral,
                         subquery: sql_query,
                         alias: Some(sqlast::TableAlias {
-                            name: ident(name.to_string()),
+                            name: name.clone(),
                             columns: Vec::new(),
                         }),
                     },
@@ -905,14 +900,14 @@ pub fn compile_select(
                     // If the expression is an identifier, then simply forward it along. In the case of a
                     // compound identifier (e.g. table.foo), SQL semantics are to pick the last element (i.e.
                     // foo) as the new name.
-                    let name = match expr {
-                        sqlast::Expr::Identifier(i) => i.value.clone(),
+                    let name: Ident = match expr {
+                        sqlast::Expr::Identifier(i) => i.get().into(),
                         sqlast::Expr::CompoundIdentifier(c) => c
                             .last()
                             .expect("Compound identifiers should have at least one element")
-                            .value
-                            .clone(),
-                        _ => format!("{}", expr),
+                            .get()
+                            .into(),
+                        _ => format!("{}", expr).into(),
                     };
                     let compiled =
                         compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
@@ -923,11 +918,10 @@ pub fn compile_select(
                     }])
                 }
                 sqlast::SelectItem::ExprWithAlias { expr, alias } => {
-                    let name = alias.value.clone();
                     let compiled =
                         compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
                     mkcref(vec![CTypedNameAndSQL {
-                        name: Ident::with_location(loc.clone(), name),
+                        name: Ident::from_sqlident(loc.clone(), alias.get().clone()),
                         type_: compiled.type_,
                         sql: compiled.sql,
                     }])
@@ -947,7 +941,7 @@ pub fn compile_select(
                                 ));
                             }
 
-                            Some(qualifier.0[0].value.clone())
+                            Some(qualifier.0[0].get().into())
                         }
                         _ => unreachable!(),
                     };
@@ -968,10 +962,7 @@ pub fn compile_select(
                                             .replace_location(loc.clone())]))
                                     }
                                 };
-                                let sqlpath = vec![
-                                    ident(m.relation.value.clone()),
-                                    ident(m.field.value.clone()),
-                                ];
+                                let sqlpath = vec![m.relation.to_sqlident(), m.field.to_sqlident()];
                                 ret.push(CTypedNameAndSQL {
                                     name: m.field.clone(),
                                     type_,
@@ -1000,7 +991,7 @@ pub fn compile_select(
             for a in &*exprs.read()? {
                 for b in &*a.read()? {
                     fields.push(MField {
-                        name: b.name.clone(),
+                        name: b.name.get().clone(),
                         type_: b.type_.clone(),
                         nullable: true,
                     });
@@ -1042,7 +1033,7 @@ pub fn compile_select(
             for sqlexpr in &*proj_exprs {
                 names.extend(sqlexpr.sql.names.clone());
                 projection.push(sqlast::SelectItem::ExprWithAlias {
-                    alias: ident(sqlexpr.name.value.clone()),
+                    alias: sqlexpr.name.to_sqlident(),
                     expr: sqlexpr.sql.body.as_expr(),
                 });
             }
@@ -1786,12 +1777,12 @@ pub fn compile_sqlexpr(
                     ))
                 }
             };
-            let mut compiled_args: BTreeMap<String, CTypedNameAndExpr> = BTreeMap::new();
+            let mut compiled_args: BTreeMap<Ident, CTypedNameAndExpr> = BTreeMap::new();
             let mut pos: usize = 0;
             for arg in args {
                 let (name, expr) = match arg {
                     sqlast::FunctionArg::Named { name, arg } => {
-                        (Ident::with_location(loc.clone(), name.value.clone()), arg)
+                        (Ident::with_location(loc.clone(), name.get()), arg)
                     }
                     sqlast::FunctionArg::Unnamed(arg) => {
                         if pos >= fn_type.args.len() {
@@ -1801,7 +1792,10 @@ pub fn compile_sqlexpr(
                             )]));
                         }
                         pos += 1;
-                        (fn_type.args[pos - 1].name.clone(), arg)
+                        (
+                            Ident::with_location(loc.clone(), fn_type.args[pos - 1].name.clone()),
+                            arg,
+                        )
                     }
                 };
 
@@ -1809,32 +1803,37 @@ pub fn compile_sqlexpr(
                     sqlast::FunctionArgExpr::Expr(e) => Cow::Borrowed(e),
                     sqlast::FunctionArgExpr::Wildcard
                     | sqlast::FunctionArgExpr::QualifiedWildcard(_) => {
+                        // TODO: This is a really clunky way of checking for wildcards. Ideally we do not need to produce
+                        // the count function name each time.
+                        //
                         // Wildcards (qualified or not) are only supported for certain functions
                         // (count as far as we know, and potentially others).
-                        match func_name.as_slice().first().map(|s| s.value.as_str()) {
-                            Some("count") => Cow::Owned(sqlast::Expr::Value(
-                                sqlast::Value::Number("1".to_string(), false),
-                            )),
-                            _ => {
-                                return Err(CompileError::unimplemented(
-                                    loc.clone(),
-                                    &format!("wildcard arguments for {:?} function", name),
-                                ))
-                            }
+                        if func_name.as_slice().first().map(|s| s.get())
+                            == Some(Into::<Ident>::into("count")).as_ref()
+                        {
+                            Cow::Owned(sqlast::Expr::Value(sqlast::Value::Number(
+                                "1".to_string(),
+                                false,
+                            )))
+                        } else {
+                            return Err(CompileError::unimplemented(
+                                loc.clone(),
+                                &format!("wildcard arguments for {:?} function", func_name),
+                            ));
                         }
                     }
                 };
 
-                if compiled_args.get(&name.value).is_some() {
+                if compiled_args.get(&name).is_some() {
                     return Err(CompileError::duplicate_entry(vec![name]));
                 }
 
                 let compiled_arg =
                     compile_sqlexpr(compiler.clone(), schema.clone(), scope.clone(), loc, &expr)?;
                 compiled_args.insert(
-                    name.value.clone(),
+                    name.get().clone(),
                     CTypedNameAndExpr {
-                        name: name.clone(),
+                        name: name.get().clone(),
                         type_: compiled_arg.type_,
                         expr: compiled_arg.expr,
                     },
@@ -1843,7 +1842,7 @@ pub fn compile_sqlexpr(
 
             let mut arg_exprs = Vec::new();
             for arg in &fn_type.args {
-                if let Some(compiled_arg) = compiled_args.get_mut(&arg.name.value) {
+                if let Some(compiled_arg) = compiled_args.get_mut(&arg.name) {
                     arg.type_.unify(&compiled_arg.type_)?;
                     arg_exprs.push(compiled_arg.clone());
                 } else if arg.nullable {
@@ -1856,7 +1855,9 @@ pub fn compile_sqlexpr(
                         expr: NULL.expr.clone(),
                     });
                 } else {
-                    return Err(CompileError::missing_arg(vec![arg.name.clone()]));
+                    return Err(CompileError::missing_arg(vec![Ident::without_location(
+                        arg.name.clone(),
+                    )]));
                 }
             }
 
@@ -1895,14 +1896,16 @@ pub fn compile_sqlexpr(
                             .read()?
                         {
                             MType::Generic(generic) => {
-                                if let Some(generic) = as_generic::<ExternalType>(generic.as_ref())
+                                if let Some(generic) =
+                                    as_generic::<ExternalType>(generic.get().as_ref())
                                 {
                                     let inner_type = generic.inner_type();
 
                                     // TODO We should place some metadata on the function, or have a whitelist
                                     // of functions that work this way, but for now, we simply special case the
                                     // load function
-                                    if func_name.as_slice()[0].value != "load" {
+                                    if func_name.as_slice()[0].get() != &Into::<Ident>::into("load")
+                                    {
                                         return Err(CompileError::unimplemented(
                                             loc.clone(),
                                             "external types for non-load functions",
@@ -1984,7 +1987,7 @@ pub fn compile_sqlexpr(
                                 let fn_body = inline_context(
                                     fn_body,
                                     args.iter()
-                                        .map(|a| (a.name.value.clone(), a.expr.clone()))
+                                        .map(|a| (a.name.clone(), a.expr.clone()))
                                         .collect(),
                                 )
                                 .await?;
@@ -2008,7 +2011,8 @@ pub fn compile_sqlexpr(
                                         &arg.read()?.to_typed_expr(),
                                     )?;
                                     args.push(sqlast::FunctionArg::Named {
-                                        name: arg.read()?.name.to_sqlident(),
+                                        name: Ident::without_location(arg.read()?.name.clone())
+                                            .to_sqlident(),
                                         arg: sqlast::FunctionArgExpr::Expr(sql.body.as_expr()),
                                     });
                                     names.extend(sql.names.clone());

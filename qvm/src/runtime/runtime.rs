@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 use crate::compile::schema;
 use crate::{
+    ast::Ident,
     types,
     types::{Arc, Value},
 };
@@ -27,7 +28,7 @@ pub fn build() -> Result<Runtime> {
 pub async fn eval_params<'a>(
     ctx: &'a Context,
     params: &'a schema::Params<TypeRef>,
-) -> Result<HashMap<String, SQLParam>> {
+) -> Result<HashMap<Ident, SQLParam>> {
     let mut param_values = HashMap::new();
     for (name, param) in params {
         let value = eval(ctx, param).await?;

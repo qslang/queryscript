@@ -10,14 +10,14 @@ use cxx::{CxxString, CxxVector};
 use duckdb::{ffi as cffi, Connection};
 use sqlparser::ast as sqlast;
 
-use crate::types::{arrow::ArrowRecordBatchRelation, Relation, Value};
-
+use crate::ast::Ident;
 use crate::runtime::{
     error::{rt_unimplemented, Result},
     normalize::Normalizer,
     sql::{SQLEngine, SQLParam},
     Context,
 };
+use crate::types::{arrow::ArrowRecordBatchRelation, Relation, Value};
 
 #[cxx::bridge]
 pub mod cppffi {
@@ -45,7 +45,7 @@ pub struct DuckDBNormalizer {
 }
 
 impl DuckDBNormalizer {
-    pub fn new(params: &[String]) -> DuckDBNormalizer {
+    pub fn new(params: &[Ident]) -> DuckDBNormalizer {
         DuckDBNormalizer {
             params: params
                 .iter()
@@ -85,7 +85,7 @@ impl DuckDBEngine {
     fn eval_in_place(
         &self,
         query: &sqlast::Query,
-        params: HashMap<String, SQLParam>,
+        params: HashMap<Ident, SQLParam>,
     ) -> Result<Arc<dyn Relation>> {
         // The code below works by (globally within the connection) installing a replacement
         // scan that accesses the relations referenced in the query parameters. I did some light
@@ -110,7 +110,7 @@ impl DuckDBEngine {
             match &param.value {
                 Value::Relation(r) => {
                     relations.insert(
-                        key.clone(),
+                        key.into(),
                         ArrowRelation {
                             relation: r.clone(),
                             schema: Arc::new((&param.type_).try_into()?),
@@ -177,7 +177,7 @@ impl SQLEngine for DuckDBEngine {
         &self,
         ctx: &Context,
         query: &sqlast::Query,
-        params: HashMap<String, SQLParam>,
+        params: HashMap<Ident, SQLParam>,
     ) -> Result<Arc<dyn Relation>> {
         // We call block_in_place here because DuckDB may perform computationally expensive work,
         // and it's not hooked into the async coroutines that the runtime uses (and therefore cannot

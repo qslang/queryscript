@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub struct ContextInliner {
-    context: BTreeMap<String, Arc<Expr<CRef<MType>>>>,
+    context: BTreeMap<Ident, Arc<Expr<CRef<MType>>>>,
 }
 
 impl SQLVisitor for ContextInliner {}
@@ -32,29 +32,31 @@ impl Visitor<CRef<MType>> for ContextInliner {
 
 pub async fn inline_context(
     expr: Arc<Expr<CRef<MType>>>,
-    context: BTreeMap<String, Arc<Expr<CRef<MType>>>>,
+    context: BTreeMap<Ident, Arc<Expr<CRef<MType>>>>,
 ) -> Result<Arc<Expr<CRef<MType>>>> {
     let visitor = ContextInliner { context };
     Ok(Arc::new(expr.visit(&visitor).await?))
 }
 
 pub struct ParamInliner {
-    context: BTreeMap<String, SQLBody>,
+    context: BTreeMap<Ident, SQLBody>,
 }
 
 impl SQLVisitor for ParamInliner {
     fn visit_sqlexpr(&self, expr: &sqlast::Expr) -> Option<sqlast::Expr> {
         let ident = match expr {
-            sqlast::Expr::Identifier(x) => x.value.clone(),
+            sqlast::Expr::Identifier(x) => x.clone(),
             sqlast::Expr::CompoundIdentifier(v) => {
                 if v.len() != 1 {
                     return None;
                 }
 
-                v[0].value.clone()
+                v[0].clone()
             }
             _ => return None,
-        };
+        }
+        .get()
+        .into();
 
         if let Some(e) = self.context.get(&ident) {
             Some(e.as_expr())
@@ -72,7 +74,7 @@ impl SQLVisitor for ParamInliner {
                     return None;
                 }
 
-                if let Some(e) = self.context.get(&name.0[0].value) {
+                if let Some(e) = self.context.get(&name.0[0].get().into()) {
                     Some(e.as_table(alias.clone()))
                 } else {
                     None

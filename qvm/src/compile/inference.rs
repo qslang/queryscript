@@ -1,15 +1,16 @@
-use crate::compile::coerce::CoerceOp;
-use crate::compile::error::*;
-use crate::compile::schema::{mkref, Ref};
-use crate::runtime;
 use snafu::prelude::*;
-
 use std::collections::BTreeMap;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+
+use crate::ast::Ident;
+use crate::compile::coerce::CoerceOp;
+use crate::compile::error::*;
+use crate::compile::schema::{mkref, Ref};
+use crate::runtime;
 
 pub trait Constrainable: Clone + fmt::Debug + Send + Sync {
     fn unify(&self, other: &Self) -> Result<()> {
@@ -57,7 +58,8 @@ where
 
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
-impl Constrainable for String {}
+impl Constrainable for String {} // XXX Remove?
+impl Constrainable for Ident {}
 impl<T> Constrainable for Vec<T> where T: Constrainable {}
 impl<K, V> Constrainable for BTreeMap<K, V>
 where
@@ -108,7 +110,7 @@ where
 {
     Known(Ref<T>),
     Unknown {
-        debug_names: Vec<String>,
+        debug_names: Vec<Ident>,
         error: Option<CompileError>,
         constraints: Vec<Ref<dyn Constraint<T>>>,
     },
@@ -152,7 +154,7 @@ impl<T: Constrainable> fmt::Debug for CRef<T> {
 impl<T: 'static + Constrainable> CRef<T> {
     pub fn new_unknown(debug_name: &str) -> CRef<T> {
         CRef(mkref(Constrained::Unknown {
-            debug_names: vec![debug_name.to_string()],
+            debug_names: vec![debug_name.to_string().into()],
             error: None,
             constraints: Vec::new(),
         }))
@@ -160,7 +162,7 @@ impl<T: 'static + Constrainable> CRef<T> {
 
     pub fn new_error(e: CompileError) -> CRef<T> {
         CRef(mkref(Constrained::Unknown {
-            debug_names: vec!["error".to_string()],
+            debug_names: vec!["error".to_string().into()],
             error: Some(e),
             constraints: Vec::new(),
         }))

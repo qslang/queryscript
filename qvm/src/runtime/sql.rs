@@ -2,6 +2,7 @@ use sqlparser::ast as sqlast;
 use std::{collections::HashMap, sync::Arc};
 
 use super::{error::Result, Context};
+use crate::ast::Ident;
 use crate::types::{Relation, Type, Value};
 
 use async_trait::async_trait;
@@ -16,19 +17,19 @@ pub trait SQLEngine: std::fmt::Debug + Send + Sync {
         &self,
         ctx: &Context,
         query: &sqlast::Query,
-        params: HashMap<String, SQLParam>,
+        params: HashMap<Ident, SQLParam>,
     ) -> Result<Arc<dyn Relation>>;
 }
 
 #[derive(Debug, Clone)]
 pub struct SQLParam {
-    pub name: String,
+    pub name: Ident,
     pub value: Value,
     pub type_: Type,
 }
 
 impl SQLParam {
-    pub fn new(name: String, value: Value, type_: &Type) -> SQLParam {
+    pub fn new(name: Ident, value: Value, type_: &Type) -> SQLParam {
         SQLParam {
             name,
             value,

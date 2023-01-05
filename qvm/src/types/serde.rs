@@ -79,3 +79,12 @@ impl Serialize for &dyn Record {
         map.end()
     }
 }
+
+impl Serialize for crate::ast::Ident {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.as_str().serialize(serializer)
+    }
+}

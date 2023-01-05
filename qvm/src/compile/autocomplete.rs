@@ -1,7 +1,7 @@
 use snafu::prelude::*;
 
 use crate::ast;
-use crate::ast::ToStrings;
+use crate::ast::ToIdents;
 use crate::compile;
 use crate::compile::schema;
 use crate::parser;
@@ -85,11 +85,11 @@ pub fn loc_to_pos(text: &str, loc: parser::Location) -> usize {
         - 1
 }
 
-fn parse_longest_path(texts: &Vec<String>) -> Vec<ast::Ident> {
+fn parse_longest_path(texts: &Vec<ast::Ident>) -> Vec<ast::Located<ast::Ident>> {
     texts
         .iter()
-        .fold::<Vec<ast::Ident>, _>(Vec::new(), |acc, item| {
-            let parsed = if item.is_empty() {
+        .fold::<Vec<ast::Located<ast::Ident>>, _>(Vec::new(), |acc, item| {
+            let parsed = if item.as_str().is_empty() {
                 Vec::new()
             } else {
                 match parser::parse_path("<repl>", item.as_str()) {
@@ -108,9 +108,9 @@ fn parse_longest_path(texts: &Vec<String>) -> Vec<ast::Ident> {
 fn get_imported_decls<F: FnMut(&schema::SchemaEntry) -> bool>(
     compiler: compile::Compiler,
     schema: schema::Ref<schema::Schema>,
-    path: &Vec<ast::Ident>,
+    path: &Vec<ast::Located<ast::Ident>>,
     mut f: F,
-) -> compile::Result<Vec<String>> {
+) -> compile::Result<Vec<ast::Ident>> {
     let (schema, _, remainder) = compile::lookup_path(compiler, schema.clone(), path, true, true)?;
     if remainder.len() > 0 {
         return Ok(Vec::new());
@@ -120,7 +120,7 @@ fn get_imported_decls<F: FnMut(&schema::SchemaEntry) -> bool>(
         .decls
         .iter()
         .filter_map(move |(k, v)| if f(&v.value) { Some(k.clone()) } else { None })
-        .collect::<Vec<String>>());
+        .collect::<Vec<ast::Ident>>());
 }
 
 fn get_schema_paths(
@@ -129,7 +129,7 @@ fn get_schema_paths(
 ) -> compile::Result<Vec<String>> {
     if let Some(folder) = schema.read()?.folder.clone() {
         let mut folder = Path::new(&folder).to_path_buf();
-        folder.extend(path.to_strings().iter());
+        folder.extend(path.iter().map(|s| s.to_string()));
         let files = read_dir(folder)?;
         let mut ret = Vec::new();
         for f in files {
@@ -156,8 +156,8 @@ fn get_schema_paths(
 fn get_record_fields(
     compiler: compile::Compiler,
     schema: schema::Ref<schema::Schema>,
-    path: &Vec<ast::Ident>,
-) -> compile::Result<Vec<String>> {
+    path: &ast::Path,
+) -> compile::Result<Vec<ast::Ident>> {
     let expr = compile::compile_reference(compiler.clone(), schema.clone(), path)?;
     let type_ = expr
         .type_
@@ -170,7 +170,7 @@ fn get_record_fields(
 
     match type_ {
         schema::MType::Record(fields) => {
-            return Ok(fields.iter().map(|f| f.name.value.clone()).collect());
+            return Ok(fields.iter().map(|f| f.name.clone()).collect());
         }
         _ => {}
     }
@@ -179,7 +179,7 @@ fn get_record_fields(
 }
 
 impl AutoCompleter {
-    pub fn auto_complete(&self, line: &str, pos: usize) -> (usize, Vec<String>) {
+    pub fn auto_complete(&self, line: &str, pos: usize) -> (usize, Vec<ast::Ident>) {
         (&mut *self.stats.borrow_mut()).tried += 1;
 
         let mut full = self.curr_buffer.borrow().clone();
@@ -211,7 +211,7 @@ impl AutoCompleter {
             return (0, Vec::new());
         }
 
-        let mut ident_types = BTreeMap::<char, Vec<String>>::new();
+        let mut ident_types = BTreeMap::<char, Vec<ast::Ident>>::new();
         for s in suggestions.clone() {
             match s {
                 parser::Token::Word(w) => {
@@ -225,7 +225,7 @@ impl AutoCompleter {
                     ident_types
                         .entry(style)
                         .or_insert_with(Vec::new)
-                        .push(w.value);
+                        .push(w.into());
                 }
                 _ => {}
             }
@@ -270,8 +270,8 @@ impl AutoCompleter {
             .get(&parser::AUTOCOMPLETE_SCHEMA)
             .map(parse_longest_path)
             .map_or(Vec::new(), |path| {
-                if let Ok(choices) = get_schema_paths(self.schema.clone(), &path) {
-                    return choices;
+                if let Ok(choices) = get_schema_paths(self.schema.clone(), &path.to_idents()) {
+                    return choices.into_iter().map(|s| s.into()).collect();
                 }
                 Vec::new()
             });
@@ -291,7 +291,8 @@ impl AutoCompleter {
         let all = vec![vars, types, schemas, keywords].concat();
         let filtered = all
             .into_iter()
-            .filter(|a| a.starts_with(partial.as_str()))
+            // TODO: This may need to be implemented to be case insensitive
+            .filter(|a| a.as_str().starts_with(partial.as_str()))
             .collect::<Vec<_>>();
 
         (&mut *self.stats.borrow_mut()).msg = format!(
