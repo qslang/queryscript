@@ -2130,6 +2130,112 @@ pub fn compile_sqlexpr(
 
             CTypedExpr { type_, expr }
         }
+        sqlast::Expr::ArrayAgg(sqlast::ArrayAgg {
+            distinct,
+            expr,
+            order_by,
+            limit,
+            within_group,
+        }) => {
+            let compiled_expr = compile_sqlarg(
+                compiler.clone(),
+                schema.clone(),
+                scope.clone(),
+                loc,
+                expr.as_ref(),
+            )?;
+
+            let ob = match order_by {
+                Some(order_by) => Some((
+                    // NOTE: Unlike the ORDER BY clause of a SELECT statement, numeric references
+                    // (e.g. ORDER BY 1) do not refer to the array_agg expression.
+                    compile_sqlarg(
+                        compiler.clone(),
+                        schema.clone(),
+                        scope.clone(),
+                        loc,
+                        &order_by.expr,
+                    )?,
+                    order_by.asc.clone(),
+                    order_by.nulls_first.clone(),
+                )),
+                None => None,
+            };
+
+            let limit = match limit {
+                Some(l) => Some(compile_sqlarg(
+                    compiler.clone(),
+                    schema.clone(),
+                    scope.clone(),
+                    loc,
+                    l,
+                )?),
+                None => None,
+            };
+
+            let distinct = *distinct;
+            let within_group = *within_group;
+
+            CTypedExpr {
+                type_: mkcref(MType::List(Located::new(
+                    compiled_expr.type_.clone(),
+                    loc.clone(),
+                ))),
+                expr: compiler.async_cref(async move {
+                    let mut names = CSQLNames::new();
+                    let expr = compiled_expr.sql.await?;
+
+                    let ob = match ob {
+                        Some((ob, asc, nulls_first)) => {
+                            let ob = ob.sql.await?;
+                            Some((ob, asc, nulls_first))
+                        }
+                        None => None,
+                    };
+
+                    let limit = match limit {
+                        Some(limit) => Some(limit.sql.await?),
+                        None => None,
+                    };
+
+                    let expr = expr.read()?;
+                    names.extend(expr.names.clone());
+
+                    let order_by = match ob {
+                        Some((ob, asc, nulls_first)) => {
+                            let ob = ob.read()?;
+                            names.extend(ob.names.clone());
+                            Some(Box::new(sqlast::OrderByExpr {
+                                expr: ob.body.as_expr(),
+                                asc,
+                                nulls_first,
+                            }))
+                        }
+                        None => None,
+                    };
+
+                    let limit = match limit {
+                        Some(limit) => {
+                            let limit = limit.read()?;
+                            names.extend(limit.names.clone());
+                            Some(Box::new(limit.body.as_expr()))
+                        }
+                        None => None,
+                    };
+
+                    Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                        names,
+                        body: SQLBody::Expr(sqlast::Expr::ArrayAgg(sqlast::ArrayAgg {
+                            distinct,
+                            expr: Box::new(expr.body.as_expr()),
+                            order_by,
+                            limit,
+                            within_group,
+                        })),
+                    }))))
+                })?,
+            }
+        }
         sqlast::Expr::CompoundIdentifier(sqlpath) => {
             compile_sqlreference(compiler.clone(), schema.clone(), scope.clone(), sqlpath)?
         }

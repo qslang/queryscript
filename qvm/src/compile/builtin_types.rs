@@ -58,7 +58,6 @@ fn max<R>(value R) -> R = sql;
 fn count<R>(value R) -> bigint = sql;
 fn sum<R>(value R) -> SumAgg<R> = sql;
 fn avg<R>(value R) -> double = sql;
-fn array_agg<R>(value R) -> [R] = sql;
 ";
 
 lazy_static! {
