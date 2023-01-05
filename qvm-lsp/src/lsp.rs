@@ -769,9 +769,26 @@ struct RunExprResult {
 
 impl Backend {
     async fn on_change(&self, uri: Url, text: String, version: Option<i32>) -> Result<()> {
-        // I'm not sure what the exact semantics are, but I know that on_change() gets sent before other requests
-        // (e.g. completion), and everything relies on having up-to-date text, so we do a blocking update here
-        // on the text before other requests can run.
+        // Update the text in `Document` syncronously, then kick off a compilation asynchronously.
+        // It's very important that setting the file contents happens as soon as possible and
+        // without yielding, so that nothing else has a chance to run before the text has been saved
+        // into the document.  This happens in particular when a new file is being opened, which
+        // causes multiple requests to get sent over the wire in rapid succession (e.g. `didOpen`
+        // followed by `codeLens`).  In this case, `codeLens` may fail if tokio interleaves the
+        // requests in any way, despite the fact that the client guarantees these requests are in
+        // the right order over the wire.
+        //
+        // NOTE(mandrews): This is still not technically correct, since tokio already had a chance
+        // to reorder the tasks (e.g. the `didOpen` and the `codeLens` above), especially in a
+        // multi-threaded runtime.  Even if the runtime were single-threaded, it could have happened
+        // before we got to this point, both when awaiting the call to this function as well as a
+        // couple of other awaits up the stack in tower_lsp.
+        //
+        // TODO(mandrews): There doesn't appear to be a way to fix the fundamental race condition
+        // within tower_lsp, so we'll either have to upstream a way to make certain handlers run
+        // synchronously in the network loop or we'll have to move to another LSP server utility
+        // (e.g. https://github.com/rust-lang/rust-analyzer/tree/master/lib/lsp-server)
+        //
         task::block_in_place({
             let uri = uri.clone();
             let text = text.clone();
