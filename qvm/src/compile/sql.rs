@@ -196,7 +196,7 @@ pub fn compile_sqlreference(
                     names: CSQLNames::from_unbound(&sqlpath),
                     body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
                 })));
-                compiler.run_on_symbol(
+                compiler.run_on_symbol::<ExprEntry>(
                     path[0].clone(),
                     SymbolKind::Field,
                     mkcref(type_.clone().into()),
@@ -215,7 +215,7 @@ pub fn compile_sqlreference(
                         if let Some(fm) = available.read()?.get(&name_ident) {
                             if let Some(type_) = fm.type_.clone() {
                                 let sqlpath = vec![fm.relation.to_sqlident(), name.clone()];
-                                compiler.run_on_symbol(
+                                compiler.run_on_symbol::<ExprEntry>(
                                     path[0].clone(),
                                     SymbolKind::Field,
                                     mkcref(type_.clone().into()),
@@ -269,7 +269,7 @@ pub fn compile_sqlreference(
                     names: CSQLNames::from_unbound(&sqlpath),
                     body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
                 })));
-                compiler.run_on_symbol(
+                compiler.run_on_symbol::<ExprEntry>(
                     path[1].clone(),
                     SymbolKind::Value,
                     mkcref(type_.clone().into()),
@@ -297,7 +297,7 @@ pub fn compile_reference(
     schema: Ref<Schema>,
     path: &ast::Path,
 ) -> Result<TypedExpr<CRef<MType>>> {
-    let (_, decl, remainder) = lookup_path(
+    let (_, decl, remainder) = lookup_path::<ExprEntry>(
         compiler.clone(),
         schema.clone(),
         &path,
@@ -309,10 +309,7 @@ pub fn compile_reference(
     let entry = decl.value.clone();
     let remainder_cpy = remainder.clone();
 
-    let expr = match &entry {
-        SchemaEntry::Expr(v) => v.clone(),
-        _ => return Err(CompileError::wrong_kind(path.clone(), "value", &decl)),
-    };
+    let expr = &decl.value;
     let type_ = expr
         .type_
         .then(|t: Ref<SType>| Ok(t.read()?.instantiate()?))?;
@@ -324,7 +321,7 @@ pub fn compile_reference(
     };
 
     let (stype, r) = match remainder.len() {
-        0 => (expr.type_, top_level_ref),
+        0 => (expr.type_.clone(), top_level_ref),
         _ => {
             // Turn the top level reference into a SQL placeholder, and return
             // a path accessing it
@@ -353,7 +350,7 @@ pub fn compile_reference(
             kind,
             stype.clone(),
             decl.name.location().clone(),
-            Some(decl.get().clone()),
+            Some(decl.clone()),
         )?;
     }
 

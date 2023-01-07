@@ -159,16 +159,11 @@ mod tests {
         );
 
         let mut decls = BTreeMap::<String, Box<dyn fmt::Debug>>::new();
-        for (name, decl) in &schema.read().unwrap().decls {
-            match &decl.value {
-                compile::schema::SchemaEntry::Type(t) => {
-                    decls.insert(format!("type {}", name), Box::new(t.clone()));
-                }
-                compile::schema::SchemaEntry::Expr(e) => {
-                    decls.insert(format!("let {}", name), Box::new(e.type_.clone()));
-                }
-                _ => {}
-            }
+        for (name, t) in &schema.read().unwrap().type_decls {
+            decls.insert(format!("type {}", name), Box::new(t.value.clone()));
+        }
+        for (name, e) in &schema.read().unwrap().expr_decls {
+            decls.insert(format!("let {}", name), Box::new(e.value.type_.clone()));
         }
 
         let mut exprs = Vec::new();

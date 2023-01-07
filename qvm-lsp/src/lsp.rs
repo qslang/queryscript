@@ -19,7 +19,7 @@ use qvm::{
     compile::{
         autocomplete::{loc_to_pos, pos_to_loc, AutoCompleter},
         error::CompileError,
-        schema::{CRef, Decl, MFnType, MType, SType, SchemaEntry},
+        schema::{CRef, Decl, ExprEntry, MFnType, MType, SType},
         Compiler, Schema, SchemaRef,
     },
     parser::{error::PrettyError, parse_schema},
@@ -52,7 +52,7 @@ pub struct Symbol {
     pub kind: compile::SymbolKind,
     pub type_: CRef<SType>,
     pub def: SourceLocation,
-    pub decl: Option<Decl>,
+    pub public: bool,
     pub references: BTreeSet<SourceLocation>,
 }
 
@@ -531,7 +531,7 @@ impl LanguageServer for Backend {
             });
         }
 
-        for (name, decl) in schema.read().map_err(log_internal_error)?.decls.iter() {
+        for (name, decl) in schema.read().map_err(log_internal_error)?.expr_decls.iter() {
             if !is_runnable_decl(&decl.value)? {
                 continue;
             }
@@ -574,9 +574,8 @@ fn get_fn_type(type_: CRef<SType>) -> Result<Option<(MFnType, BTreeSet<ast::Iden
 }
 
 fn format_symbol(symbol: &Symbol) -> Result<String> {
-    let is_public = symbol.decl.as_ref().map_or(false, |decl| decl.public);
     let mut parts = Vec::<String>::new();
-    if is_public {
+    if symbol.public {
         parts.push("export ".into());
     }
     match symbol.kind {
@@ -628,32 +627,20 @@ fn format_symbol(symbol: &Symbol) -> Result<String> {
     Ok(parts.join(""))
 }
 
-fn is_runnable_decl(decl: &SchemaEntry) -> Result<bool> {
-    Ok(match decl {
-        SchemaEntry::Schema(_) | SchemaEntry::Type(_) => false,
-        SchemaEntry::Expr(e) => match e.to_runtime_type() {
-            Ok(e) => match *(e.type_.read().map_err(log_internal_error)?) {
-                QVMType::Fn(_) => false,
-                _ => true,
-            },
-            Err(_) => false,
+fn is_runnable_decl(e: &ExprEntry) -> Result<bool> {
+    Ok(match e.to_runtime_type() {
+        Ok(e) => match *(e.type_.read().map_err(log_internal_error)?) {
+            QVMType::Fn(_) => false,
+            _ => true,
         },
+        Err(_) => false,
     })
 }
 
 fn get_runnable_expr_from_decl(
-    decl: &SchemaEntry,
+    expr: &ExprEntry,
 ) -> Result<qvm::compile::schema::TypedExpr<qvm::compile::schema::Ref<QVMType>>> {
-    let s_expr = match decl {
-        SchemaEntry::Expr(ref expr) => expr.clone(),
-        _ => {
-            return Err(Error::invalid_params(format!(
-                "Invalid expression (wrong kind of decl): {:?}",
-                decl
-            )))
-        }
-    };
-    Ok(s_expr.to_runtime_type().map_err(|e| {
+    Ok(expr.to_runtime_type().map_err(|e| {
         eprintln!("Failed to convert expression to runtime type: {:?}", e);
         Error::internal_error()
     })?)
@@ -673,7 +660,7 @@ fn find_expr_by_location(
         })?));
     }
 
-    if let Some((_name, decl)) = schema.decls.iter().find(|(_name, decl)| {
+    if let Some((_name, decl)) = schema.expr_decls.iter().find(|(_name, decl)| {
         let runnable = match is_runnable_decl(&decl.value) {
             Ok(b) => b,
             Err(e) => {
@@ -718,7 +705,7 @@ impl compile::OnSymbol for SymbolRecorder {
         kind: compile::SymbolKind,
         type_: CRef<SType>,
         def: SourceLocation,
-        decl: Option<Decl>,
+        public: bool,
     ) -> compile::Result<()> {
         let file = name.location().file();
         if let Some(file) = file {
@@ -732,7 +719,7 @@ impl compile::OnSymbol for SymbolRecorder {
                 kind,
                 type_,
                 def,
-                decl,
+                public,
                 references: BTreeSet::new(),
             };
             match self.symbols.entry(uri) {
@@ -948,7 +935,7 @@ impl Backend {
             match params.expr {
                 RunExprType::Expr(expr) => {
                     let decl = &schema
-                        .decls
+                        .expr_decls
                         .get(&expr.clone().into())
                         .ok_or_else(|| {
                             Error::invalid_params(format!(

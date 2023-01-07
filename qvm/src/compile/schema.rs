@@ -12,6 +12,7 @@ pub use crate::ast::Located;
 use crate::ast::SourceLocation;
 use crate::compile::{
     coerce::{coerce_types, CoerceOp},
+    compile::SymbolKind,
     error::*,
     generics::Generic,
     inference::{mkcref, Constrainable, Constrained},
@@ -918,7 +919,8 @@ impl Constrainable for STypedExpr {
     }
 }
 
-#[derive(Clone, Debug)]
+/*
+#[derive(clone, Debug)]
 pub enum SchemaEntry {
     Schema(ast::Path),
     Type(CRef<MType>),
@@ -934,18 +936,50 @@ impl SchemaEntry {
         }
     }
 }
+*/
 
 pub fn mkref<T>(t: T) -> Ref<T> {
     Arc::new(RwLock::new(t))
 }
 
+// XXX Clean this up
+pub trait Entry: Clone {
+    fn run_on_info(&self) -> Option<(SymbolKind, CRef<SType>)>;
+    fn is_schema_kind(&self) -> bool {
+        false
+    }
+}
+
+pub type SchemaEntry = ast::Path;
+pub type TypeEntry = CRef<MType>;
+pub type ExprEntry = STypedExpr;
+
+impl Entry for SchemaEntry {
+    fn run_on_info(&self) -> Option<(SymbolKind, CRef<SType>)> {
+        None
+    }
+    fn is_schema_kind(&self) -> bool {
+        true
+    }
+}
+impl Entry for TypeEntry {
+    fn run_on_info(&self) -> Option<(SymbolKind, CRef<SType>)> {
+        Some((SymbolKind::Type, SType::new_mono(self.clone())))
+    }
+}
+impl Entry for ExprEntry {
+    fn run_on_info(&self) -> Option<(SymbolKind, CRef<SType>)> {
+        Some((SymbolKind::Value, self.type_.clone()))
+    }
+}
+
 #[derive(Clone, Debug)]
-pub struct Decl {
+pub struct Decl<Entry: Clone> {
     pub public: bool,
     pub extern_: bool,
     pub fn_arg: bool,
     pub name: Located<Ident>,
-    pub value: SchemaEntry,
+    pub value: Entry,
 }
 
 #[derive(Clone, Debug)]
@@ -992,13 +1026,19 @@ impl<T> Pretty for Located<T> {
     }
 }
 
+pub type DeclMap<Entry> = BTreeMap<Ident, Located<Decl<Entry>>>;
+
 #[derive(Clone, Debug)]
 pub struct Schema {
     pub file: String,
     pub folder: Option<String>,
     pub parent_scope: Option<Ref<Schema>>,
     pub externs: BTreeMap<Ident, CRef<MType>>,
-    pub decls: BTreeMap<Ident, Located<Decl>>,
+
+    pub schema_decls: DeclMap<ast::Path>,
+    pub type_decls: DeclMap<CRef<MType>>,
+    pub expr_decls: DeclMap<STypedExpr>,
+
     pub imports: BTreeMap<Vec<Ident>, Ref<ImportedSchema>>,
     pub exprs: Vec<Located<CTypedExpr>>,
 }
@@ -1010,7 +1050,9 @@ impl Schema {
             folder,
             parent_scope: None,
             externs: BTreeMap::new(),
-            decls: BTreeMap::new(),
+            schema_decls: BTreeMap::new(),
+            type_decls: BTreeMap::new(),
+            expr_decls: BTreeMap::new(),
             imports: BTreeMap::new(),
             exprs: Vec::new(),
         })

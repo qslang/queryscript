@@ -86,7 +86,7 @@ pub trait OnSymbol {
         kind: SymbolKind,
         type_: CRef<SType>,
         def: SourceLocation,
-        decl: Option<Decl>,
+        is_public: bool,
     ) -> Result<()>;
 }
 
@@ -211,18 +211,24 @@ impl Compiler {
         Ok(on_symbol)
     }
 
-    pub fn run_on_symbol(
+    pub fn run_on_symbol<E: Entry>(
         &self,
         name: Located<Ident>,
         kind: SymbolKind,
         type_: CRef<SType>,
         def: SourceLocation,
-        decl: Option<Decl>,
+        decl: Option<Decl<E>>,
     ) -> Result<()> {
         let mut data = self.data.write()?;
         let on_symbol = &mut data.config.on_symbol;
         Ok(match on_symbol {
-            Some(f) => f.on_symbol(name.clone(), kind, type_, def, decl)?,
+            Some(f) => f.on_symbol(
+                name.clone(),
+                kind,
+                type_,
+                def,
+                decl.as_ref().map_or(false, |decl| decl.public),
+            )?,
             None => {}
         })
     }
@@ -556,7 +562,7 @@ pub fn lookup_schema(
 
     if let Some(ident) = path.last() {
         let file = imported.read()?.schema.read()?.file.clone();
-        compiler.run_on_symbol(
+        compiler.run_on_symbol::<SchemaEntry>(
             ident.clone(),
             SymbolKind::File,
             CRef::new_unknown("schema"),
@@ -568,42 +574,115 @@ pub fn lookup_schema(
     return Ok(imported);
 }
 
-pub fn lookup_path(
+// XXX merge this with Entry trait?
+pub trait DeclAccessor<E: Entry> {
+    fn get_map(&self) -> &DeclMap<E>;
+    fn kind(&self) -> &'static str;
+
+    fn get(&self, ident: &Ident) -> Option<&Located<Decl<E>>> {
+        self.get_map().get(ident)
+    }
+
+    fn get_and_check(
+        &self,
+        ident: &Ident,
+        check_visibility: bool,
+        full_path: &ast::Path,
+    ) -> Result<Option<&Located<Decl<E>>>> {
+        match self.get(ident) {
+            Some(decl) => {
+                if check_visibility && !decl.public {
+                    return Err(CompileError::wrong_kind(
+                        full_path.clone(),
+                        "public",
+                        self.kind(),
+                    ));
+                } else {
+                    Ok(Some(decl))
+                }
+            }
+            None => Ok(None),
+        }
+    }
+}
+
+impl DeclAccessor<SchemaEntry> for Schema {
+    fn get_map(&self) -> &DeclMap<ast::Path> {
+        &self.schema_decls
+    }
+
+    fn kind(&self) -> &'static str {
+        "schema"
+    }
+}
+
+impl DeclAccessor<TypeEntry> for Schema {
+    fn get_map(&self) -> &DeclMap<CRef<MType>> {
+        &self.type_decls
+    }
+
+    fn kind(&self) -> &'static str {
+        "type"
+    }
+}
+
+impl DeclAccessor<ExprEntry> for Schema {
+    fn get_map(&self) -> &DeclMap<STypedExpr> {
+        &self.expr_decls
+    }
+
+    fn kind(&self) -> &'static str {
+        "value"
+    }
+}
+
+// XXX We probably want to restore the error message
+pub fn lookup_path<E: Entry>(
     compiler: Compiler,
     schema: Ref<Schema>,
     path: &ast::Path,
     import_global: bool,
     resolve_last: bool,
-) -> Result<(Ref<Schema>, Option<Located<Decl>>, ast::Path)> {
+) -> Result<(Ref<Schema>, Option<Decl<E>>, ast::Path)>
+where
+    Schema: DeclAccessor<E>,
+{
     if path.len() == 0 {
         return Ok((schema, None, path.clone()));
     }
 
     let mut schema = schema;
     for (i, ident) in path.iter().enumerate() {
-        let new = match schema.read()?.decls.get(&ident) {
-            Some(decl) => {
-                if i > 0 && !decl.public {
-                    return Err(CompileError::wrong_kind(path.clone(), "public", decl));
-                }
-
-                if i == path.len() - 1 && !resolve_last {
-                    return Ok((schema.clone(), Some(decl.clone()), vec![]));
-                }
-
-                match &decl.value {
-                    SchemaEntry::Schema(imported) => {
-                        lookup_schema(compiler.clone(), schema.clone(), &imported)?
-                            .read()?
-                            .schema
-                            .clone()
-                    }
-                    _ => return Ok((schema.clone(), Some(decl.clone()), path[i + 1..].to_vec())),
-                }
+        let check_visibility = i > 0;
+        if let Some(decl) =
+            DeclAccessor::<E>::get_and_check(&*schema.read()?, &ident, check_visibility, path)?
+        {
+            // If this isn't a schema, or if it is a schema and we're on the last element and not planning to resolve
+            // the last element, then we can return. NOTE: if it is a schema, we'll do a second lookup below, which is
+            // slightly wasteful.
+            if !decl.value.is_schema_kind() || (i == path.len() - 1 && !resolve_last) {
+                return Ok((
+                    schema.clone(),
+                    Some(decl.get().clone()),
+                    path[i + 1..].to_vec(),
+                ));
             }
-            None => match &schema.read()?.parent_scope {
+        }
+
+        let new = if let Some(imported) = DeclAccessor::<ast::Path>::get_and_check(
+            &*schema.read()?,
+            &ident,
+            check_visibility,
+            path,
+        )? {
+            lookup_schema(compiler.clone(), schema.clone(), &imported.value)?
+                .read()?
+                .schema
+                .clone()
+        } else {
+            match &schema.read()?.parent_scope {
                 Some(parent) => {
-                    return lookup_path(
+                    return lookup_path::<E>(
                         compiler.clone(),
                         parent.clone(),
                         &path[i..].to_vec(),
@@ -613,7 +692,7 @@ pub fn lookup_path(
                 }
                 None => {
                     if import_global {
-                        return lookup_path(
+                        return lookup_path::<E>(
                             compiler.clone(),
                             compiler.builtins(),
                             &path[i..].to_vec(),
@@ -624,7 +703,7 @@ pub fn lookup_path(
                         return Ok((schema.clone(), None, path[i..].to_vec()));
                     }
                 }
-            },
+            }
         };
 
         schema = new;
@@ -647,7 +726,7 @@ pub fn resolve_type(
     );
     match &ast.body {
         ast::TypeBody::Reference(path) => {
-            let (_, decl, r) = lookup_path(
+            let (_, decl, r) = lookup_path::<CRef<MType>>(
                 compiler.clone(),
                 schema.clone(),
                 &path,
@@ -658,21 +737,17 @@ pub fn resolve_type(
                 return Err(CompileError::no_such_entry(r));
             }
             let decl = decl.ok_or_else(|| CompileError::no_such_entry(r))?;
-            let t = match &decl.value {
-                SchemaEntry::Type(t) => t.clone(),
-                _ => return Err(CompileError::wrong_kind(path.clone(), "type", &decl)),
-            };
             if let Some(ident) = path.last() {
                 compiler.run_on_symbol(
                     ident.clone(),
                     SymbolKind::Type,
-                    SType::new_mono(t.clone()),
+                    SType::new_mono(decl.value.clone()),
                     decl.name.location().clone(),
-                    Some(decl.get().clone()),
+                    Some(decl.clone()),
                 )?;
             }
 
-            Ok(t)
+            Ok(decl.value.clone())
         }
         ast::TypeBody::Struct(entries) => {
             let mut fields = Vec::new();
@@ -839,12 +914,8 @@ fn compile_expr(compiler: Compiler, schema: Ref<Schema>, expr: &ast::Expr) -> Re
     }
 }
 
-pub fn rebind_decl(_schema: SchemaInstance, decl: &Decl) -> Result<SchemaEntry> {
-    match &decl.value {
-        SchemaEntry::Schema(s) => Ok(SchemaEntry::Schema(s.clone())),
-        SchemaEntry::Type(t) => Ok(SchemaEntry::Type(t.clone())),
-        SchemaEntry::Expr(e) => Ok(SchemaEntry::Expr(e.clone())),
-    }
+pub fn rebind_decl<E: Entry>(_schema: SchemaInstance, decl: &Decl<E>) -> Result<E> {
+    Ok(decl.value.clone())
 }
 
 fn compile_schema_from_file(
@@ -922,6 +993,88 @@ fn declare_schema_entries(
     result
 }
 
+type Declaration<T> = (Located<Ident>, bool, T);
+
+fn import_all_decls<E: Entry>(
+    decls: &DeclMap<E>,
+    imported_schema: SchemaInstance,
+) -> Result<Vec<Declaration<E>>> {
+    let mut ret = Vec::new();
+    for (_, v) in decls.iter().filter(|(_, v)| v.public) {
+        ret.push((
+            v.name.clone(),
+            false, /* extern_ */
+            rebind_decl(imported_schema.clone(), &v)?,
+        ));
+    }
+    Ok(ret)
+}
+
+fn import_named_decl<E: Entry>(
+    compiler: Compiler,
+    imported: Ref<ImportedSchema>,
+    imported_schema: SchemaInstance,
+    item: &ast::Path,
+) -> Result<Declaration<E>>
+where
+    Schema: DeclAccessor<E>,
+{
+    let loc = path_location(item);
+    if item.len() != 1 {
+        return Err(CompileError::unimplemented(loc, "path imports"));
+    }
+
+    let (_, decl, r) = lookup_path::<E>(
+        compiler.clone(),
+        imported.read()?.schema.clone(),
+        &item,
+        false, /* import_global */
+        false, /* resolve_last */
+    )?;
+    if r.len() > 0 {
+        return Err(CompileError::no_such_entry(r.clone()));
+    }
+    let decl = decl.ok_or_else(|| CompileError::no_such_entry(r))?;
+
+    if let Some(ident) = item.last() {
+        run_on_decl(compiler.clone(), ident.clone(), &decl)?;
+    }
+
+    Ok((
+        item[0].clone(),
+        false, /* extern_ */
+        rebind_decl(imported_schema, &decl)?,
+    ))
+}
+
+fn add_decls<E: Entry>(
+    decls: &mut DeclMap<E>,
+    entries: Vec<Declaration<E>>,
+    loc: &SourceLocation,
+    stmt: &ast::Stmt,
+) -> Result<()> {
+    for (name, extern_, value) in &entries {
+        if decls.contains_key(name) {
+            return Err(CompileError::duplicate_entry(vec![name.clone()]));
+        }
+
+        decls.insert(
+            name.get().clone(),
+            Located::new(
+                Decl {
+                    public: stmt.export,
+                    extern_: *extern_,
+                    fn_arg: false,
+                    name: name.clone(),
+                    value: value.clone(),
+                },
+                loc.clone(),
+            ),
+        );
+    }
+    Ok(())
+}
+
 fn declare_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::Stmt) -> Result<()> {
     let loc = SourceLocation::Range(
         schema.read()?.file.clone(),
@@ -930,9 +1083,12 @@ fn declare_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
             end: stmt.end.clone(),
         },
     );
-    let entries: Vec<(Located<Ident>, bool, SchemaEntry)> = match &stmt.body {
-        ast::StmtBody::Noop | ast::StmtBody::Unparsed => Vec::new(),
-        ast::StmtBody::Expr(_) => Vec::new(),
+
+    let (mut schema_decls, mut type_decls, mut expr_decls) = (Vec::new(), Vec::new(), Vec::new());
+
+    match &stmt.body {
+        ast::StmtBody::Noop | ast::StmtBody::Unparsed => {}
+        ast::StmtBody::Expr(_) => {}
         ast::StmtBody::Import { path, list, .. } => {
             let imported = lookup_schema(compiler.clone(), schema.clone(), &path)?;
             if imported.read()?.args.is_some() {
@@ -1011,139 +1167,128 @@ fn declare_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
             //     }
             // };
 
-            let mut imports = Vec::new();
             match list {
                 ast::ImportList::None => {
-                    imports.push((
+                    schema_decls.push((
                         path.last().unwrap().clone(),
                         false, /* extern_ */
-                        SchemaEntry::Schema(path.clone()),
+                        path.clone(),
                     ));
                 }
                 ast::ImportList::Star => {
-                    for (_, v) in imported
-                        .read()?
-                        .schema
-                        .read()?
-                        .decls
-                        .iter()
-                        .filter(|(_, v)| v.public)
-                    {
-                        let imported_schema = SchemaInstance {
-                            schema: imported.read()?.schema.clone(),
-                            id: None,
-                        };
-                        imports.push((
-                            v.name.clone(),
-                            false, /* extern_ */
-                            rebind_decl(imported_schema, &v)?,
-                        ));
-                    }
+                    let imported_schema = SchemaInstance {
+                        schema: imported.read()?.schema.clone(),
+                        id: None,
+                    };
+                    schema_decls.extend(import_all_decls(
+                        &imported.read()?.schema.read()?.schema_decls,
+                        imported_schema.clone(),
+                    )?);
+                    type_decls.extend(import_all_decls(
+                        &imported.read()?.schema.read()?.type_decls,
+                        imported_schema.clone(),
+                    )?);
+                    expr_decls.extend(import_all_decls(
+                        &imported.read()?.schema.read()?.expr_decls,
+                        imported_schema.clone(),
+                    )?);
                 }
                 ast::ImportList::Items(items) => {
+                    let imported_schema = SchemaInstance {
+                        schema: schema.clone(),
+                        id: None,
+                    };
+
+                    let mut found = false;
+                    let mut err = None;
+
                     for item in items {
-                        let loc = path_location(item);
-                        if item.len() != 1 {
-                            return Err(CompileError::unimplemented(loc, "path imports"));
-                        }
-
-                        let (_, decl, r) = lookup_path(
+                        match import_named_decl::<SchemaEntry>(
                             compiler.clone(),
-                            imported.read()?.schema.clone(),
-                            &item,
-                            false, /* import_global */
-                            false, /* resolve_last */
-                        )?;
-                        if r.len() > 0 {
-                            return Err(CompileError::no_such_entry(r.clone()));
-                        }
-                        let decl = decl.ok_or_else(|| CompileError::no_such_entry(r))?;
-
-                        if let Some(ident) = item.last() {
-                            run_on_decl(compiler.clone(), ident.clone(), decl.get())?;
-                        }
-
-                        let imported_schema = SchemaInstance {
-                            schema: schema.clone(),
-                            id: None,
+                            imported.clone(),
+                            imported_schema.clone(),
+                            item,
+                        ) {
+                            Ok(decl) => {
+                                found = true;
+                                schema_decls.push(decl);
+                            }
+                            Err(e) => err = Some(e),
                         };
 
-                        imports.push((
-                            item[0].clone(),
-                            false, /* extern_ */
-                            rebind_decl(imported_schema, &decl)?,
-                        ));
+                        match import_named_decl::<TypeEntry>(
+                            compiler.clone(),
+                            imported.clone(),
+                            imported_schema.clone(),
+                            item,
+                        ) {
+                            Ok(decl) => {
+                                found = true;
+                                type_decls.push(decl);
+                            }
+                            Err(e) => err = Some(e),
+                        };
+
+                        match import_named_decl::<ExprEntry>(
+                            compiler.clone(),
+                            imported.clone(),
+                            imported_schema.clone(),
+                            item,
+                        ) {
+                            Ok(decl) => {
+                                found = true;
+                                expr_decls.push(decl);
+                            }
+                            Err(e) => err = Some(e),
+                        };
+
+                        if !found {
+                            return Err(err.unwrap());
+                        }
                     }
                 }
             }
-
-            imports
         }
-        ast::StmtBody::TypeDef(nt) => vec![(
+        ast::StmtBody::TypeDef(nt) => type_decls.push((
             nt.name.clone(),
             false, /* extern_ */
-            SchemaEntry::Type(MType::new_unknown(nt.name.get().as_ref())),
-        )],
-        ast::StmtBody::FnDef { name, .. } => {
-            vec![(
-                name.clone(),
-                false, /* extern_ */
-                SchemaEntry::Expr(STypedExpr::new_unknown(name.get().as_ref())),
-            )]
-        }
-        ast::StmtBody::Let { name, .. } => {
-            vec![(
-                name.clone(),
-                false, /* extern_ */
-                SchemaEntry::Expr(STypedExpr::new_unknown(name.get().as_ref())),
-            )]
-        }
-        ast::StmtBody::Extern { name, .. } => vec![(
+            MType::new_unknown(nt.name.get().as_ref()),
+        )),
+        ast::StmtBody::FnDef { name, .. } => expr_decls.push((
+            name.clone(),
+            false, /* extern_ */
+            STypedExpr::new_unknown(name.get().as_ref()),
+        )),
+        ast::StmtBody::Let { name, .. } => expr_decls.push((
+            name.clone(),
+            false, /* extern_ */
+            STypedExpr::new_unknown(name.get().as_ref()),
+        )),
+        ast::StmtBody::Extern { name, .. } => expr_decls.push((
             name.clone(),
             true, /* extern_ */
-            SchemaEntry::Expr(STypedExpr::new_unknown(name.get().as_ref())),
-        )],
+            STypedExpr::new_unknown(name.get().as_ref()),
+        )),
     };
 
-    for (name, extern_, value) in &entries {
-        if schema.read()?.decls.contains_key(name) {
-            return Err(CompileError::duplicate_entry(vec![name.clone()]));
-        }
+    add_decls(&mut schema.write()?.schema_decls, schema_decls, &loc, stmt)?;
+    add_decls(&mut schema.write()?.type_decls, type_decls, &loc, stmt)?;
+    add_decls(&mut schema.write()?.expr_decls, expr_decls, &loc, stmt)?;
 
-        schema.write()?.decls.insert(
-            name.get().clone(),
-            Located::new(
-                Decl {
-                    public: stmt.export,
-                    extern_: *extern_,
-                    fn_arg: false,
-                    name: name.clone(),
-                    value: value.clone(),
-                },
-                loc.clone(),
-            ),
-        );
-    }
     Ok(())
 }
 
-fn run_on_decl(compiler: Compiler, ident: Located<Ident>, decl: &Decl) -> Result<()> {
-    match &decl.value {
-        SchemaEntry::Expr(e) => compiler.run_on_symbol(
+fn run_on_decl<E: Entry>(compiler: Compiler, ident: Located<Ident>, decl: &Decl<E>) -> Result<()> {
+    let info = decl.value.run_on_info();
+    match info {
+        Some((kind, type_)) => compiler.run_on_symbol(
             ident,
-            SymbolKind::Value,
-            e.type_.clone(),
+            kind,
+            type_,
             decl.name.location().clone(),
             Some(decl.clone()),
         ),
-        SchemaEntry::Type(t) => compiler.run_on_symbol(
-            ident,
-            SymbolKind::Type,
-            SType::new_mono(t.clone()),
-            decl.name.location().clone(),
-            Some(decl.clone()),
-        ),
-        SchemaEntry::Schema(_) => Ok(()),
+        None => Ok(()),
     }
 }
 
@@ -1154,7 +1299,7 @@ pub fn unify_type_decl(
     type_: CRef<MType>,
 ) -> Result<()> {
     let s = schema.read()?;
-    let decl = s.decls.get(&name).ok_or_else(|| {
+    let decl = s.type_decls.get(&name).ok_or_else(|| {
         CompileError::internal(
             name.location().clone(),
             format!(
@@ -1164,20 +1309,8 @@ pub fn unify_type_decl(
             .as_str(),
         )
     })?;
-    match &decl.value {
-        SchemaEntry::Type(t) => t.unify(&type_)?,
-        _ => {
-            return Err(CompileError::internal(
-                name.location().clone(),
-                format!(
-                    "Expected {} to be a type declaration during reprocessing",
-                    name
-                )
-                .as_str(),
-            ))
-        }
-    }
 
+    decl.value.unify(&type_)?;
     run_on_decl(compiler.clone(), decl.name.clone(), decl.get())?;
 
     Ok(())
@@ -1190,30 +1323,18 @@ pub fn unify_expr_decl(
     value: &STypedExpr,
 ) -> Result<()> {
     let s = schema.read()?;
-    let decl = s.decls.get(&name).ok_or_else(|| {
+    let decl = s.expr_decls.get(&name).ok_or_else(|| {
         CompileError::internal(
             name.location().clone(),
             format!(
-                "Could not find type declaration {} during reprocessing",
+                "Could not find expr declaration {} during reprocessing",
                 name
             )
             .as_str(),
         )
     })?;
-    match &decl.value {
-        SchemaEntry::Expr(e) => e.unify(&value)?,
-        _ => {
-            return Err(CompileError::internal(
-                name.location().clone(),
-                format!(
-                    "Expected {} to be a type declaration during reprocessing",
-                    name
-                )
-                .as_str(),
-            ))
-        }
-    }
 
+    decl.value.unify(&value)?;
     run_on_decl(compiler.clone(), decl.name.clone(), decl.get())?;
 
     Ok(())
@@ -1267,7 +1388,7 @@ fn compile_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
 
             let mut unknowns = BTreeMap::new();
             for generic in generics {
-                inner_schema.write()?.decls.insert(
+                inner_schema.write()?.type_decls.insert(
                     generic.get().clone(),
                     Located::new(
                         Decl {
@@ -1275,7 +1396,7 @@ fn compile_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
                             extern_: true,
                             fn_arg: true,
                             name: generic.clone(),
-                            value: SchemaEntry::Type(mkcref(MType::Name(generic.clone()))),
+                            value: mkcref(MType::Name(generic.clone())),
                         },
                         loc.clone(),
                     ),
@@ -1284,13 +1405,13 @@ fn compile_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
             }
             let mut compiled_args = Vec::new();
             for arg in args {
-                if inner_schema.read()?.decls.get(&arg.name).is_some() {
+                if inner_schema.read()?.expr_decls.get(&arg.name).is_some() {
                     return Err(CompileError::duplicate_entry(vec![arg.name.clone()]));
                 }
                 let type_ = resolve_type(compiler.clone(), inner_schema.clone(), &arg.type_)?;
                 let substituted = type_.substitute(&unknowns)?;
                 let stype = SType::new_mono(substituted.clone());
-                inner_schema.write()?.decls.insert(
+                inner_schema.write()?.expr_decls.insert(
                     arg.name.get().clone(),
                     Located::new(
                         Decl {
@@ -1298,15 +1419,15 @@ fn compile_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
                             extern_: true,
                             fn_arg: true,
                             name: arg.name.clone(),
-                            value: SchemaEntry::Expr(STypedExpr {
+                            value: STypedExpr {
                                 type_: stype.clone(),
                                 expr: mkcref(Expr::ContextRef(arg.name.get().clone())),
-                            }),
+                            },
                         },
                         loc.clone(),
                     ),
                 );
-                compiler.run_on_symbol(
+                compiler.run_on_symbol::<ExprEntry>(
                     arg.name.clone(),
                     SymbolKind::Argument,
                     stype,
@@ -1433,22 +1554,14 @@ fn compile_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
 
 pub fn gather_schema_externs(schema: Ref<Schema>) -> Result<()> {
     let s = schema.read()?;
-    for (name, decl) in &s.decls {
+    for (name, decl) in &s.expr_decls {
         if decl.extern_ {
-            match &decl.value {
-                SchemaEntry::Expr(e) => {
-                    schema.write()?.externs.insert(
-                        name.clone(),
-                        e.type_.then(|t: Ref<SType>| Ok(t.read()?.instantiate()?))?,
-                    );
-                }
-                _ => {
-                    return Err(CompileError::unimplemented(
-                        SourceLocation::Unknown,
-                        "type externs",
-                    ))
-                }
-            }
+            let e = &decl.value;
+
+            schema.write()?.externs.insert(
+                name.clone(),
+                e.type_.then(|t: Ref<SType>| Ok(t.read()?.instantiate()?))?,
+            );
         }
     }
 

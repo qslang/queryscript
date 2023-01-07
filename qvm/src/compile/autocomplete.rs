@@ -3,6 +3,7 @@ use snafu::prelude::*;
 use crate::ast;
 use crate::ast::ToIdents;
 use crate::compile;
+use crate::compile::compile::DeclAccessor;
 use crate::compile::schema;
 use crate::parser;
 
@@ -105,21 +106,21 @@ fn parse_longest_path(texts: &Vec<ast::Ident>) -> Vec<ast::Located<ast::Ident>> 
         })
 }
 
-fn get_imported_decls<F: FnMut(&schema::SchemaEntry) -> bool>(
+fn get_imported_decls<E: schema::Entry>(
     compiler: compile::Compiler,
     schema: schema::Ref<schema::Schema>,
     path: &Vec<ast::Located<ast::Ident>>,
-    mut f: F,
-) -> compile::Result<Vec<ast::Ident>> {
+) -> compile::Result<Vec<ast::Ident>>
+where
+    schema::Schema: DeclAccessor<E>,
+{
     let (schema, _, remainder) = compile::lookup_path(compiler, schema.clone(), path, true, true)?;
     if remainder.len() > 0 {
         return Ok(Vec::new());
     }
-    return Ok(schema
-        .read()?
-        .decls
-        .iter()
-        .filter_map(move |(k, v)| if f(&v.value) { Some(k.clone()) } else { None })
+    return Ok(DeclAccessor::<E>::get_map(&*schema.read()?)
+        .keys()
+        .map(move |k| k.clone())
         .collect::<Vec<ast::Ident>>());
 }
 
@@ -235,11 +236,11 @@ impl AutoCompleter {
             .get(&parser::AUTOCOMPLETE_VARIABLE)
             .map(parse_longest_path)
             .map_or(Vec::new(), |path| {
-                if let Ok(choices) =
-                    get_imported_decls(self.compiler.clone(), self.schema.clone(), &path, |se| {
-                        matches!(se, schema::SchemaEntry::Expr(_))
-                    })
-                {
+                if let Ok(choices) = get_imported_decls::<schema::ExprEntry>(
+                    self.compiler.clone(),
+                    self.schema.clone(),
+                    &path,
+                ) {
                     return choices;
                 }
                 if let Ok(choices) =
@@ -255,15 +256,24 @@ impl AutoCompleter {
             .get(&parser::AUTOCOMPLETE_TYPE)
             .map(parse_longest_path)
             .map_or(Vec::new(), |path| {
-                if let Ok(choices) =
-                    get_imported_decls(self.compiler.clone(), self.schema.clone(), &path, |se| {
-                        matches!(se, schema::SchemaEntry::Type(_))
-                            || matches!(se, schema::SchemaEntry::Schema(_))
-                    })
-                {
-                    return choices;
+                let mut choices = Vec::new();
+
+                if let Ok(c) = get_imported_decls::<schema::SchemaEntry>(
+                    self.compiler.clone(),
+                    self.schema.clone(),
+                    &path,
+                ) {
+                    choices.extend(c);
                 }
-                Vec::new()
+                if let Ok(c) = get_imported_decls::<schema::TypeEntry>(
+                    self.compiler.clone(),
+                    self.schema.clone(),
+                    &path,
+                ) {
+                    choices.extend(c);
+                }
+
+                choices
             });
 
         let schemas = ident_types

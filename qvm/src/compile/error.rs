@@ -1,6 +1,6 @@
 use crate::ast;
 use crate::ast::{Pretty, Range};
-use crate::compile::schema::{Decl, MType};
+use crate::compile::schema::MType;
 use crate::error::MultiError;
 pub use crate::parser::error::ErrorLocation;
 use crate::parser::error::{ParserError, PrettyError};
@@ -84,12 +84,12 @@ pub enum CompileError {
         "Wrong kind: expected {} declaration at {}, found {}",
         expected.white().bold(),
         path.pretty(),
-        actual.value.kind().white().bold(),
+        kind.white().bold(),
     ))]
     WrongKind {
         path: ast::Path,
         expected: String,
-        actual: Decl,
+        kind: String,
         backtrace: Option<Backtrace>,
     },
 
@@ -147,11 +147,11 @@ impl CompileError {
         return DuplicateEntrySnafu { path }.build();
     }
 
-    pub fn wrong_kind(path: ast::Path, expected: &str, actual: &Decl) -> CompileError {
+    pub fn wrong_kind(path: ast::Path, expected: &str, kind: &str) -> CompileError {
         return WrongKindSnafu {
             path,
             expected,
-            actual: actual.clone(),
+            kind,
         }
         .build();
     }

@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use crate::ast::{Ident, SourceLocation};
 use crate::compile::compile::{Compiler, CompilerConfig};
 use crate::compile::inference::mkcref;
-use crate::compile::schema::{Decl, Located, MType, Ref, Schema, SchemaEntry};
+use crate::compile::schema::{Decl, Located, MType, Ref, Schema, TypeEntry};
 use crate::types::{AtomicType, TimeUnit};
 
 pub use crate::compile::generics::GLOBAL_GENERICS;
@@ -65,7 +65,7 @@ fn strptime<R>(value text, fmt string) -> timestamp = sql;
 
 lazy_static! {
     pub static ref BUILTIN_LOC: SourceLocation = SourceLocation::File("<builtin>".to_string());
-    static ref BUILTIN_TYPE_DECLS: Vec<(Ident, Decl)> = BUILTIN_TYPES
+    static ref BUILTIN_TYPE_DECLS: Vec<(Ident, Decl<TypeEntry>)> = BUILTIN_TYPES
         .iter()
         .map(|(name, type_)| (
             name.to_string().into(),
@@ -74,16 +74,16 @@ lazy_static! {
                 extern_: false,
                 fn_arg: false,
                 name: Ident::with_location(BUILTIN_LOC.clone(), name.to_string()),
-                value: SchemaEntry::Type(mkcref(MType::Atom(Located::new(
+                value: mkcref(MType::Atom(Located::new(
                     type_.clone(),
                     BUILTIN_LOC.clone()
-                )))),
+                ))),
             },
         ))
         .collect();
     pub static ref GLOBAL_SCHEMA: Ref<Schema> = {
         let ret = Schema::new("<builtin>".to_string(), None);
-        ret.write().unwrap().decls = BTreeMap::from_iter(
+        ret.write().unwrap().type_decls = BTreeMap::from_iter(
             BUILTIN_TYPE_DECLS
                 .clone()
                 .into_iter()
