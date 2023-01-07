@@ -3,7 +3,6 @@ use snafu::prelude::*;
 use crate::ast;
 use crate::ast::ToIdents;
 use crate::compile;
-use crate::compile::compile::DeclAccessor;
 use crate::compile::schema;
 use crate::parser;
 
@@ -110,15 +109,15 @@ fn get_imported_decls<E: schema::Entry>(
     compiler: compile::Compiler,
     schema: schema::Ref<schema::Schema>,
     path: &Vec<ast::Located<ast::Ident>>,
-) -> compile::Result<Vec<ast::Ident>>
-where
-    schema::Schema: DeclAccessor<E>,
-{
-    let (schema, _, remainder) = compile::lookup_path(compiler, schema.clone(), path, true, true)?;
+) -> compile::Result<Vec<ast::Ident>> {
+    let (schema, _, remainder) =
+        compile::lookup_path::<E>(compiler, schema.clone(), path, true, true)?;
     if remainder.len() > 0 {
         return Ok(Vec::new());
     }
-    return Ok(DeclAccessor::<E>::get_map(&*schema.read()?)
+    return Ok(schema
+        .read()?
+        .get_decls::<E>()
         .keys()
         .map(move |k| k.clone())
         .collect::<Vec<ast::Ident>>());
@@ -295,7 +294,10 @@ impl AutoCompleter {
             Some(c) => c.is_lowercase(),
             None => false,
         } {
-            keywords = keywords.iter().map(|k| k.to_lowercase()).collect();
+            keywords = keywords
+                .iter()
+                .map(|k| k.as_str().to_lowercase().into())
+                .collect();
         }
 
         let all = vec![vars, types, schemas, keywords].concat();

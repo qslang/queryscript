@@ -306,7 +306,6 @@ pub fn compile_reference(
     )?;
 
     let decl = decl.ok_or_else(|| CompileError::no_such_entry(path.clone()))?;
-    let entry = decl.value.clone();
     let remainder_cpy = remainder.clone();
 
     let expr = &decl.value;

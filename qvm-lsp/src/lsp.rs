@@ -19,7 +19,7 @@ use qvm::{
     compile::{
         autocomplete::{loc_to_pos, pos_to_loc, AutoCompleter},
         error::CompileError,
-        schema::{CRef, Decl, ExprEntry, MFnType, MType, SType},
+        schema::{CRef, ExprEntry, MFnType, MType, SType},
         Compiler, Schema, SchemaRef,
     },
     parser::{error::PrettyError, parse_schema},

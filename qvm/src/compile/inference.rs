@@ -58,7 +58,6 @@ where
 
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
-impl Constrainable for String {} // XXX Remove?
 impl Constrainable for Ident {}
 impl<T> Constrainable for Vec<T> where T: Constrainable {}
 impl<K, V> Constrainable for BTreeMap<K, V>

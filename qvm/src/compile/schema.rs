@@ -919,35 +919,14 @@ impl Constrainable for STypedExpr {
     }
 }
 
-/*
-#[derive(clone, Debug)]
-pub enum SchemaEntry {
-    Schema(ast::Path),
-    Type(CRef<MType>),
-    Expr(STypedExpr),
-}
-
-impl SchemaEntry {
-    pub fn kind(&self) -> String {
-        match self {
-            SchemaEntry::Schema(_) => "schema".to_string(),
-            SchemaEntry::Type(_) => "type".to_string(),
-            SchemaEntry::Expr(_) => "value".to_string(),
-        }
-    }
-}
-*/
-
 pub fn mkref<T>(t: T) -> Ref<T> {
     Arc::new(RwLock::new(t))
 }
 
-// XXX Clean this up
 pub trait Entry: Clone {
     fn run_on_info(&self) -> Option<(SymbolKind, CRef<SType>)>;
-    fn is_schema_kind(&self) -> bool {
-        false
-    }
+    fn get_map(schema: &Schema) -> &DeclMap<Self>;
+    fn kind() -> &'static str;
 }
 
 pub type SchemaEntry = ast::Path;
@@ -958,18 +937,33 @@ impl Entry for SchemaEntry {
     fn run_on_info(&self) -> Option<(SymbolKind, CRef<SType>)> {
         None
     }
-    fn is_schema_kind(&self) -> bool {
-        true
+    fn get_map(schema: &Schema) -> &DeclMap<SchemaEntry> {
+        &schema.schema_decls
+    }
+    fn kind() -> &'static str {
+        "schema"
     }
 }
 impl Entry for TypeEntry {
     fn run_on_info(&self) -> Option<(SymbolKind, CRef<SType>)> {
         Some((SymbolKind::Type, SType::new_mono(self.clone())))
     }
+    fn get_map(schema: &Schema) -> &DeclMap<TypeEntry> {
+        &schema.type_decls
+    }
+    fn kind() -> &'static str {
+        "type"
+    }
 }
 impl Entry for ExprEntry {
     fn run_on_info(&self) -> Option<(SymbolKind, CRef<SType>)> {
         Some((SymbolKind::Value, self.type_.clone()))
+    }
+    fn get_map(schema: &Schema) -> &DeclMap<ExprEntry> {
+        &schema.expr_decls
+    }
+    fn kind() -> &'static str {
+        "type"
     }
 }
 
@@ -1056,6 +1050,32 @@ impl Schema {
             imports: BTreeMap::new(),
             exprs: Vec::new(),
         })
+    }
+
+    pub fn get_decls<E: Entry>(&self) -> &DeclMap<E> {
+        E::get_map(self)
+    }
+
+    pub fn get_and_check<E: Entry>(
+        &self,
+        ident: &Ident,
+        check_visibility: bool,
+        full_path: &ast::Path,
+    ) -> Result<Option<&Located<Decl<E>>>> {
+        match self.get_decls::<E>().get(ident) {
+            Some(decl) => {
+                if check_visibility && !decl.public {
+                    return Err(CompileError::wrong_kind(
+                        full_path.clone(),
+                        "public",
+                        E::kind(),
+                    ));
+                } else {
+                    Ok(Some(decl))
+                }
+            }
+            None => Ok(None),
+        }
     }
 }
 

@@ -34,6 +34,7 @@ sqlparser = { path = "../sqlparser-rs" }
 tabled = "0.10"
 tokio = "1.0"
 ts-rs = { version = "6.2", optional = true }
+unicase = "2.6.0"
 
 # We don't import this directly (rather, through "arrow"), but need the serde feature
 # to be propagated through to it.

@@ -574,79 +574,13 @@ pub fn lookup_schema(
     return Ok(imported);
 }
 
-// XXX merge this with Entry trait?
-pub trait DeclAccessor<E: Entry> {
-    fn get_map(&self) -> &DeclMap<E>;
-    fn kind(&self) -> &'static str;
-
-    fn get(&self, ident: &Ident) -> Option<&Located<Decl<E>>> {
-        self.get_map().get(ident)
-    }
-
-    fn get_and_check(
-        &self,
-        ident: &Ident,
-        check_visibility: bool,
-        full_path: &ast::Path,
-    ) -> Result<Option<&Located<Decl<E>>>> {
-        match self.get(ident) {
-            Some(decl) => {
-                if check_visibility && !decl.public {
-                    return Err(CompileError::wrong_kind(
-                        full_path.clone(),
-                        "public",
-                        self.kind(),
-                    ));
-                } else {
-                    Ok(Some(decl))
-                }
-            }
-            None => Ok(None),
-        }
-    }
-}
-
-impl DeclAccessor<SchemaEntry> for Schema {
-    fn get_map(&self) -> &DeclMap<ast::Path> {
-        &self.schema_decls
-    }
-
-    fn kind(&self) -> &'static str {
-        "schema"
-    }
-}
-
-impl DeclAccessor<TypeEntry> for Schema {
-    fn get_map(&self) -> &DeclMap<CRef<MType>> {
-        &self.type_decls
-    }
-
-    fn kind(&self) -> &'static str {
-        "type"
-    }
-}
-
-impl DeclAccessor<ExprEntry> for Schema {
-    fn get_map(&self) -> &DeclMap<STypedExpr> {
-        &self.expr_decls
-    }
-
-    fn kind(&self) -> &'static str {
-        "value"
-    }
-}
-
-// XXX We probably want to restore the error message
 pub fn lookup_path<E: Entry>(
     compiler: Compiler,
     schema: Ref<Schema>,
     path: &ast::Path,
     import_global: bool,
     resolve_last: bool,
-) -> Result<(Ref<Schema>, Option<Decl<E>>, ast::Path)>
-where
-    Schema: DeclAccessor<E>,
-{
+) -> Result<(Ref<Schema>, Option<Decl<E>>, ast::Path)> {
     if path.len() == 0 {
         return Ok((schema, None, path.clone()));
     }
@@ -654,27 +588,22 @@ where
     let mut schema = schema;
     for (i, ident) in path.iter().enumerate() {
         let check_visibility = i > 0;
-        if let Some(decl) =
-            DeclAccessor::<E>::get_and_check(&*schema.read()?, &ident, check_visibility, path)?
+        if let Some(decl) = schema
+            .read()?
+            .get_and_check::<E>(&ident, check_visibility, path)?
         {
-            // If this isn't a schema, or if it is a schema and we're on the last element and not planning to resolve
-            // the last element, then we can return. NOTE: if it is a schema, we'll do a second lookup below, which is
-            // slightly wasteful.
-            if !decl.value.is_schema_kind() || (i == path.len() - 1 && !resolve_last) {
-                return Ok((
-                    schema.clone(),
-                    Some(decl.get().clone()),
-                    path[i + 1..].to_vec(),
-                ));
-            }
+            return Ok((
+                schema.clone(),
+                Some(decl.get().clone()),
+                path[i + 1..].to_vec(),
+            ));
         }
 
-        let new = if let Some(imported) = DeclAccessor::<ast::Path>::get_and_check(
-            &*schema.read()?,
-            &ident,
-            check_visibility,
-            path,
-        )? {
+        let new = if let Some(imported) =
+            schema
+                .read()?
+                .get_and_check::<SchemaEntry>(&ident, check_visibility, path)?
+        {
             lookup_schema(compiler.clone(), schema.clone(), &imported.value)?
                 .read()?
                 .schema
@@ -1015,10 +944,7 @@ fn import_named_decl<E: Entry>(
     imported: Ref<ImportedSchema>,
     imported_schema: SchemaInstance,
     item: &ast::Path,
-) -> Result<Declaration<E>>
-where
-    Schema: DeclAccessor<E>,
-{
+) -> Result<Declaration<E>> {
     let loc = path_location(item);
     if item.len() != 1 {
         return Err(CompileError::unimplemented(loc, "path imports"));
