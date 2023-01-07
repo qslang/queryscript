@@ -26,7 +26,7 @@ type CompileResult<T> = MultiResult<T, CompileError>;
 // load commands before we run unsafe expressions, so the latter can
 // depend on the former.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Ord, Eq)]
-pub enum ExternalTypeOrder {
+pub enum ExternalTypeRank {
     Load,
     UnsafeExpr,
 }
@@ -36,7 +36,13 @@ pub struct ExternalTypeHandle {
     pub handle: tokio::task::JoinHandle<Result<()>>,
     pub inner_type: CRef<MType>,
     pub tx: tokio::sync::oneshot::Sender<bool>,
-    pub order: (ExternalTypeOrder, usize),
+    pub order: (ExternalTypeRank, usize),
+}
+
+impl ExternalTypeHandle {
+    pub fn rank(&self) -> ExternalTypeRank {
+        self.order.0
+    }
 }
 
 // Flip the ordering so that the heap is a min-heap
@@ -335,14 +341,27 @@ impl Compiler {
             //
             let external_types = {
                 let mut ret = Vec::new();
+                let mut first_rank = None;
+
                 let mut data = c_try!(result, self.data.write());
-                while let Some(et) = data.external_types.pop() {
-                    ret.push(et);
+                while let Some(et) = data.external_types.peek() {
+                    // If the upcoming external type has a higher rank than the first external type,
+                    // then bail out for now, so that the compiler has some breathing room to complete
+                    // type inference for (safe) expressions that depend on the original kind. A simpler
+                    // approach would be to just pull one external type at a time, but in practice we
+                    // probably want to schema infer external data sources in parallel.
+                    let rank = et.rank();
+                    match (first_rank, rank) {
+                        (Some(first_rank), rank) if rank > first_rank => break,
+                        (None, rank) => first_rank = Some(rank),
+                        _ => {}
+                    };
+                    ret.push(data.external_types.pop().unwrap());
                 }
                 ret
             };
 
-            let mut unresolved = 0;
+            let any_external_types = external_types.len() > 0;
             for external_type in external_types {
                 // Check whether the type can be converted to a runtime type. If it errors
                 // out, then we know that the type is still unresolved.
@@ -362,7 +381,6 @@ impl Compiler {
                         Err(_)
                     )
                 {
-                    unresolved += 1;
                     match external_type.tx.send(true) {
                         Ok(()) => {}
                         Err(_) => {
@@ -385,7 +403,7 @@ impl Compiler {
                 }
             }
 
-            if unresolved > 0 {
+            if any_external_types {
                 // If there were any unresolved types, then loop around again (knowing that the thread will
                 // park at least once after the requisite work is done or immediately if there's no more work).
                 continue;
@@ -448,7 +466,7 @@ impl Compiler {
         &self,
         f: impl std::future::Future<Output = Result<()>> + Send + 'static,
         inner_type: CRef<MType>,
-        order: ExternalTypeOrder,
+        order: ExternalTypeRank,
     ) -> Result<()> {
         let (tx, rx) = tokio::sync::oneshot::channel();
 

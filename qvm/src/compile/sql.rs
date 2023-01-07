@@ -23,7 +23,7 @@ use crate::{
     ast::{SourceLocation, ToPath, ToSqlIdent},
 };
 
-use super::compile::ExternalTypeOrder;
+use super::compile::ExternalTypeRank;
 
 const QVM_NAMESPACE: &str = "__qvm";
 
@@ -1916,7 +1916,7 @@ pub fn compile_sqlexpr(
                                     compiler.add_external_type(
                                         resolve,
                                         inner_type.clone(),
-                                        ExternalTypeOrder::Load,
+                                        ExternalTypeRank::Load,
                                     )?;
                                 }
                             }

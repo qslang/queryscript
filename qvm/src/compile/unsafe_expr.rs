@@ -2,7 +2,7 @@ use snafu::prelude::*;
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use crate::compile::compile::ExternalTypeOrder;
+use crate::compile::compile::ExternalTypeRank;
 use crate::compile::error::*;
 use crate::compile::generics::{ExternalType, GenericConstructor};
 use crate::compile::inference::mkcref;
@@ -177,7 +177,7 @@ pub fn compile_unsafe_expr(
     let expr_type = CRef::new_unknown("unsafe expr");
     let resolve = schema_infer_expr_fn(schema.clone(), inference_expr, expr_type.clone());
 
-    compiler.add_external_type(resolve, expr_type.clone(), ExternalTypeOrder::UnsafeExpr)?;
+    compiler.add_external_type(resolve, expr_type.clone(), ExternalTypeRank::UnsafeExpr)?;
 
     Ok(CTypedExpr {
         type_: mkcref(MType::Generic(Located::new(
