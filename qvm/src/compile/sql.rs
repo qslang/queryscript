@@ -1394,6 +1394,205 @@ pub fn schema_infer_load_fn(
     }
 }
 
+// This function is used to compile OrderByExprs that cannot refer to projection
+// terms (e.g. ORDER BY 1 _cannot_ be compiled by this function). It's used by window
+// functions, array_agg, etc.
+fn compile_unreferenced_order_by_expr(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    scope: &Ref<SQLScope>,
+    loc: &SourceLocation,
+    order_by: &sqlast::OrderByExpr,
+) -> Result<CRef<CWrap<(CSQLNames, sqlast::OrderByExpr)>>> {
+    let cexpr = compile_sqlarg(
+        compiler.clone(),
+        schema.clone(),
+        scope.clone(),
+        loc,
+        &order_by.expr,
+    )?;
+
+    let asc = order_by.asc.clone();
+    let nulls_first = order_by.nulls_first.clone();
+    Ok(compiler.async_cref(async move {
+        let ob = cexpr.sql.await?;
+        let ob = ob.read()?;
+        Ok(cwrap((
+            ob.names.clone(),
+            sqlast::OrderByExpr {
+                expr: ob.body.as_expr(),
+                asc,
+                nulls_first,
+            },
+        )))
+    })?)
+}
+
+fn compile_window_frame_bound(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    scope: &Ref<SQLScope>,
+    loc: &SourceLocation,
+    window_spec: &sqlast::WindowFrameBound,
+) -> Result<CRef<CWrap<(CSQLNames, sqlast::WindowFrameBound)>>> {
+    use sqlast::WindowFrameBound::*;
+    Ok(match window_spec {
+        CurrentRow => cwrap((CSQLNames::new(), CurrentRow)),
+        Preceding(None) => cwrap((CSQLNames::new(), Preceding(None))),
+        Following(None) => cwrap((CSQLNames::new(), Following(None))),
+        Preceding(Some(e)) | Following(Some(e)) => {
+            let preceding = match window_spec {
+                Preceding(_) => true,
+                Following(_) => false,
+                _ => unreachable!(),
+            };
+
+            let c_e = compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, &e)?;
+            compiler.async_cref(async move {
+                let c_e = c_e.sql.await?;
+                let c_e = c_e.read()?;
+                let c_e = Some(Box::new(c_e.body.as_expr()));
+                Ok(cwrap((
+                    CSQLNames::new(),
+                    match preceding {
+                        true => Preceding(c_e),
+                        false => Following(c_e),
+                    },
+                )))
+            })?
+        }
+    })
+}
+
+fn compile_window_spec(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    scope: &Ref<SQLScope>,
+    loc: &SourceLocation,
+    window_spec: &sqlast::WindowSpec,
+) -> Result<CRef<CWrap<(CSQLNames, sqlast::WindowSpec)>>> {
+    let sqlast::WindowSpec {
+        partition_by,
+        order_by,
+        window_frame,
+    } = window_spec;
+
+    let c_partition_by = combine_crefs(
+        partition_by
+            .iter()
+            .map(|e| {
+                Ok(compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, e)?.sql)
+            })
+            .collect::<Result<Vec<_>>>()?,
+    )?;
+
+    let c_order_by = combine_crefs(
+        order_by
+            .iter()
+            .map(|e| {
+                Ok(compile_unreferenced_order_by_expr(
+                    compiler, schema, scope, loc, e,
+                )?)
+            })
+            .collect::<Result<Vec<_>>>()?,
+    )?;
+
+    let window_frame = window_frame
+        .as_ref()
+        .map(|w| {
+            let sqlast::WindowFrame {
+                units,
+                start_bound,
+                end_bound,
+            } = &w;
+            let c_start = compile_window_frame_bound(compiler, schema, scope, loc, &start_bound)?;
+            let c_end = end_bound
+                .as_ref()
+                .map(|end_bound| {
+                    compile_window_frame_bound(compiler, schema, scope, loc, &end_bound)
+                })
+                .transpose()?;
+            let units = units.clone();
+            compiler.async_cref(async move {
+                let c_start = c_start.await?;
+                let c_end = match c_end {
+                    Some(c_end) => Some(c_end.await?),
+                    None => None,
+                };
+
+                let mut names = CSQLNames::new();
+                let (start_names, start_bound) = cunwrap(c_start)?;
+                names.extend(start_names);
+                let end_bound = match c_end {
+                    Some(c_end) => {
+                        let (end_names, end_bound) = cunwrap(c_end)?;
+                        names.extend(end_names);
+                        Some(end_bound)
+                    }
+                    None => None,
+                };
+
+                Ok(cwrap((
+                    names,
+                    sqlast::WindowFrame {
+                        units,
+                        start_bound,
+                        end_bound,
+                    },
+                )))
+            })
+        })
+        .transpose()?;
+
+    compiler.async_cref(async move {
+        let c_partition_by = c_partition_by.await?;
+        let c_order_by = c_order_by.await?;
+        let window_frame = match window_frame {
+            Some(window_frame) => Some(window_frame.await?),
+            None => None,
+        };
+
+        let mut names = SQLNames::new();
+        let partition_by = {
+            let mut ret = Vec::new();
+            for expr in c_partition_by.read()?.iter() {
+                let expr = expr.read()?;
+                names.extend(expr.names.clone());
+                ret.push(expr.body.as_expr());
+            }
+            ret
+        };
+
+        let order_by = {
+            let mut ret = Vec::new();
+            for expr in c_order_by.read()?.clone().into_iter() {
+                let (expr_names, expr) = cunwrap(expr)?;
+                names.extend(expr_names);
+                ret.push(expr);
+            }
+            ret
+        };
+
+        let window_frame = match window_frame {
+            Some(window_frame) => {
+                let (window_names, window_frame) = cunwrap(window_frame)?;
+                names.extend(window_names);
+                Some(window_frame)
+            }
+            None => None,
+        };
+
+        Ok(cwrap((
+            names,
+            sqlast::WindowSpec {
+                partition_by,
+                order_by,
+                window_frame,
+            },
+        )))
+    })
+}
+
 pub fn compile_sqlexpr(
     compiler: Compiler,
     schema: Ref<Schema>,
@@ -1737,14 +1936,10 @@ pub fn compile_sqlexpr(
         }) => {
             let distinct = *distinct;
             let special = *special;
-            let over = over.clone();
-
-            if over.is_some() {
-                return Err(CompileError::unimplemented(
-                    loc.clone(),
-                    format!("Function calls with OVER").as_str(),
-                ));
-            }
+            let over = over
+                .as_ref()
+                .map(|over| compile_window_spec(&compiler, &schema, &scope, loc, over))
+                .transpose()?;
 
             let func_name = name.to_path(file.clone());
             let func = compile_reference(compiler.clone(), schema.clone(), &func_name)?;
@@ -1879,11 +2074,25 @@ pub fn compile_sqlexpr(
                         })
                         .collect::<Result<Vec<_>>>()?;
                     let arg_exprs = combine_crefs(arg_exprs)?.await?;
+
+                    let over = match over {
+                        Some(over) => Some(over.await?),
+                        None => None,
+                    };
+
                     let args = arg_exprs
                         .read()?
                         .iter()
                         .map(|e| Ok(e.read()?.clone()))
                         .collect::<Result<Vec<_>>>()?;
+
+                    let (over_names, over) = match over {
+                        Some(over) => {
+                            let (over_names, over_expr) = cunwrap(over)?;
+                            (over_names, Some(over_expr))
+                        }
+                        None => (SQLNames::new(), None),
+                    };
 
                     if type_.is_known()? {
                         match &*type_
@@ -1947,7 +2156,8 @@ pub fn compile_sqlexpr(
                     // can't be pushed down either because of their types or because they must be
                     // run locally (e.g. `load`).
                     //
-                    let can_lift = !args.iter().any(|a| has_unbound_names(a.expr.clone()));
+                    let can_lift = !args.iter().any(|a| has_unbound_names(a.expr.clone()))
+                        || !over_names.unbound.is_empty();
                     let should_lift = if compiler.allow_inlining()? {
                         matches!(fn_kind, FnKind::Native)
                     } else {
@@ -2038,7 +2248,6 @@ pub fn compile_sqlexpr(
                                     body: SQLBody::Expr(sqlast::Expr::Function(sqlast::Function {
                                         name,
                                         args,
-
                                         over,
                                         distinct,
                                         special,
@@ -2051,6 +2260,52 @@ pub fn compile_sqlexpr(
             })?;
 
             CTypedExpr { type_, expr }
+        }
+        sqlast::Expr::Tuple(fields) => {
+            let c_fields = fields
+                .iter()
+                .map(|f| compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, f))
+                .collect::<Result<Vec<_>>>()?;
+
+            let c_types = c_fields.iter().map(|f| f.type_.clone()).collect::<Vec<_>>();
+            let c_exprs =
+                combine_crefs(c_fields.iter().map(|f| f.sql.clone()).collect::<Vec<_>>())?;
+
+            CTypedExpr {
+                // NOTE: Postgres turns tuples into records whose fields are named f1, f2, ...,
+                // whereas DuckDB creates records into fields named v1, v2 ,... We pick Postgres
+                // semantics here, but may need to specify this based on the target dialect.
+                type_: mkcref(MType::Record(Located::new(
+                    c_types
+                        .iter()
+                        .enumerate()
+                        .map(|(i, t)| {
+                            Ok(MField {
+                                name: format!("f{}", i + 1).into(),
+                                type_: t.clone(),
+                                nullable: true,
+                            })
+                        })
+                        .collect::<Result<Vec<_>>>()?,
+                    SourceLocation::Unknown,
+                ))),
+                expr: compiler.async_cref(async move {
+                    let exprs = c_exprs.await?;
+                    let mut names = CSQLNames::new();
+
+                    let mut ret = Vec::new();
+                    for expr in &*exprs.read()? {
+                        let expr = expr.read()?;
+                        names.extend(expr.names.clone());
+                        ret.push(expr.body.as_expr());
+                    }
+
+                    Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                        names,
+                        body: SQLBody::Expr(sqlast::Expr::Tuple(ret)),
+                    }))))
+                })?,
+            }
         }
         sqlast::Expr::ArrayAgg(sqlast::ArrayAgg {
             distinct,
@@ -2068,19 +2323,9 @@ pub fn compile_sqlexpr(
             )?;
 
             let ob = match order_by {
-                Some(order_by) => Some((
-                    // NOTE: Unlike the ORDER BY clause of a SELECT statement, numeric references
-                    // (e.g. ORDER BY 1) do not refer to the array_agg expression.
-                    compile_sqlarg(
-                        compiler.clone(),
-                        schema.clone(),
-                        scope.clone(),
-                        loc,
-                        &order_by.expr,
-                    )?,
-                    order_by.asc.clone(),
-                    order_by.nulls_first.clone(),
-                )),
+                Some(order_by) => Some(compile_unreferenced_order_by_expr(
+                    &compiler, &schema, &scope, loc, order_by,
+                )?),
                 None => None,
             };
 
@@ -2108,10 +2353,7 @@ pub fn compile_sqlexpr(
                     let expr = compiled_expr.sql.await?;
 
                     let ob = match ob {
-                        Some((ob, asc, nulls_first)) => {
-                            let ob = ob.sql.await?;
-                            Some((ob, asc, nulls_first))
-                        }
+                        Some(ob) => Some(ob.await?),
                         None => None,
                     };
 
@@ -2124,14 +2366,10 @@ pub fn compile_sqlexpr(
                     names.extend(expr.names.clone());
 
                     let order_by = match ob {
-                        Some((ob, asc, nulls_first)) => {
-                            let ob = ob.read()?;
-                            names.extend(ob.names.clone());
-                            Some(Box::new(sqlast::OrderByExpr {
-                                expr: ob.body.as_expr(),
-                                asc,
-                                nulls_first,
-                            }))
+                        Some(ob) => {
+                            let (ob_names, ob_expr) = cunwrap(ob)?;
+                            names.extend(ob_names);
+                            Some(Box::new(ob_expr))
                         }
                         None => None,
                     };

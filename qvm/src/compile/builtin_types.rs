@@ -61,6 +61,7 @@ fn count<R>(value R) -> bigint = sql;
 fn sum<R>(value R) -> SumAgg<R> = sql;
 fn avg<R>(value R) -> double = sql;
 fn strptime<R>(value text, fmt string) -> timestamp = sql;
+fn row_number<R>() -> bigint = sql;
 ";
 
 lazy_static! {
