@@ -1777,21 +1777,21 @@ pub fn compile_sqlexpr(
                 })?,
             }
         }
-        sqlast::Expr::IsNotNull(expr) => {
-            let compiled = compile_sqlarg(
-                compiler.clone(),
-                schema.clone(),
-                scope.clone(),
-                loc,
-                expr.as_ref(),
-            )?;
+        sqlast::Expr::IsNull(e) | sqlast::Expr::IsNotNull(e) => {
+            let compiled =
+                compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, &e)?;
+            let constructor = match expr {
+                sqlast::Expr::IsNull(_) => sqlast::Expr::IsNull,
+                sqlast::Expr::IsNotNull(_) => sqlast::Expr::IsNotNull,
+                _ => unreachable!(),
+            };
             CTypedExpr {
                 type_: resolve_global_atom(compiler.clone(), "bool")?,
                 expr: compiled.sql.then({
                     move |sqlexpr: Ref<SQL<CRef<MType>>>| {
                         Ok(mkcref(Expr::SQL(Arc::new(SQL {
                             names: sqlexpr.read()?.names.clone(),
-                            body: SQLBody::Expr(sqlast::Expr::IsNotNull(Box::new(
+                            body: SQLBody::Expr(constructor(Box::new(
                                 sqlexpr.read()?.body.as_expr(),
                             ))),
                         }))))
