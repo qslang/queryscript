@@ -36,6 +36,7 @@ pub struct FnType {
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Field {
+    #[cfg_attr(feature = "ts", ts(type = "String"))]
     pub name: Ident,
     pub type_: Type,
     pub nullable: bool,
