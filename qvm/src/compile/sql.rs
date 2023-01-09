@@ -58,19 +58,10 @@ pub struct CTypedSQL {
     pub sql: CRef<SQL<CRef<MType>>>,
 }
 
-impl HasCExpr<SQL<CRef<MType>>> for &CTypedSQL {
-    fn expr(&self) -> &CRef<SQL<CRef<MType>>> {
-        &self.sql
-    }
+impl<Ty: Clone + fmt::Debug + Send + Sync, SQLAst: Clone + fmt::Debug + Send + Sync> Constrainable
+    for SQLSnippet<Ty, SQLAst>
+{
 }
-
-impl HasCType<MType> for &CTypedSQL {
-    fn type_(&self) -> &CRef<MType> {
-        &self.type_
-    }
-}
-
-impl<Ty: Clone + fmt::Debug + Send + Sync> Constrainable for SQL<Ty> {}
 impl Constrainable for TypedSQL {}
 impl Constrainable for NameAndSQL {}
 impl Constrainable for CTypedNameAndSQL {}
@@ -455,274 +446,408 @@ pub fn combine_sqlnames(all: &Vec<Ref<SQL<CRef<MType>>>>) -> Result<CSQLNames> {
     Ok(ret)
 }
 
-pub fn compile_relation(
-    compiler: &Compiler,
-    schema: &Ref<Schema>,
-    scope: &Ref<SQLScope>,
-    loc: &SourceLocation,
-    relation: &sqlast::TableFactor,
-) -> Result<CRef<CWrap<(CSQLNames, sqlast::TableFactor)>>> {
-    let file = schema.read()?.file.clone();
-    Ok(match relation {
-        sqlast::TableFactor::Table {
-            name,
-            alias,
-            args,
-            with_hints,
-        } => {
-            let loc = path_location(&name.0.to_path(file.clone()));
+// This trait is used to compile sql expressions with their parameters, without computing
+// their types. This is useful for expressions that do not directly impact a query's type,
+// e.g. the OVER clause of a window function, or an ORDER BY clause.
+type CSQLSnippet<T> = SQLSnippet<CRef<MType>, T>;
+type CRefSnippet<T> = CRef<CWrap<CSQLSnippet<T>>>;
 
-            if args.is_some() {
-                return Err(CompileError::unimplemented(
-                    loc.clone(),
-                    "Table valued functions",
-                ));
+trait CompileSQL<Wrapper = CRefSnippet<Self>>: Clone + fmt::Debug + Send + Sync + 'static {
+    fn compile_sql(
+        &self,
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        scope: &Ref<SQLScope>,
+        loc: &SourceLocation,
+    ) -> Result<Wrapper>;
+}
+
+impl<T> CompileSQL for Option<T>
+where
+    T: CompileSQL,
+{
+    fn compile_sql(
+        &self,
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        scope: &Ref<SQLScope>,
+        loc: &SourceLocation,
+    ) -> Result<CRefSnippet<Self>> {
+        match self {
+            Some(t) => {
+                let c_t = t.compile_sql(compiler, schema, scope, loc)?;
+                compiler.async_cref(async move {
+                    let t = c_t.await?;
+                    let t = cunwrap(t)?;
+                    Ok(CSQLSnippet::wrap(t.names, Some(t.body)))
+                })
             }
-
-            if with_hints.len() > 0 {
-                return Err(CompileError::unimplemented(loc.clone(), "WITH hints"));
-            }
-
-            // TODO: This currently assumes that table references always come from outside
-            // the query, which is not actually the case.
-            //
-            let relation = compile_reference(
-                compiler.clone(),
-                schema.clone(),
-                &name.to_path(file.clone()),
-            )?;
-
-            let list_type = mkcref(MType::List(Located::new(
-                MType::new_unknown(format!("FROM {}", name.to_string()).as_str()),
-                loc.clone(),
-            )));
-            list_type.unify(&relation.type_)?;
-
-            let name = match alias {
-                Some(a) => a.name.clone(),
-                None => name
-                    .0
-                    .last()
-                    .ok_or_else(|| {
-                        CompileError::internal(
-                            loc.clone(),
-                            "Table name must have at least one part",
-                        )
-                    })?
-                    .clone(),
-            };
-
-            let mut from_names = CSQLNames::new();
-
-            scope
-                .write()?
-                .add_reference(&name.get().into(), &loc, relation.type_.clone())?;
-
-            let placeholder_name =
-                QVM_NAMESPACE.to_string() + compiler.next_placeholder("rel")?.as_str();
-            from_names
-                .params
-                .insert(placeholder_name.clone().into(), relation);
-
-            cwrap((
-                from_names,
-                sqlast::TableFactor::Table {
-                    name: sqlast::ObjectName(vec![param_ident(placeholder_name)]),
-                    alias: Some(sqlast::TableAlias {
-                        name: name.clone(),
-                        columns: Vec::new(),
-                    }),
-                    args: None,
-                    with_hints: Vec::new(),
-                },
-            ))
+            None => Ok(CSQLSnippet::wrap(CSQLNames::new(), None)),
         }
-        sqlast::TableFactor::Derived {
-            lateral,
-            subquery,
-            alias,
-        } => {
-            if *lateral {
-                // This is a lateral subquery, which I haven't tested yet (because it will require
-                // forwarding the outer scope into the subquery).
-                return Err(CompileError::unimplemented(
-                    loc.clone(),
-                    "Lateral Subqueries",
-                ));
+    }
+}
+
+impl<T> CompileSQL for Box<T>
+where
+    T: CompileSQL,
+{
+    fn compile_sql(
+        &self,
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        scope: &Ref<SQLScope>,
+        loc: &SourceLocation,
+    ) -> Result<CRefSnippet<Self>> {
+        let c_t = self.as_ref().compile_sql(compiler, schema, scope, loc)?;
+        compiler.async_cref(async move {
+            let t = c_t.await?;
+            let t = cunwrap(t)?;
+            Ok(CSQLSnippet::wrap(t.names, Box::new(t.body)))
+        })
+    }
+}
+
+impl<T> CompileSQL for Vec<T>
+where
+    T: CompileSQL,
+{
+    fn compile_sql(
+        &self,
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        scope: &Ref<SQLScope>,
+        loc: &SourceLocation,
+    ) -> Result<CRefSnippet<Self>> {
+        let c_vec = combine_crefs(
+            self.iter()
+                .map(|t| t.compile_sql(compiler, schema, scope, loc))
+                .collect::<Result<Vec<_>>>()?,
+        )?;
+        compiler.async_cref(async move {
+            let c_vec = c_vec.await?;
+            let mut names = CSQLNames::new();
+            let mut ret = Vec::new();
+            for element in c_vec.read()?.iter() {
+                let element = cunwrap(element.clone())?;
+                names.extend(element.names);
+                ret.push(element.body);
             }
 
-            // NOTE: Once we thread locations through the parse tree, we should use the location here.
-            let subquery = compile_sqlquery(
-                compiler.clone(),
-                schema.clone(),
-                Some(scope.clone()),
-                loc,
-                subquery,
-            )?;
+            Ok(CSQLSnippet::wrap(names, ret))
+        })
+    }
+}
 
-            let (loc, name) = match alias {
-                Some(a) => (
-                    a.name
-                        .location()
-                        .as_ref()
-                        .map(|r| SourceLocation::from_file_range(file.clone(), Some(r.clone())))
-                        .unwrap_or(loc.clone()),
-                    a.name.clone(),
-                ),
-                None => (
+// This is not the primary implementation of compiling an expression, but is a convenience function so that we can
+// run compile_sqlarg through the compile_sql() trait (e.g. to help compile an Option<Expr>).
+impl CompileSQL for sqlast::Expr {
+    fn compile_sql(
+        &self,
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        scope: &Ref<SQLScope>,
+        loc: &SourceLocation,
+    ) -> Result<CRefSnippet<Self>> {
+        let compiled = compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, self)?;
+        compiler.async_cref(async move {
+            let compiled = compiled.sql.await?;
+            let compiled = compiled.read()?;
+            Ok(CSQLSnippet::wrap(
+                compiled.names.clone(),
+                compiled.body.as_expr(),
+            ))
+        })
+    }
+}
+
+impl CompileSQL for sqlast::TableFactor {
+    fn compile_sql(
+        &self,
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        scope: &Ref<SQLScope>,
+        loc: &SourceLocation,
+    ) -> Result<CRefSnippet<Self>> {
+        let file = schema.read()?.file.clone();
+        Ok(match self {
+            sqlast::TableFactor::Table {
+                name,
+                alias,
+                args,
+                with_hints,
+            } => {
+                let loc = path_location(&name.0.to_path(file.clone()));
+
+                if args.is_some() {
+                    return Err(CompileError::unimplemented(
+                        loc.clone(),
+                        "Table valued functions",
+                    ));
+                }
+
+                if with_hints.len() > 0 {
+                    return Err(CompileError::unimplemented(loc.clone(), "WITH hints"));
+                }
+
+                // TODO: This currently assumes that table references always come from outside
+                // the query, which is not actually the case.
+                //
+                let relation = compile_reference(
+                    compiler.clone(),
+                    schema.clone(),
+                    &name.to_path(file.clone()),
+                )?;
+
+                let list_type = mkcref(MType::List(Located::new(
+                    MType::new_unknown(format!("FROM {}", name.to_string()).as_str()),
                     loc.clone(),
-                    param_ident(compiler.next_placeholder("anonymous_subquery")?),
-                ),
-            };
+                )));
+                list_type.unify(&relation.type_)?;
 
-            scope
-                .write()?
-                .add_reference(&name.get().into(), &loc, subquery.type_.clone())?;
-
-            let loc = loc.clone();
-            let lateral = *lateral;
-            compiler.async_cref(async move {
-                let subquery_expr = Arc::new(subquery.expr.await?.read()?.clone());
-                let (sql_names, sql_query) = match &*subquery_expr {
-                    Expr::SQL(q) => (q.names.clone(), Box::new(q.body.as_query())),
-                    _ => {
-                        return Err(CompileError::internal(
-                            loc.clone(),
-                            "Subquery must be a SQL expression",
-                        ))
-                    }
+                let name = match alias {
+                    Some(a) => a.name.clone(),
+                    None => name
+                        .0
+                        .last()
+                        .ok_or_else(|| {
+                            CompileError::internal(
+                                loc.clone(),
+                                "Table name must have at least one part",
+                            )
+                        })?
+                        .clone(),
                 };
 
-                Ok(cwrap((
-                    sql_names,
-                    sqlast::TableFactor::Derived {
-                        lateral,
-                        subquery: sql_query,
+                let mut from_names = CSQLNames::new();
+
+                scope
+                    .write()?
+                    .add_reference(&name.get().into(), &loc, relation.type_.clone())?;
+
+                let placeholder_name =
+                    QVM_NAMESPACE.to_string() + compiler.next_placeholder("rel")?.as_str();
+                from_names
+                    .params
+                    .insert(placeholder_name.clone().into(), relation);
+
+                CSQLSnippet::wrap(
+                    from_names,
+                    sqlast::TableFactor::Table {
+                        name: sqlast::ObjectName(vec![param_ident(placeholder_name)]),
                         alias: Some(sqlast::TableAlias {
                             name: name.clone(),
                             columns: Vec::new(),
                         }),
+                        args: None,
+                        with_hints: Vec::new(),
                     },
-                )))
-            })?
-        }
-        sqlast::TableFactor::TableFunction { .. } => {
-            return Err(CompileError::unimplemented(loc.clone(), "TABLE"))
-        }
-        sqlast::TableFactor::UNNEST { .. } => {
-            return Err(CompileError::unimplemented(loc.clone(), "UNNEST"))
-        }
-        sqlast::TableFactor::NestedJoin { .. } => {
-            return Err(CompileError::unimplemented(loc.clone(), "Nested JOIN"))
-        }
-    })
+                )
+            }
+            sqlast::TableFactor::Derived {
+                lateral,
+                subquery,
+                alias,
+            } => {
+                if *lateral {
+                    // This is a lateral subquery, which I haven't tested yet (because it will require
+                    // forwarding the outer scope into the subquery).
+                    return Err(CompileError::unimplemented(
+                        loc.clone(),
+                        "Lateral Subqueries",
+                    ));
+                }
+
+                // NOTE: Once we thread locations through the parse tree, we should use the location here.
+                let subquery = compile_sqlquery(
+                    compiler.clone(),
+                    schema.clone(),
+                    Some(scope.clone()),
+                    loc,
+                    subquery,
+                )?;
+
+                let (loc, name) = match alias {
+                    Some(a) => (
+                        a.name
+                            .location()
+                            .as_ref()
+                            .map(|r| SourceLocation::from_file_range(file.clone(), Some(r.clone())))
+                            .unwrap_or(loc.clone()),
+                        a.name.clone(),
+                    ),
+                    None => (
+                        loc.clone(),
+                        param_ident(compiler.next_placeholder("anonymous_subquery")?),
+                    ),
+                };
+
+                scope
+                    .write()?
+                    .add_reference(&name.get().into(), &loc, subquery.type_.clone())?;
+
+                let loc = loc.clone();
+                let lateral = *lateral;
+                compiler.async_cref(async move {
+                    let subquery_expr = Arc::new(subquery.expr.await?.read()?.clone());
+                    let (sql_names, sql_query) = match &*subquery_expr {
+                        Expr::SQL(q) => (q.names.clone(), Box::new(q.body.as_query())),
+                        _ => {
+                            return Err(CompileError::internal(
+                                loc.clone(),
+                                "Subquery must be a SQL expression",
+                            ))
+                        }
+                    };
+
+                    Ok(CSQLSnippet::wrap(
+                        sql_names,
+                        sqlast::TableFactor::Derived {
+                            lateral,
+                            subquery: sql_query,
+                            alias: Some(sqlast::TableAlias {
+                                name: name.clone(),
+                                columns: Vec::new(),
+                            }),
+                        },
+                    ))
+                })?
+            }
+            sqlast::TableFactor::TableFunction { .. } => {
+                return Err(CompileError::unimplemented(loc.clone(), "TABLE"))
+            }
+            sqlast::TableFactor::UNNEST { .. } => {
+                return Err(CompileError::unimplemented(loc.clone(), "UNNEST"))
+            }
+            sqlast::TableFactor::NestedJoin { .. } => {
+                return Err(CompileError::unimplemented(loc.clone(), "Nested JOIN"))
+            }
+        })
+    }
 }
 
-pub fn compile_join_constraint(
-    compiler: &Compiler,
-    schema: &Ref<Schema>,
-    scope: &Ref<SQLScope>,
-    loc: &SourceLocation,
-    join_constraint: &sqlast::JoinConstraint,
-) -> Result<CRef<CWrap<(CSQLNames, sqlast::JoinConstraint)>>> {
-    use sqlast::JoinConstraint::*;
-    Ok(match join_constraint {
-        On(e) => {
-            let sql = compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, &e)?;
-            sql.type_
-                .unify(&resolve_global_atom(compiler.clone(), "bool")?)?;
-            compiler.async_cref({
-                async move {
+impl CompileSQL for sqlast::JoinConstraint {
+    fn compile_sql(
+        &self,
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        scope: &Ref<SQLScope>,
+        loc: &SourceLocation,
+    ) -> Result<CRefSnippet<Self>> {
+        use sqlast::JoinConstraint::*;
+        Ok(match self {
+            On(e) => {
+                let sql = compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, &e)?;
+                sql.type_
+                    .unify(&resolve_global_atom(compiler.clone(), "bool")?)?;
+                compiler.async_cref(async move {
                     let sql = sql.sql.await?;
                     let sql = sql.read()?;
-                    Ok(cwrap((sql.names.clone(), On(sql.body.as_expr()))))
-                }
-            })?
-        }
-        Using(_) => return Err(CompileError::unimplemented(loc.clone(), "JOIN ... USING")),
-        Natural => cwrap((CSQLNames::new(), Natural)),
-        None => cwrap((CSQLNames::new(), None)),
-    })
-}
-
-pub fn compile_join_operator(
-    compiler: &Compiler,
-    schema: &Ref<Schema>,
-    scope: &Ref<SQLScope>,
-    loc: &SourceLocation,
-    join_operator: &sqlast::JoinOperator,
-) -> Result<CRef<CWrap<(CSQLNames, sqlast::JoinOperator)>>> {
-    use sqlast::JoinOperator::*;
-    let join_constructor = match join_operator {
-        Inner(_) => Some(Inner),
-        LeftOuter(_) => Some(Inner),
-        RightOuter(_) => Some(Inner),
-        FullOuter(_) => Some(Inner),
-        _ => None,
-    };
-
-    Ok(match join_operator {
-        Inner(c) | LeftOuter(c) | RightOuter(c) | FullOuter(c) => {
-            let constraint = compile_join_constraint(compiler, schema, scope, loc, c)?;
-            compiler.async_cref(async move {
-                let (names, sql) = cunwrap(constraint.await?)?;
-                Ok(cwrap((names, join_constructor.unwrap()(sql))))
-            })?
-        }
-        o => {
-            return Err(CompileError::unimplemented(
-                loc.clone(),
-                format!("{:?}", o).as_str(),
-            ))
-        }
-    })
-}
-
-pub fn compile_table_with_joins(
-    compiler: &Compiler,
-    schema: &Ref<Schema>,
-    scope: &Ref<SQLScope>,
-    loc: &SourceLocation,
-    table: &sqlast::TableWithJoins,
-) -> Result<CRef<CWrap<(CSQLNames, sqlast::TableWithJoins)>>> {
-    let relation = compile_relation(compiler, schema, scope, loc, &table.relation)?;
-
-    let mut join_rels = Vec::new();
-    let mut join_ops = Vec::new();
-    for join in &table.joins {
-        let join_relation = compile_relation(compiler, schema, scope, loc, &join.relation)?;
-
-        join_rels.push(join_relation);
-        join_ops.push(compile_join_operator(
-            compiler,
-            schema,
-            scope,
-            loc,
-            &join.join_operator,
-        )?);
+                    Ok(CSQLSnippet::wrap(sql.names.clone(), On(sql.body.as_expr())))
+                })?
+            }
+            Using(_) => return Err(CompileError::unimplemented(loc.clone(), "JOIN ... USING")),
+            Natural => CSQLSnippet::wrap(CSQLNames::new(), Natural),
+            None => CSQLSnippet::wrap(CSQLNames::new(), None),
+        })
     }
-    compiler.async_cref(async move {
-        let mut table_params = CSQLNames::new();
-        let (relation_params, relation) = cunwrap(relation.await?)?;
-        table_params.extend(relation_params);
+}
 
-        let mut joins = Vec::new();
-        for (jo, relation) in join_ops.into_iter().zip(join_rels.into_iter()) {
-            let (relation_params, relation) = cunwrap(relation.await?)?;
-            table_params.extend(relation_params);
+impl CompileSQL for sqlast::JoinOperator {
+    fn compile_sql(
+        &self,
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        scope: &Ref<SQLScope>,
+        loc: &SourceLocation,
+    ) -> Result<CRefSnippet<Self>> {
+        use sqlast::JoinOperator::*;
+        let join_constructor = match self {
+            Inner(_) => Some(Inner),
+            LeftOuter(_) => Some(Inner),
+            RightOuter(_) => Some(Inner),
+            FullOuter(_) => Some(Inner),
+            _ => None,
+        };
 
-            let (join_op_params, join_operator) = cunwrap(jo.await?)?;
-            table_params.extend(join_op_params);
-            joins.push(sqlast::Join {
-                relation,
-                join_operator,
-            });
-        }
-        Ok(cwrap((
-            table_params,
-            sqlast::TableWithJoins { relation, joins },
-        )))
-    })
+        Ok(match self {
+            Inner(c) | LeftOuter(c) | RightOuter(c) | FullOuter(c) => {
+                let constraint = c.compile_sql(compiler, schema, scope, loc)?;
+                compiler.async_cref(async move {
+                    let join_constraint = cunwrap(constraint.await?)?;
+                    Ok(CSQLSnippet::wrap(
+                        join_constraint.names,
+                        join_constructor.unwrap()(join_constraint.body),
+                    ))
+                })?
+            }
+            o => {
+                return Err(CompileError::unimplemented(
+                    loc.clone(),
+                    format!("{:?}", o).as_str(),
+                ))
+            }
+        })
+    }
+}
+
+impl CompileSQL for sqlast::Join {
+    fn compile_sql(
+        &self,
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        scope: &Ref<SQLScope>,
+        loc: &SourceLocation,
+    ) -> Result<CRefSnippet<Self>> {
+        let relation = self.relation.compile_sql(compiler, schema, scope, loc)?;
+        let join_operator = self
+            .join_operator
+            .compile_sql(compiler, schema, scope, loc)?;
+        compiler.async_cref(async move {
+            let relation = cunwrap(relation.await?)?;
+            let join_operator = cunwrap(join_operator.await?)?;
+
+            let mut names = CSQLNames::new();
+            names.extend(relation.names);
+            names.extend(join_operator.names);
+            Ok(CSQLSnippet::wrap(
+                names,
+                sqlast::Join {
+                    relation: relation.body,
+                    join_operator: join_operator.body,
+                },
+            ))
+        })
+    }
+}
+
+impl CompileSQL for sqlast::TableWithJoins {
+    fn compile_sql(
+        &self,
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        scope: &Ref<SQLScope>,
+        loc: &SourceLocation,
+    ) -> Result<CRefSnippet<Self>> {
+        let c_relation = self.relation.compile_sql(compiler, schema, scope, loc)?;
+        let c_joins = self.joins.compile_sql(compiler, schema, scope, loc)?;
+
+        compiler.async_cref(async move {
+            let relation = cunwrap(c_relation.await?)?;
+            let joins = cunwrap(c_joins.await?)?;
+
+            let mut table_params = CSQLNames::new();
+            table_params.extend(relation.names);
+            table_params.extend(joins.names);
+
+            Ok(CSQLSnippet::wrap(
+                table_params,
+                sqlast::TableWithJoins {
+                    relation: relation.body,
+                    joins: joins.body,
+                },
+            ))
+        })
+    }
 }
 
 pub fn compile_from(
@@ -731,33 +856,9 @@ pub fn compile_from(
     parent_scope: Option<Ref<SQLScope>>,
     loc: &SourceLocation,
     from: &Vec<sqlast::TableWithJoins>,
-) -> Result<(
-    Ref<SQLScope>,
-    CRef<CWrap<(CSQLNames, Vec<sqlast::TableWithJoins>)>>,
-)> {
+) -> Result<(Ref<SQLScope>, CRefSnippet<Vec<sqlast::TableWithJoins>>)> {
     let scope = SQLScope::new(parent_scope);
-    let from = match from.len() {
-        0 => cwrap((CSQLNames::new(), Vec::new())),
-        _ => {
-            let tables = from
-                .iter()
-                .map(|table| compile_table_with_joins(compiler, schema, &scope, loc, table))
-                .collect::<Result<Vec<_>>>()?;
-
-            compiler.async_cref(async move {
-                let mut all_names = CSQLNames::new();
-                let mut all_tables = Vec::new();
-
-                for table in tables.into_iter() {
-                    let (names, table) = cunwrap(table.await?)?;
-                    all_names.extend(names);
-                    all_tables.push(table);
-                }
-
-                Ok(cwrap((all_names, all_tables)))
-            })?
-        }
-    };
+    let from = from.compile_sql(compiler, schema, &scope, loc)?;
 
     Ok((scope, from))
 }
@@ -1006,7 +1107,7 @@ pub fn compile_select(
         let scope = scope.clone();
         let loc = loc.clone();
         async move {
-            let (from_names, from) = cunwrap(from.await?)?;
+            let from = cunwrap(from.await?)?;
 
             let exprs = projections.await?;
             let mut proj_exprs = Vec::new();
@@ -1033,7 +1134,7 @@ pub fn compile_select(
                     expr: sqlexpr.sql.body.as_expr(),
                 });
             }
-            names.extend(from_names);
+            names.extend(from.names);
 
             let selection = match &select.selection {
                 Some(selection) => {
@@ -1065,7 +1166,7 @@ pub fn compile_select(
             }
 
             let mut ret = select.clone();
-            ret.from = from.clone();
+            ret.from = from.body;
             ret.projection = projection;
             ret.selection = selection;
             ret.group_by = group_by;
@@ -1394,203 +1495,144 @@ pub fn schema_infer_load_fn(
     }
 }
 
-// This function is used to compile OrderByExprs that cannot refer to projection
+// This implementation is used to compile OrderByExprs that cannot refer to projection
 // terms (e.g. ORDER BY 1 _cannot_ be compiled by this function). It's used by window
 // functions, array_agg, etc.
-fn compile_unreferenced_order_by_expr(
-    compiler: &Compiler,
-    schema: &Ref<Schema>,
-    scope: &Ref<SQLScope>,
-    loc: &SourceLocation,
-    order_by: &sqlast::OrderByExpr,
-) -> Result<CRef<CWrap<(CSQLNames, sqlast::OrderByExpr)>>> {
-    let cexpr = compile_sqlarg(
-        compiler.clone(),
-        schema.clone(),
-        scope.clone(),
-        loc,
-        &order_by.expr,
-    )?;
+impl CompileSQL for sqlast::OrderByExpr {
+    fn compile_sql(
+        &self,
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        scope: &Ref<SQLScope>,
+        loc: &SourceLocation,
+    ) -> Result<CRefSnippet<Self>> {
+        let cexpr = self.expr.compile_sql(compiler, schema, scope, loc)?;
 
-    let asc = order_by.asc.clone();
-    let nulls_first = order_by.nulls_first.clone();
-    Ok(compiler.async_cref(async move {
-        let ob = cexpr.sql.await?;
-        let ob = ob.read()?;
-        Ok(cwrap((
-            ob.names.clone(),
-            sqlast::OrderByExpr {
-                expr: ob.body.as_expr(),
-                asc,
-                nulls_first,
-            },
-        )))
-    })?)
+        let asc = self.asc.clone();
+        let nulls_first = self.nulls_first.clone();
+        Ok(compiler.async_cref(async move {
+            let ob = cunwrap(cexpr.await?)?;
+            Ok(CSQLSnippet::wrap(
+                ob.names,
+                sqlast::OrderByExpr {
+                    expr: ob.body,
+                    asc,
+                    nulls_first,
+                },
+            ))
+        })?)
+    }
 }
 
-fn compile_window_frame_bound(
-    compiler: &Compiler,
-    schema: &Ref<Schema>,
-    scope: &Ref<SQLScope>,
-    loc: &SourceLocation,
-    window_spec: &sqlast::WindowFrameBound,
-) -> Result<CRef<CWrap<(CSQLNames, sqlast::WindowFrameBound)>>> {
-    use sqlast::WindowFrameBound::*;
-    Ok(match window_spec {
-        CurrentRow => cwrap((CSQLNames::new(), CurrentRow)),
-        Preceding(None) => cwrap((CSQLNames::new(), Preceding(None))),
-        Following(None) => cwrap((CSQLNames::new(), Following(None))),
-        Preceding(Some(e)) | Following(Some(e)) => {
-            let preceding = match window_spec {
-                Preceding(_) => true,
-                Following(_) => false,
-                _ => unreachable!(),
-            };
-
-            let c_e = compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, &e)?;
-            compiler.async_cref(async move {
-                let c_e = c_e.sql.await?;
-                let c_e = c_e.read()?;
-                let c_e = Some(Box::new(c_e.body.as_expr()));
-                Ok(cwrap((
-                    CSQLNames::new(),
-                    match preceding {
-                        true => Preceding(c_e),
-                        false => Following(c_e),
-                    },
-                )))
-            })?
-        }
-    })
-}
-
-fn compile_window_spec(
-    compiler: &Compiler,
-    schema: &Ref<Schema>,
-    scope: &Ref<SQLScope>,
-    loc: &SourceLocation,
-    window_spec: &sqlast::WindowSpec,
-) -> Result<CRef<CWrap<(CSQLNames, sqlast::WindowSpec)>>> {
-    let sqlast::WindowSpec {
-        partition_by,
-        order_by,
-        window_frame,
-    } = window_spec;
-
-    let c_partition_by = combine_crefs(
-        partition_by
-            .iter()
-            .map(|e| {
-                Ok(compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, e)?.sql)
-            })
-            .collect::<Result<Vec<_>>>()?,
-    )?;
-
-    let c_order_by = combine_crefs(
-        order_by
-            .iter()
-            .map(|e| {
-                Ok(compile_unreferenced_order_by_expr(
-                    compiler, schema, scope, loc, e,
-                )?)
-            })
-            .collect::<Result<Vec<_>>>()?,
-    )?;
-
-    let window_frame = window_frame
-        .as_ref()
-        .map(|w| {
-            let sqlast::WindowFrame {
-                units,
-                start_bound,
-                end_bound,
-            } = &w;
-            let c_start = compile_window_frame_bound(compiler, schema, scope, loc, &start_bound)?;
-            let c_end = end_bound
-                .as_ref()
-                .map(|end_bound| {
-                    compile_window_frame_bound(compiler, schema, scope, loc, &end_bound)
-                })
-                .transpose()?;
-            let units = units.clone();
-            compiler.async_cref(async move {
-                let c_start = c_start.await?;
-                let c_end = match c_end {
-                    Some(c_end) => Some(c_end.await?),
-                    None => None,
+impl CompileSQL for sqlast::WindowFrameBound {
+    fn compile_sql(
+        &self,
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        scope: &Ref<SQLScope>,
+        loc: &SourceLocation,
+    ) -> Result<CRefSnippet<Self>> {
+        use sqlast::WindowFrameBound::*;
+        Ok(match self {
+            CurrentRow => CSQLSnippet::wrap(CSQLNames::new(), CurrentRow),
+            Preceding(e) | Following(e) => {
+                let preceding = match self {
+                    Preceding(_) => true,
+                    Following(_) => false,
+                    _ => unreachable!(),
                 };
 
-                let mut names = CSQLNames::new();
-                let (start_names, start_bound) = cunwrap(c_start)?;
-                names.extend(start_names);
-                let end_bound = match c_end {
-                    Some(c_end) => {
-                        let (end_names, end_bound) = cunwrap(c_end)?;
-                        names.extend(end_names);
-                        Some(end_bound)
-                    }
-                    None => None,
-                };
-
-                Ok(cwrap((
-                    names,
-                    sqlast::WindowFrame {
-                        units,
-                        start_bound,
-                        end_bound,
-                    },
-                )))
-            })
+                let c_e = e.compile_sql(compiler, schema, scope, loc)?;
+                compiler.async_cref(async move {
+                    let c_e = cunwrap(c_e.await?)?;
+                    Ok(CSQLSnippet::wrap(
+                        c_e.names,
+                        match preceding {
+                            true => Preceding(c_e.body),
+                            false => Following(c_e.body),
+                        },
+                    ))
+                })?
+            }
         })
-        .transpose()?;
+    }
+}
 
-    compiler.async_cref(async move {
-        let c_partition_by = c_partition_by.await?;
-        let c_order_by = c_order_by.await?;
-        let window_frame = match window_frame {
-            Some(window_frame) => Some(window_frame.await?),
-            None => None,
-        };
+impl CompileSQL for sqlast::WindowFrame {
+    fn compile_sql(
+        &self,
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        scope: &Ref<SQLScope>,
+        loc: &SourceLocation,
+    ) -> Result<CRefSnippet<Self>> {
+        let sqlast::WindowFrame {
+            units,
+            start_bound,
+            end_bound,
+        } = self;
+        let c_start = start_bound.compile_sql(compiler, schema, scope, loc)?;
+        let c_end = end_bound.compile_sql(compiler, schema, scope, loc)?;
+        let units = units.clone();
+        compiler.async_cref(async move {
+            let start_bound = cunwrap(c_start.await?)?;
+            let end_bound = cunwrap(c_end.await?)?;
 
-        let mut names = SQLNames::new();
-        let partition_by = {
-            let mut ret = Vec::new();
-            for expr in c_partition_by.read()?.iter() {
-                let expr = expr.read()?;
-                names.extend(expr.names.clone());
-                ret.push(expr.body.as_expr());
-            }
-            ret
-        };
+            let mut names = CSQLNames::new();
+            names.extend(start_bound.names);
+            names.extend(end_bound.names);
 
-        let order_by = {
-            let mut ret = Vec::new();
-            for expr in c_order_by.read()?.clone().into_iter() {
-                let (expr_names, expr) = cunwrap(expr)?;
-                names.extend(expr_names);
-                ret.push(expr);
-            }
-            ret
-        };
+            Ok(CSQLSnippet::wrap(
+                names,
+                sqlast::WindowFrame {
+                    units,
+                    start_bound: start_bound.body,
+                    end_bound: end_bound.body,
+                },
+            ))
+        })
+    }
+}
 
-        let window_frame = match window_frame {
-            Some(window_frame) => {
-                let (window_names, window_frame) = cunwrap(window_frame)?;
-                names.extend(window_names);
-                Some(window_frame)
-            }
-            None => None,
-        };
+impl CompileSQL for sqlast::WindowSpec {
+    fn compile_sql(
+        &self,
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        scope: &Ref<SQLScope>,
+        loc: &SourceLocation,
+    ) -> Result<CRefSnippet<Self>> {
+        let sqlast::WindowSpec {
+            partition_by,
+            order_by,
+            window_frame,
+        } = self;
 
-        Ok(cwrap((
-            names,
-            sqlast::WindowSpec {
-                partition_by,
-                order_by,
-                window_frame,
-            },
-        )))
-    })
+        let c_partition_by = partition_by.compile_sql(compiler, schema, scope, loc)?;
+        let c_order_by = order_by.compile_sql(compiler, schema, scope, loc)?;
+
+        let window_frame = window_frame.compile_sql(compiler, schema, scope, loc)?;
+
+        compiler.async_cref(async move {
+            let partition_by = cunwrap(c_partition_by.await?)?;
+            let order_by = cunwrap(c_order_by.await?)?;
+            let window_frame = cunwrap(window_frame.await?)?;
+
+            let mut names = SQLNames::new();
+            names.extend(partition_by.names);
+            names.extend(order_by.names);
+            names.extend(window_frame.names);
+
+            Ok(CSQLSnippet::wrap(
+                names,
+                sqlast::WindowSpec {
+                    partition_by: partition_by.body,
+                    order_by: order_by.body,
+                    window_frame: window_frame.body,
+                },
+            ))
+        })
+    }
 }
 
 pub fn compile_sqlexpr(
@@ -1936,10 +1978,7 @@ pub fn compile_sqlexpr(
         }) => {
             let distinct = *distinct;
             let special = *special;
-            let over = over
-                .as_ref()
-                .map(|over| compile_window_spec(&compiler, &schema, &scope, loc, over))
-                .transpose()?;
+            let over = over.compile_sql(&compiler, &schema, &scope, loc)?;
 
             let func_name = name.to_path(file.clone());
             let func = compile_reference(compiler.clone(), schema.clone(), &func_name)?;
@@ -2075,24 +2114,13 @@ pub fn compile_sqlexpr(
                         .collect::<Result<Vec<_>>>()?;
                     let arg_exprs = combine_crefs(arg_exprs)?.await?;
 
-                    let over = match over {
-                        Some(over) => Some(over.await?),
-                        None => None,
-                    };
+                    let over = cunwrap(over.await?)?;
 
                     let args = arg_exprs
                         .read()?
                         .iter()
                         .map(|e| Ok(e.read()?.clone()))
                         .collect::<Result<Vec<_>>>()?;
-
-                    let (over_names, over) = match over {
-                        Some(over) => {
-                            let (over_names, over_expr) = cunwrap(over)?;
-                            (over_names, Some(over_expr))
-                        }
-                        None => (SQLNames::new(), None),
-                    };
 
                     if type_.is_known()? {
                         match &*type_
@@ -2157,7 +2185,7 @@ pub fn compile_sqlexpr(
                     // run locally (e.g. `load`).
                     //
                     let can_lift = !args.iter().any(|a| has_unbound_names(a.expr.clone()))
-                        || !over_names.unbound.is_empty();
+                        || !over.names.unbound.is_empty();
                     let should_lift = if compiler.allow_inlining()? {
                         matches!(fn_kind, FnKind::Native)
                     } else {
@@ -2248,7 +2276,7 @@ pub fn compile_sqlexpr(
                                     body: SQLBody::Expr(sqlast::Expr::Function(sqlast::Function {
                                         name,
                                         args,
-                                        over,
+                                        over: over.body,
                                         distinct,
                                         special,
                                     })),
@@ -2322,12 +2350,7 @@ pub fn compile_sqlexpr(
                 expr.as_ref(),
             )?;
 
-            let ob = match order_by {
-                Some(order_by) => Some(compile_unreferenced_order_by_expr(
-                    &compiler, &schema, &scope, loc, order_by,
-                )?),
-                None => None,
-            };
+            let ob = order_by.compile_sql(&compiler, &schema, &scope, loc)?;
 
             let limit = match limit {
                 Some(l) => Some(compile_sqlarg(
@@ -2352,10 +2375,7 @@ pub fn compile_sqlexpr(
                     let mut names = CSQLNames::new();
                     let expr = compiled_expr.sql.await?;
 
-                    let ob = match ob {
-                        Some(ob) => Some(ob.await?),
-                        None => None,
-                    };
+                    let ob = cunwrap(ob.await?)?;
 
                     let limit = match limit {
                         Some(limit) => Some(limit.sql.await?),
@@ -2365,14 +2385,7 @@ pub fn compile_sqlexpr(
                     let expr = expr.read()?;
                     names.extend(expr.names.clone());
 
-                    let order_by = match ob {
-                        Some(ob) => {
-                            let (ob_names, ob_expr) = cunwrap(ob)?;
-                            names.extend(ob_names);
-                            Some(Box::new(ob_expr))
-                        }
-                        None => None,
-                    };
+                    names.extend(ob.names);
 
                     let limit = match limit {
                         Some(limit) => {
@@ -2388,7 +2401,7 @@ pub fn compile_sqlexpr(
                         body: SQLBody::Expr(sqlast::Expr::ArrayAgg(sqlast::ArrayAgg {
                             distinct,
                             expr: Box::new(expr.body.as_expr()),
-                            order_by,
+                            order_by: ob.body,
                             limit,
                             within_group,
                         })),

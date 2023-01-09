@@ -2,7 +2,6 @@ use snafu::prelude::*;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
@@ -55,8 +54,6 @@ where
     F: FnMut(Ref<T>) -> Result<CRef<R>> + Send + Sync,
 {
 }
-
-pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
 impl Constrainable for Ident {}
 impl<T> Constrainable for Vec<T> where T: Constrainable {}

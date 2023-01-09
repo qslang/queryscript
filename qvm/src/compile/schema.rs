@@ -656,6 +656,20 @@ impl SQLBody {
     }
 }
 
+impl fmt::Debug for SQLBody {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match &self {
+                SQLBody::Expr(expr) => expr.to_string(),
+                SQLBody::Query(query) => query.to_string(),
+                SQLBody::Table(table) => table.to_string(),
+            }
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SQLNames<TypeRef>
 where
@@ -702,7 +716,7 @@ where
 }
 
 #[derive(Clone)]
-pub struct SQL<TypeRef>
+pub struct SQLSnippet<TypeRef, SQLAst>
 where
     TypeRef: Clone + fmt::Debug + Send + Sync,
 {
@@ -712,22 +726,30 @@ where
 
     // The AST representing the actual body of the SQL query or expression.
     //
-    pub body: SQLBody,
+    pub body: SQLAst,
 }
 
-impl<T: Clone + fmt::Debug + Send + Sync> fmt::Debug for SQL<T> {
+impl<TypeRef: Clone + fmt::Debug + Send + Sync, SQLAst> SQLSnippet<TypeRef, SQLAst> {
+    pub fn wrap(names: SQLNames<TypeRef>, body: SQLAst) -> CRef<super::inference::CWrap<Self>>
+    where
+        TypeRef: 'static,
+        SQLAst: Clone + fmt::Debug + Send + Sync + 'static,
+    {
+        super::inference::cwrap(Self { names, body })
+    }
+}
+
+impl<T: Clone + fmt::Debug + Send + Sync, SQLAst: fmt::Debug> fmt::Debug for SQLSnippet<T, SQLAst> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let body = match &self.body {
-            SQLBody::Expr(expr) => expr.to_string(),
-            SQLBody::Query(query) => query.to_string(),
-            SQLBody::Table(table) => table.to_string(),
-        };
+        let body = format!("{:?}", &self.body);
         f.debug_struct("SQL")
             .field("names", &self.names)
             .field("body", &body)
             .finish()
     }
 }
+
+pub type SQL<TypeRef> = SQLSnippet<TypeRef, SQLBody>;
 
 #[derive(Debug, Clone)]
 pub enum FnKind {
