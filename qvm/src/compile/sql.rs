@@ -745,7 +745,14 @@ impl CompileSQL for sqlast::JoinConstraint {
                     Ok(CSQLSnippet::wrap(sql.names.clone(), On(sql.body.as_expr())))
                 })?
             }
+
+            // USING is quite difficult to implement, because it also affects the type of the query itself. If a field
+            // is "used" in a USING, then it's only projected from the first relation. We should probably store an exclusion
+            // list on the scope, and then not include the field(s) during get_available_references(). Additionally, we will
+            // need to pass the target table down here (the left side of the USING field should be whichever references is
+            // available prior to excluding the field from the USING clause).
             Using(_) => return Err(CompileError::unimplemented(loc.clone(), "JOIN ... USING")),
+
             Natural => CSQLSnippet::wrap(CSQLNames::new(), Natural),
             None => CSQLSnippet::wrap(CSQLNames::new(), None),
         })
@@ -2537,6 +2544,13 @@ pub fn compile_sqlexpr(
             schema.clone(),
             scope.clone(),
             &vec![ident.clone()],
+        )?,
+        sqlast::Expr::Nested(expr) => compile_sqlexpr(
+            compiler.clone(),
+            schema.clone(),
+            scope.clone(),
+            loc,
+            expr.as_ref(),
         )?,
         _ => {
             return Err(CompileError::unimplemented(
