@@ -930,17 +930,55 @@ pub fn compile_gb_ob_expr(
     })
 }
 
-fn check_options(loc: &SourceLocation, o: &sqlast::WildcardAdditionalOptions) -> Result<()> {
-    if let Some(_) = o.opt_except {
-        return Err(CompileError::unimplemented(loc.clone(), "Wildcard EXCEPT"));
+fn extract_renamings(
+    file: Option<String>,
+    o: &sqlast::WildcardAdditionalOptions,
+) -> BTreeMap<Ident, Option<Located<Ident>>> {
+    let mut ret = BTreeMap::new();
+
+    if let Some(exclude) = &o.opt_exclude {
+        use sqlast::ExcludeSelectItem::*;
+        match exclude {
+            Single(i) => {
+                ret.insert(i.get().into(), None);
+            }
+            Multiple(l) => {
+                ret.extend(l.iter().map(|i| (i.get().into(), None)));
+            }
+        }
     }
-    if let Some(_) = o.opt_exclude {
-        return Err(CompileError::unimplemented(loc.clone(), "Wildcard EXCLUDE"));
+
+    if let Some(except) = &o.opt_except {
+        ret.insert(except.first_element.get().into(), None);
+        ret.extend(
+            except
+                .additional_elements
+                .iter()
+                .map(|i| (i.get().into(), None)),
+        );
     }
-    if let Some(_) = o.opt_rename {
-        return Err(CompileError::unimplemented(loc.clone(), "Wildcard RENAME"));
+
+    if let Some(rename) = &o.opt_rename {
+        use sqlast::RenameSelectItem::*;
+        match rename {
+            Single(i) => {
+                ret.insert(
+                    i.ident.get().into(),
+                    Some(Ident::from_located_sqlident(file.clone(), i.alias.clone())),
+                );
+            }
+            Multiple(l) => {
+                ret.extend(l.iter().map(|i| {
+                    (
+                        i.ident.get().into(),
+                        Some(Ident::from_located_sqlident(file.clone(), i.alias.clone())),
+                    )
+                }));
+            }
+        }
     }
-    Ok(())
+
+    ret
 }
 
 pub fn compile_select(
@@ -1024,13 +1062,11 @@ pub fn compile_select(
                     }])
                 }
                 sqlast::SelectItem::Wildcard(..) | sqlast::SelectItem::QualifiedWildcard { .. } => {
-                    let qualifier = match p {
+                    let (qualifier, renamings) = match p {
                         sqlast::SelectItem::Wildcard(options) => {
-                            check_options(loc, options)?;
-                            None
+                            (None, extract_renamings(loc.file(), options))
                         }
                         sqlast::SelectItem::QualifiedWildcard(qualifier, options) => {
-                            check_options(loc, options)?;
                             if qualifier.0.len() != 1 {
                                 return Err(CompileError::unimplemented(
                                     loc.clone(),
@@ -1038,10 +1074,14 @@ pub fn compile_select(
                                 ));
                             }
 
-                            Some(qualifier.0[0].get().into())
+                            (
+                                Some(qualifier.0[0].get().into()),
+                                extract_renamings(loc.file(), options),
+                            )
                         }
                         _ => unreachable!(),
                     };
+
                     let available =
                         scope
                             .read()?
@@ -1059,9 +1099,16 @@ pub fn compile_select(
                                             .replace_location(loc.clone())]))
                                     }
                                 };
+
+                                let name = match renamings.get(&m.field) {
+                                    Some(Some(n)) => n.clone(),
+                                    Some(None) => continue,
+                                    None => m.field.clone(),
+                                };
+
                                 let sqlpath = vec![m.relation.to_sqlident(), m.field.to_sqlident()];
                                 ret.push(CTypedNameAndSQL {
-                                    name: m.field.clone(),
+                                    name,
                                     type_,
                                     sql: mkcref(SQL {
                                         names: CSQLNames::from_unbound(&sqlpath),

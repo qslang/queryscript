@@ -133,6 +133,17 @@ impl Ident {
         Ident::with_location(loc, Into::<Ident>::into(ident))
     }
 
+    pub fn from_located_sqlident(
+        file: Option<String>,
+        ident: sqlast::Located<sqlast::Ident>,
+    ) -> Located<Ident> {
+        let loc = match file {
+            Some(f) => SourceLocation::from_file_range(f, ident.location().clone()),
+            None => SourceLocation::Unknown,
+        };
+        Ident::with_location(loc, Into::<Ident>::into(ident.get()))
+    }
+
     pub fn replace_location(&self, loc: SourceLocation) -> Located<Ident> {
         Ident::with_location(loc, self.clone())
     }
