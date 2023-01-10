@@ -759,11 +759,16 @@ impl CompileSQL for sqlast::JoinOperator {
     ) -> Result<CRefSnippet<Self>> {
         use sqlast::JoinOperator::*;
         let join_constructor = match self {
-            Inner(_) => Some(Inner),
-            LeftOuter(_) => Some(Inner),
-            RightOuter(_) => Some(Inner),
-            FullOuter(_) => Some(Inner),
-            _ => None,
+            Inner(_) => Inner,
+            LeftOuter(_) => LeftOuter,
+            RightOuter(_) => RightOuter,
+            FullOuter(_) => FullOuter,
+            o => {
+                return Err(CompileError::unimplemented(
+                    loc.clone(),
+                    format!("{:?}", o).as_str(),
+                ))
+            }
         };
 
         Ok(match self {
@@ -773,16 +778,11 @@ impl CompileSQL for sqlast::JoinOperator {
                     let join_constraint = cunwrap(constraint.await?)?;
                     Ok(CSQLSnippet::wrap(
                         join_constraint.names,
-                        join_constructor.unwrap()(join_constraint.body),
+                        join_constructor(join_constraint.body),
                     ))
                 })?
             }
-            o => {
-                return Err(CompileError::unimplemented(
-                    loc.clone(),
-                    format!("{:?}", o).as_str(),
-                ))
-            }
+            _ => unreachable!(),
         })
     }
 }
