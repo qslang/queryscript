@@ -1754,6 +1754,50 @@ impl CompileSQL for sqlast::WindowSpec {
     }
 }
 
+async fn extract_scalar_subselect_field(
+    loc: &SourceLocation,
+    query_type: &MType,
+) -> Result<MField> {
+    let inner_record = match &query_type {
+        MType::List(t) => {
+            let inner_type = t.get().await?;
+            let inner_type = inner_type.read()?;
+            match &*inner_type {
+                MType::Record(r) => Some(r.clone()),
+                _ => None,
+            }
+        }
+        _ => None,
+    };
+
+    let inner_record = match inner_record {
+        Some(i) => i,
+        None => {
+            return Err(CompileError::internal(
+                loc.clone(),
+                format!(
+                    "Subselect expected to return a list of records (not {:?})",
+                    query_type
+                )
+                .as_str(),
+            ))
+        }
+    };
+
+    Ok(if inner_record.get().len() == 1 {
+        inner_record.get()[0].clone()
+    } else {
+        return Err(CompileError::scalar_subselect(
+            inner_record.location().clone(),
+            format!(
+                "should return a single field (not {})",
+                inner_record.get().len()
+            )
+            .as_str(),
+        ));
+    })
+}
+
 pub fn compile_sqlexpr(
     compiler: Compiler,
     schema: Ref<Schema>,
@@ -2542,45 +2586,7 @@ pub fn compile_sqlexpr(
                 let query_type = type_.await?;
                 let query_type = query_type.read()?.clone();
 
-                let inner_record = match &query_type {
-                    MType::List(t) => {
-                        let inner_type = t.get().await?;
-                        let inner_type = inner_type.read()?;
-                        match &*inner_type {
-                            MType::Record(r) => Some(r.clone()),
-                            _ => None,
-                        }
-                    }
-                    _ => None,
-                };
-
-                let inner_record = match inner_record {
-                    Some(i) => i,
-                    None => {
-                        return Err(CompileError::internal(
-                            loc.clone(),
-                            format!(
-                                "Subselect expected to return a list of records (not {:?})",
-                                query_type
-                            )
-                            .as_str(),
-                        ))
-                    }
-                };
-
-                let first_field = if inner_record.get().len() == 1 {
-                    inner_record.get()[0].clone()
-                } else {
-                    return Err(CompileError::scalar_subselect(
-                        inner_record.location().clone(),
-                        format!(
-                            "should return a single field (not {})",
-                            inner_record.get().len()
-                        )
-                        .as_str(),
-                    ));
-                };
-
+                let first_field = extract_scalar_subselect_field(&loc, &query_type).await?;
                 Ok(first_field.type_)
             })?;
 
@@ -2593,6 +2599,63 @@ pub fn compile_sqlexpr(
             })?;
 
             CTypedExpr { type_, expr }
+        }
+        sqlast::Expr::InSubquery {
+            expr,
+            subquery,
+            negated,
+        } => {
+            let expr = compile_sqlarg(
+                compiler.clone(),
+                schema.clone(),
+                scope.clone(),
+                loc,
+                expr.as_ref(),
+            )?;
+            let (_scope, subquery_type, subquery) = compile_sqlquery(
+                compiler.clone(),
+                schema.clone(),
+                Some(scope.clone()),
+                loc,
+                subquery.as_ref(),
+            )?;
+
+            compiler.async_cref({
+                let loc = loc.clone();
+                async move {
+                    let subquery_type = subquery_type.await?;
+                    let subquery_type = subquery_type.read()?.clone();
+
+                    let first_field = extract_scalar_subselect_field(&loc, &subquery_type).await?;
+                    first_field.type_.unify(&expr.type_)?;
+
+                    Ok(mkcref(()))
+                }
+            })?;
+
+            let negated = *negated;
+
+            CTypedExpr {
+                type_: resolve_global_atom(compiler.clone(), "bool")?,
+                expr: compiler.async_cref(async move {
+                    let expr = expr.sql.clone().await?;
+                    let subquery = cunwrap(subquery.await?)?;
+                    let expr = expr.read()?;
+
+                    let mut names = CSQLNames::new();
+                    names.extend(expr.names.clone());
+                    names.extend(subquery.names);
+
+                    Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                        names: names,
+                        body: SQLBody::Expr(sqlast::Expr::InSubquery {
+                            expr: Box::new(expr.body.as_expr()),
+                            subquery: Box::new(subquery.body),
+                            negated,
+                        }),
+                    }))))
+                })?,
+            }
         }
         sqlast::Expr::CompoundIdentifier(sqlpath) => {
             compile_sqlreference(compiler.clone(), schema.clone(), scope.clone(), sqlpath)?

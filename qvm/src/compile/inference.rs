@@ -56,6 +56,7 @@ where
 }
 
 impl Constrainable for Ident {}
+impl Constrainable for () {}
 impl<T> Constrainable for Vec<T> where T: Constrainable {}
 impl<K, V> Constrainable for BTreeMap<K, V>
 where
