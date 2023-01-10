@@ -840,13 +840,20 @@ fn compile_expr(compiler: Compiler, schema: Ref<Schema>, expr: &ast::Expr) -> Re
         compile_unsafe_expr(compiler, schema, &expr.body, &loc)
     } else {
         match &expr.body {
-            ast::ExprBody::SQLQuery(q) => Ok(compile_sqlquery(
-                compiler.clone(),
-                schema.clone(),
-                None,
-                &loc,
-                q,
-            )?),
+            ast::ExprBody::SQLQuery(q) => {
+                let (_scope, type_, query) =
+                    compile_sqlquery(compiler.clone(), schema.clone(), None, &loc, q)?;
+                Ok(CTypedExpr {
+                    type_,
+                    expr: compiler.async_cref(async move {
+                        let query = cunwrap(query.await?)?;
+                        Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                            names: query.names,
+                            body: SQLBody::Query(query.body),
+                        }))))
+                    })?,
+                })
+            }
             ast::ExprBody::SQLExpr(e) => {
                 let scope = SQLScope::new(None);
                 Ok(compile_sqlexpr(

@@ -658,7 +658,7 @@ impl CompileSQL for sqlast::TableFactor {
                 }
 
                 // NOTE: Once we thread locations through the parse tree, we should use the location here.
-                let subquery = compile_sqlquery(
+                let (_scope, subquery_type, subquery) = compile_sqlquery(
                     compiler.clone(),
                     schema.clone(),
                     Some(scope.clone()),
@@ -683,27 +683,17 @@ impl CompileSQL for sqlast::TableFactor {
 
                 scope
                     .write()?
-                    .add_reference(&name.get().into(), &loc, subquery.type_.clone())?;
+                    .add_reference(&name.get().into(), &loc, subquery_type.clone())?;
 
-                let loc = loc.clone();
                 let lateral = *lateral;
                 compiler.async_cref(async move {
-                    let subquery_expr = Arc::new(subquery.expr.await?.read()?.clone());
-                    let (sql_names, sql_query) = match &*subquery_expr {
-                        Expr::SQL(q) => (q.names.clone(), Box::new(q.body.as_query())),
-                        _ => {
-                            return Err(CompileError::internal(
-                                loc.clone(),
-                                "Subquery must be a SQL expression",
-                            ))
-                        }
-                    };
+                    let subquery_expr = cunwrap(subquery.await?)?;
 
                     Ok(CSQLSnippet::wrap(
-                        sql_names,
+                        subquery_expr.names,
                         sqlast::TableFactor::Derived {
                             lateral,
-                            subquery: sql_query,
+                            subquery: Box::new(subquery_expr.body),
                             alias: Some(sqlast::TableAlias {
                                 name: name.clone(),
                                 columns: Vec::new(),
@@ -997,7 +987,7 @@ pub fn compile_select(
 ) -> Result<(
     Ref<SQLScope>,
     CRef<MType>,
-    CRef<CWrap<(CSQLNames, Box<sqlast::SetExpr>)>>,
+    CRef<CWrap<(CSQLNames, sqlast::Select)>>,
 )> {
     if select.top.is_some() {
         return Err(CompileError::unimplemented(loc.clone(), "TOP"));
@@ -1230,10 +1220,7 @@ pub fn compile_select(
                 .remove_bound_references(compiler.clone(), names)?;
             let names = names.await?.read()?.clone();
 
-            Ok(cwrap((
-                names,
-                Box::new(sqlast::SetExpr::Select(Box::new(ret.clone()))),
-            )))
+            Ok(cwrap((names, ret)))
         }
     })?;
 
@@ -1266,7 +1253,7 @@ pub fn compile_sqlquery(
     parent_scope: Option<Ref<SQLScope>>,
     loc: &SourceLocation,
     query: &sqlast::Query,
-) -> Result<CTypedExpr> {
+) -> Result<(Ref<SQLScope>, CRef<MType>, CRefSnippet<sqlast::Query>)> {
     if query.with.is_some() {
         return Err(CompileError::unimplemented(loc.clone(), "WITH"));
     }
@@ -1316,67 +1303,145 @@ pub fn compile_sqlquery(
         ));
     }
 
-    match query.body.as_ref() {
+    let (scope, type_, set_expr) =
+        compile_setexpr(&compiler, &schema, parent_scope.clone(), loc, &query.body)?;
+
+    Ok((
+        scope.clone(),
+        type_,
+        compiler.async_cref({
+            let compiled_order_by =
+                compile_order_by(&compiler, &schema, &scope, loc, &query.order_by)?;
+
+            let loc = loc.clone();
+            let compiler = compiler.clone();
+            async move {
+                let body = cunwrap(set_expr.await?)?;
+                let SQLSnippet { mut names, body } = body;
+                let limit = match limit {
+                    Some(limit) => Some(finish_sqlexpr(&loc, limit.expr, &mut names).await?),
+                    None => None,
+                };
+
+                let offset = match offset {
+                    Some((offset, rows)) => Some(sqlparser::ast::Offset {
+                        value: finish_sqlexpr(&loc, offset.expr, &mut names).await?,
+                        rows,
+                    }),
+                    None => None,
+                };
+
+                let (ob_names, order_by) = cunwrap(compiled_order_by.await?)?;
+                names.extend(ob_names);
+
+                let names = scope
+                    .read()?
+                    .remove_bound_references(compiler.clone(), names)?;
+                let names = names.await?.read()?.clone();
+
+                Ok(SQLSnippet::wrap(
+                    names,
+                    sqlast::Query {
+                        with: None,
+                        body: Box::new(body),
+                        order_by,
+                        limit,
+                        offset,
+                        fetch: None,
+                        locks: Vec::new(),
+                    },
+                ))
+            }
+        })?,
+    ))
+}
+
+pub fn compile_setexpr(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    parent_scope: Option<Ref<SQLScope>>,
+    loc: &SourceLocation,
+    set_expr: &sqlast::SetExpr,
+) -> Result<(Ref<SQLScope>, CRef<MType>, CRefSnippet<sqlast::SetExpr>)> {
+    match set_expr {
         sqlast::SetExpr::Select(s) => {
             let (scope, type_, select) =
                 compile_select(compiler.clone(), schema.clone(), parent_scope, loc, s)?;
 
-            Ok(CTypedExpr {
+            Ok((
+                scope,
                 type_,
-                expr: compiler.async_cref({
-                    let compiled_order_by =
-                        compile_order_by(&compiler, &schema, &scope, loc, &query.order_by)?;
-
-                    let loc = loc.clone();
-                    let compiler = compiler.clone();
-                    async move {
-                        let (mut names, body) = cunwrap(select.await?)?;
-                        let limit = match limit {
-                            Some(limit) => {
-                                Some(finish_sqlexpr(&loc, limit.expr, &mut names).await?)
-                            }
-                            None => None,
-                        };
-
-                        let offset = match offset {
-                            Some((offset, rows)) => Some(sqlparser::ast::Offset {
-                                value: finish_sqlexpr(&loc, offset.expr, &mut names).await?,
-                                rows,
-                            }),
-                            None => None,
-                        };
-
-                        let (ob_names, order_by) = cunwrap(compiled_order_by.await?)?;
-                        names.extend(ob_names);
-
-                        let names = scope
-                            .read()?
-                            .remove_bound_references(compiler.clone(), names)?;
-                        let names = names.await?.read()?.clone();
-
-                        Ok(mkcref(Expr::SQL(Arc::new(SQL {
-                            names,
-                            body: SQLBody::Query(sqlast::Query {
-                                with: None,
-                                body,
-                                order_by,
-                                limit,
-                                offset,
-                                fetch: None,
-                                locks: Vec::new(),
-                            }),
-                        }))))
-                    }
+                compiler.async_cref(async move {
+                    let (names, body) = cunwrap(select.await?)?;
+                    Ok(SQLSnippet::wrap(
+                        names,
+                        sqlast::SetExpr::Select(Box::new(body)),
+                    ))
                 })?,
-            })
+            ))
         }
         sqlast::SetExpr::Query(q) => {
-            compile_sqlquery(compiler.clone(), schema.clone(), parent_scope, loc, q)
+            let (scope, type_, query) =
+                compile_sqlquery(compiler.clone(), schema.clone(), parent_scope, loc, &q)?;
+
+            Ok((
+                scope,
+                type_,
+                compiler.async_cref(async move {
+                    let query = cunwrap(query.await?)?;
+                    Ok(SQLSnippet::wrap(
+                        query.names,
+                        sqlast::SetExpr::Query(Box::new(query.body)),
+                    ))
+                })?,
+            ))
         }
-        sqlast::SetExpr::SetOperation { .. } => Err(CompileError::unimplemented(
-            loc.clone(),
-            "UNION | EXCEPT | INTERSECT",
-        )),
+        sqlast::SetExpr::SetOperation {
+            op,
+            set_quantifier,
+            left,
+            right,
+        } => {
+            let op = op.clone();
+            let set_quantifier = set_quantifier.clone();
+            let (left_scope, left_type, left_set_expr) =
+                compile_setexpr(compiler, schema, parent_scope.clone(), loc, &left)?;
+            let (_right_scope, right_type, right_set_expr) =
+                compile_setexpr(compiler, schema, parent_scope.clone(), loc, &right)?;
+
+            left_type.unify(&right_type)?;
+
+            Ok((
+                left_scope,
+                left_type,
+                compiler.async_cref({
+                    async move {
+                        let left = cunwrap(left_set_expr.await?)?;
+                        let right = cunwrap(right_set_expr.await?)?;
+
+                        let SQLSnippet {
+                            names: mut left_names,
+                            body: left_body,
+                        } = left;
+                        let SQLSnippet {
+                            names: right_names,
+                            body: right_body,
+                        } = right;
+
+                        left_names.extend(right_names);
+                        Ok(SQLSnippet::wrap(
+                            left_names,
+                            sqlast::SetExpr::SetOperation {
+                                op,
+                                set_quantifier,
+                                left: Box::new(left_body),
+                                right: Box::new(right_body),
+                            },
+                        ))
+                    }
+                })?,
+            ))
+        }
         sqlast::SetExpr::Values(_) => Err(CompileError::unimplemented(loc.clone(), "VALUES")),
         sqlast::SetExpr::Insert(_) => Err(CompileError::unimplemented(loc.clone(), "INSERT")),
         sqlast::SetExpr::Table(_) => Err(CompileError::unimplemented(loc.clone(), "TABLE")),
@@ -2464,21 +2529,17 @@ pub fn compile_sqlexpr(
             }
         }
         sqlast::Expr::Subquery(query) => {
-            let query = intern_cref_placeholder(
+            let (_scope, type_, subquery) = compile_sqlquery(
                 compiler.clone(),
-                "param".to_string(),
-                compile_sqlquery(
-                    compiler.clone(),
-                    schema.clone(),
-                    Some(scope.clone()),
-                    loc,
-                    query.as_ref(),
-                )?,
+                schema.clone(),
+                Some(scope.clone()),
+                loc,
+                query.as_ref(),
             )?;
 
             let loc = loc.clone();
             let type_ = compiler.async_cref(async move {
-                let query_type = query.type_.await?;
+                let query_type = type_.await?;
                 let query_type = query_type.read()?.clone();
 
                 let inner_record = match &query_type {
@@ -2524,13 +2585,10 @@ pub fn compile_sqlexpr(
             })?;
 
             let expr = compiler.async_cref(async {
-                let inner_query = query.sql.await?;
-                let inner_query = inner_query.read()?;
+                let inner_query = cunwrap(subquery.await?)?;
                 Ok(mkcref(Expr::SQL(Arc::new(SQL {
                     names: inner_query.names.clone(),
-                    body: SQLBody::Expr(sqlast::Expr::Subquery(Box::new(
-                        inner_query.body.as_query(),
-                    ))),
+                    body: SQLBody::Expr(sqlast::Expr::Subquery(Box::new(inner_query.body))),
                 }))))
             })?;
 
