@@ -55,12 +55,19 @@ const BUILTIN_TYPES: &'static [BuiltinType] = &[
 const BUILTIN_FUNCTIONS: &'static str = "
 fn load<R>(file varchar, format varchar) -> External<[R]> = native;
 fn __native_identity<T>(value T) -> T = native;
+
+-- Functions
+fn abs<R>(value R) -> R = sql;
+fn strptime<R>(value text, fmt string) -> timestamp = sql;
+
+-- Aggs
 fn min<R>(value R) -> R = sql;
 fn max<R>(value R) -> R = sql;
 fn count<R>(value R) -> bigint = sql;
 fn sum<R>(value R) -> SumAgg<R> = sql;
 fn avg<R>(value R) -> double = sql;
-fn strptime<R>(value text, fmt string) -> timestamp = sql;
+
+-- Window functions
 fn row_number<R>() -> bigint = sql;
 ";
 

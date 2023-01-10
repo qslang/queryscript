@@ -163,11 +163,18 @@ impl DuckDBEngine {
 
         // NOTE: We could probably avoid collecting the whole result here and instead make
         // ArrowRecordBatchRelation accept an iterator as input.
-        let rbs = ArrowRecordBatchRelation::new(
+        Ok(ArrowRecordBatchRelation::from_duckdb(query_result))
+    }
+}
+
+impl ArrowRecordBatchRelation {
+    pub fn from_duckdb(query_result: duckdb::Arrow) -> Arc<dyn Relation> {
+        // NOTE: We could probably avoid collecting the whole result here and instead make
+        // ArrowRecordBatchRelation accept an iterator as input.
+        ArrowRecordBatchRelation::new(
             query_result.get_schema(),
             Arc::new(query_result.collect::<Vec<RecordBatch>>()),
-        );
-        Ok(rbs)
+        )
     }
 }
 

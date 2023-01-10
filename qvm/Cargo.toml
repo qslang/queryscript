@@ -53,5 +53,9 @@ cxx = "1.0"
 # These are duckdb dependencies that we access directly
 hashlink = { version = "*" }
 
+[dev-dependencies]
+sqllogictest = "0.10.0"
+walkdir = "2.3.2"
+
 [build-dependencies]
 cxx-build = "1.0"

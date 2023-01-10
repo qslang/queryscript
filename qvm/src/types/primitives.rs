@@ -2,12 +2,30 @@ pub use super::types::*;
 pub use super::value::*;
 
 macro_rules! primitive_conversion {
-    ($native_ty:ty, $arm:tt) => {
+    ($native_ty:ty, $arm:tt, $return_ty:ty) => {
         impl From<$native_ty> for Value {
             fn from(val: $native_ty) -> Self {
                 Value::$arm(val.into())
             }
         }
+
+        impl TryInto<$return_ty> for Value {
+            type Error = super::error::TypesystemError;
+
+            fn try_into(self) -> super::error::Result<$return_ty> {
+                match self {
+                    Value::$arm(v) => Ok(v.into()),
+                    _ => super::error::ts_fail!(
+                        "Expected {} but got {:?}",
+                        stringify!($return_ty),
+                        self
+                    ),
+                }
+            }
+        }
+    };
+    ($native_ty:ty, $arm:tt) => {
+        primitive_conversion!($native_ty, $arm, $native_ty);
     };
 }
 
@@ -24,7 +42,7 @@ primitive_conversion!(half::f16, Float16);
 primitive_conversion!(f32, Float32);
 primitive_conversion!(f64, Float64);
 primitive_conversion!(String, Utf8);
-primitive_conversion!(&[u8], Binary);
+primitive_conversion!(&[u8], Binary, Vec<u8>);
 primitive_conversion!(i128, Decimal128);
 primitive_conversion!(i256, Decimal256);
 

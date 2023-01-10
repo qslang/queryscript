@@ -107,6 +107,13 @@ pub trait Relation: fmt::Debug + Send + Sync {
 
     fn num_batches(&self) -> usize;
     fn batch(&self, index: usize) -> &dyn RecordBatch;
+
+    fn records(&self) -> Vec<Arc<dyn Record>> {
+        (0..self.num_batches())
+            .map(|i| self.batch(i).records())
+            .flatten()
+            .collect()
+    }
 }
 
 pub trait RecordBatch: fmt::Debug + Send + Sync {

@@ -20,12 +20,11 @@ impl Context {
     where
         F: FnOnce() -> R,
     {
-        if tokio::runtime::Handle::current().runtime_flavor()
-            == tokio::runtime::RuntimeFlavor::MultiThread
-        {
-            tokio::task::block_in_place(f)
-        } else {
-            f()
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(f)
+            }
+            _ => f(),
         }
     }
 
