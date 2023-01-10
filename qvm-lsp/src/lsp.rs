@@ -313,7 +313,6 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        eprintln!("Starting completion");
         let position = params.text_document_position.position;
         let uri = params.text_document_position.text_document.uri.clone();
         let file = uri.path().to_string();
@@ -324,7 +323,7 @@ impl LanguageServer for Backend {
 
         let text = self.get_text(&uri).await?;
 
-        let loc = qvm::ast::Location {
+        let mut loc = qvm::ast::Location {
             line: (position.line + 1) as u64,
             column: (position.character + 1) as u64,
         };
@@ -334,7 +333,11 @@ impl LanguageServer for Backend {
         // active and the schema in the document is out of date.
         //
         let schema_ast = parse_schema(file.as_str(), text.as_str()).result;
-        let stmt = schema_ast.find_stmt(loc.clone());
+
+        // Find the statement that the previous character was a part of
+        //
+        loc.column -= 1;
+        let stmt = schema_ast.find_stmt(loc);
 
         let (start_pos, line) = if let Some(stmt) = stmt {
             let (start_pos, end_pos) = (
@@ -352,6 +355,7 @@ impl LanguageServer for Backend {
 
         let compiler = self.compiler.clone();
         let (suggestion_pos, suggestions) = task::spawn_blocking({
+            let line = line.clone();
             move || -> Result<_> {
                 let compiler = compiler.lock().map_err(log_internal_error)?;
                 let autocompleter = AutoCompleter::new(

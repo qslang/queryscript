@@ -88,9 +88,9 @@ pub fn loc_to_pos(text: &str, loc: parser::Location) -> Result<usize> {
     let lines = text.split('\n').collect::<Vec<_>>();
     let line_idx = (loc.line - 1) as usize;
     let column_idx = (loc.column - 1) as usize;
-    if line_idx >= lines.len() || column_idx >= lines[line_idx].len() {
+    if line_idx >= lines.len() || column_idx > lines[line_idx].len() {
         return Err(CompileError::internal(
-            compile::error::ErrorLocation::Unknown,
+            compile::error::ErrorLocation::Single("<string>".to_string(), loc),
             "Text location is out of bounds",
         ));
     }
@@ -196,6 +196,7 @@ impl AutoCompleter {
         match self.try_auto_complete(line, pos) {
             Ok(r) => r,
             Err(e) => {
+                eprintln!("{:?}", e);
                 (&mut *self.stats.borrow_mut()).msg = format!("{}", e);
                 return (0, Vec::new());
             }
@@ -213,7 +214,8 @@ impl AutoCompleter {
         let full_loc = pos_to_loc(full.as_str(), full_pos)?;
 
         let (tokens, eof) = parser::tokenize("<repl>", &full)?;
-        let parser = parser::Parser::new("<repl>", tokens, eof);
+        let mut parser = parser::Parser::new("<repl>", tokens, eof);
+        parser.parse_stmt(0);
 
         let (tok, suggestions) = parser.get_autocomplete(full_loc);
         let partial = match tok.token {
