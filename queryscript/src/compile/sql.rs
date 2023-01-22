@@ -25,7 +25,7 @@ use crate::{
 
 use super::compile::ExternalTypeRank;
 
-const QVM_NAMESPACE: &str = "__qvm";
+const QS_NAMESPACE: &str = "__qs";
 
 #[derive(Clone, Debug)]
 pub struct TypedSQL {
@@ -625,7 +625,7 @@ impl CompileSQL for sqlast::TableFactor {
                     .add_reference(&name.get().into(), &loc, relation.type_.clone())?;
 
                 let placeholder_name =
-                    QVM_NAMESPACE.to_string() + compiler.next_placeholder("rel")?.as_str();
+                    QS_NAMESPACE.to_string() + compiler.next_placeholder("rel")?.as_str();
                 from_names
                     .params
                     .insert(placeholder_name.clone().into(), relation);

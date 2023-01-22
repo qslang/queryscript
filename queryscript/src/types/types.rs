@@ -29,7 +29,7 @@ pub struct FnType {
 
 // These types are borrowed from Apache Arrow, which we closely integrate with but do not want
 // to take a 100% dependency on. We expect to extend these types over time to include more
-// QVM specific logic.
+// QueryScript specific logic.
 
 // From arrow-schema/src/field.rs
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

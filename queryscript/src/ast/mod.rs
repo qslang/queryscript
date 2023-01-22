@@ -119,7 +119,7 @@ impl SourceLocation {
 impl Pretty for SourceLocation {
     fn pretty(&self) -> String {
         match self {
-            SourceLocation::Unknown => "<qvm>".white().bold().to_string(),
+            SourceLocation::Unknown => "<qs>".white().bold().to_string(),
             SourceLocation::File(f) => f.clone().white().bold().to_string(),
             SourceLocation::Single(f, l) => format!("{}:{}:{}", f, l.line, l.column)
                 .white()

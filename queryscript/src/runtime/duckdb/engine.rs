@@ -29,7 +29,7 @@ pub mod cppffi {
         );
     }
     unsafe extern "C++" {
-        include!("qvm/include/duckdb-extra.hpp");
+        include!("queryscript/include/duckdb-extra.hpp");
 
         type ArrowArrayStreamWrapper;
         type Value;
@@ -128,8 +128,8 @@ impl DuckDBEngine {
 
         // This block installs a replacement scan (https://duckdb.org/docs/api/c/replacement_scans.html)
         // that calls back into our code (replacement_scan_callback) when duckdb encounters a table name
-        // it does not know about (i.e. any of our __qvmrel_N relations). The replacement for these scans
-        // is a function call (arrow_scan_qvm) that scans arrow data. This technique is the same method
+        // it does not know about (i.e. any of our __qsrel_N relations). The replacement for these scans
+        // is a function call (arrow_scan_qs) that scans arrow data. This technique is the same method
         // that duckdb uses internally to automatically query python variables (backed by Arrow, Pandas, etc.).
         unsafe {
             // This follows suggestion [B] outlined in
@@ -216,7 +216,7 @@ pub unsafe extern "C" fn replacement_scan_callback(
         None => return,
     };
 
-    let fn_name = CString::new("arrow_scan_qvm").unwrap();
+    let fn_name = CString::new("arrow_scan_qs").unwrap();
     cffi::duckdb_replacement_scan_set_function_name(info, fn_name.as_ptr());
     unsafe {
         let get_data_fn = cppffi::get_create_stream_fn();

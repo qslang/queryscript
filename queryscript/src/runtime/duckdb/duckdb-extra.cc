@@ -1,6 +1,6 @@
 #include <iostream>
-#include "qvm/include/duckdb-extra.hpp"
-#include "qvm/src/runtime/duckdb/engine.rs.h"
+#include "queryscript/include/duckdb-extra.hpp"
+#include "queryscript/src/runtime/duckdb/engine.rs.h"
 
 std::unique_ptr<ArrowArrayStreamWrapper> new_array_stream_wrapper(uintptr_t data, duckdb::ArrowStreamParameters &parameters)
 {
@@ -27,7 +27,7 @@ Value *duckdb_create_pointer(uint32_t *value)
 
 // These declarations are copied from duckdb.cpp (the file included within duckdb-rs,
 // pinned to version 0.6.0). They are re-declared here so that we can reference them
-// in the redeclaration of the arrow_scan function as arrow_scan_qvm.
+// in the redeclaration of the arrow_scan function as arrow_scan_qs.
 //
 // If we update duckdb-rs, we should manually update these declarations to make sure they
 // align with duckdb.cpp, otherwise we may see undefined behavior. Of note, ArrowTableFunction
@@ -121,7 +121,7 @@ void init_arrow_scan(uint32_t *connection_ptr)
     using namespace duckdb;
 
     // This code is mirrored from ArrowTableFunction::RegisterFunction
-    TableFunction arrow("arrow_scan_qvm", {LogicalType::POINTER, LogicalType::POINTER, LogicalType::POINTER},
+    TableFunction arrow("arrow_scan_qs", {LogicalType::POINTER, LogicalType::POINTER, LogicalType::POINTER},
                         ArrowTableFunction::ArrowScanFunction, ArrowTableFunction::ArrowScanBind,
                         ArrowTableFunction::ArrowScanInitGlobal, ArrowTableFunction::ArrowScanInitLocal);
 

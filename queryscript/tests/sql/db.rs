@@ -1,5 +1,5 @@
 // NOTE: We should have one of these implementations per backend engine that
-// we support. QVM's responsibility is to, when run against a particular engine,
+// we support. queryscript's responsibility is to, when run against a particular engine,
 // mimic that engines' semantics. A secondary (stretch) goal is to make the semantics
 // identical across engines, which we could test here as well.
 
@@ -11,10 +11,10 @@ use parquet::file::properties::WriterProperties;
 use snafu::prelude::*;
 use sqllogictest::{DBOutput, DB};
 
-use qvm::ast::SourceLocation;
-use qvm::runtime;
-use qvm::types::{arrow::ArrowRecordBatchRelation, Value};
-use qvm::{compile, compile::error::RuntimeSnafu};
+use queryscript::ast::SourceLocation;
+use queryscript::runtime;
+use queryscript::types::{arrow::ArrowRecordBatchRelation, Value};
+use queryscript::{compile, compile::error::RuntimeSnafu};
 
 pub struct DuckDB {
     conn: duckdb::Connection,
@@ -161,7 +161,7 @@ fn duckdb_write_tables(
     let tables = show_tables
         .query_and_then([], |row| row.get::<_, String>(0))?
         .map(|r| Ok(r?))
-        .collect::<qvm::runtime::error::Result<Vec<_>>>()?;
+        .collect::<queryscript::runtime::error::Result<Vec<_>>>()?;
 
     // Make the target directory if it does not exist
     std::fs::create_dir_all(&target_dir)?;
@@ -202,7 +202,7 @@ trait IntoDBOutput {
     fn into_db_output(self) -> DBOutput;
 }
 
-impl IntoDBOutput for &dyn qvm::types::Relation {
+impl IntoDBOutput for &dyn queryscript::types::Relation {
     fn into_db_output(self) -> DBOutput {
         let schema = self.schema();
         let records = self.records();
@@ -210,7 +210,8 @@ impl IntoDBOutput for &dyn qvm::types::Relation {
         // This is a bit of a hack to try to guess that it's a statement
         if schema.len() == 1
             && schema[0].name.as_str() == "Count"
-            && schema[0].type_ == qvm::types::Type::Atom(qvm::types::AtomicType::Int64)
+            && schema[0].type_
+                == queryscript::types::Type::Atom(queryscript::types::AtomicType::Int64)
         {
             let count: i64 = records.get(0).map_or(0, |r| {
                 r.column(0)
@@ -244,9 +245,9 @@ impl IntoDBOutput for &dyn qvm::types::Relation {
     }
 }
 
-fn to_columntype(type_: &qvm::types::Type) -> sqllogictest::runner::ColumnType {
-    use qvm::types::AtomicType::*;
-    use qvm::types::Type::*;
+fn to_columntype(type_: &queryscript::types::Type) -> sqllogictest::runner::ColumnType {
+    use queryscript::types::AtomicType::*;
+    use queryscript::types::Type::*;
     use sqllogictest::runner::ColumnType;
     match type_ {
         Atom(Null) => ColumnType::Unknown('n'),

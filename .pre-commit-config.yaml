@@ -4,9 +4,9 @@ repos:
     hooks:
       - id: check-yaml
       - id: end-of-file-fixer
-        exclude: qvm/tests/.*\.(expected|test)$
+        exclude: queryscript/tests/.*\.(expected|test)$
       - id: trailing-whitespace
-        exclude: qvm/tests/.*\.(expected|test)$
+        exclude: queryscript/tests/.*\.(expected|test)$
   - repo: "https://github.com/psf/black"
     rev: 22.6.0
     hooks:

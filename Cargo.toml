@@ -1,7 +1,7 @@
 [workspace]
 
 members = [
-    "qvm",
+    "queryscript",
     "qvm-cli",
     "qvm-lsp",
 ]

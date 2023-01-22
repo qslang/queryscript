@@ -869,7 +869,7 @@ struct list_entry_t {
 	uint64_t length;
 };
 
-using union_tag_t = uint8_t; 
+using union_tag_t = uint8_t;
 
 //===--------------------------------------------------------------------===//
 // Internal Types

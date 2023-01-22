@@ -246,7 +246,7 @@ impl PrettyError for CompileError {
         match self {
             CompileError::SyntaxError { source } => source.location(),
             CompileError::InternalError { loc, .. } => loc.clone(),
-            CompileError::ExternalError { .. } => ErrorLocation::File("<qvm>".to_string()),
+            CompileError::ExternalError { .. } => ErrorLocation::File("<qs>".to_string()),
             CompileError::TypesystemError { loc, .. } => loc.clone(),
             CompileError::RuntimeError { loc, .. } => loc.clone(),
             CompileError::FsError { loc, .. } => loc.clone(),

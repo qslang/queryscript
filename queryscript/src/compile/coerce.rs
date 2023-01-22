@@ -172,7 +172,7 @@ pub fn comparison_coercion(lhs_type: &Type, rhs_type: &Type) -> Option<Type> {
         return Some(lhs_type.clone());
     }
     comparison_binary_numeric_coercion(lhs_type, rhs_type)
-        // .or_else(|| dictionary_coercion(lhs_type, rhs_type, true)) // TODO: QVM does not support dictionaries
+        // .or_else(|| dictionary_coercion(lhs_type, rhs_type, true)) // TODO: QueryScript does not support dictionaries
         .or_else(|| temporal_coercion(lhs_type, rhs_type))
         .or_else(|| string_coercion(lhs_type, rhs_type))
         .or_else(|| null_coercion(lhs_type, rhs_type))

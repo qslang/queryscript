@@ -177,7 +177,7 @@ impl Compiler {
         let compiler = Compiler {
             runtime: mkref(
                 tokio::runtime::Builder::new_current_thread()
-                    .thread_name("qvm-compiler")
+                    .thread_name("qsc")
                     .thread_stack_size(3 * 1024 * 1024)
                     .on_thread_park(on_park)
                     .build()?,
@@ -1549,7 +1549,7 @@ mod tests {
         let drive_counter = Arc::new(AtomicUsize::new(0));
 
         let runtime = tokio::runtime::Builder::new_current_thread()
-            .thread_name("qvm-compiler")
+            .thread_name("qsc")
             .thread_stack_size(3 * 1024 * 1024)
             .on_thread_park(on_park)
             .build()

@@ -66,7 +66,7 @@ pub enum Value {
     IntervalDayTime(i64),
     IntervalMonthDayNano(i128),
 
-    // These are the structural types in QVM that deviate from DataFusion
+    // These are the structural types in QueryScript that deviate from DataFusion
     Record(Arc<dyn Record>),
     Relation(Arc<dyn Relation>),
     List(Arc<dyn List>),

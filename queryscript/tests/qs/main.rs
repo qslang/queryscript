@@ -8,11 +8,11 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    use qvm::ast;
-    use qvm::parser;
-    use qvm::runtime;
-    use qvm::types;
-    use qvm::{
+    use queryscript::ast;
+    use queryscript::parser;
+    use queryscript::runtime;
+    use queryscript::types;
+    use queryscript::{
         compile,
         compile::{Schema, SchemaRef},
     };
@@ -104,7 +104,7 @@ mod tests {
         let expr = expr.to_runtime_type()?;
 
         let engine_type = runtime::SQLEngineType::DuckDB;
-        let async_ctx = qvm::runtime::Context::new(&schema, engine_type);
+        let async_ctx = queryscript::runtime::Context::new(&schema, engine_type);
         let async_expr = expr.clone();
 
         let value = rt.block_on(async move { runtime::eval(&async_ctx, &async_expr).await })?;

@@ -5,4 +5,4 @@ pub mod parser;
 pub mod runtime;
 pub mod types;
 
-pub use error::QVMError;
+pub use error::QSError;

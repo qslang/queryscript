@@ -94,7 +94,7 @@ impl<'a, T: ArrowArray> List for &'a T {
     fn data_type(&self) -> Type {
         T::data_type(self)
             .try_into()
-            .expect("Arrow array type convert to qvm")
+            .expect("Arrow array type convert to queryscript")
     }
 
     fn as_any(&self) -> &dyn Any {

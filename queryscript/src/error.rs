@@ -4,7 +4,7 @@ use std::fmt;
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
-pub enum QVMError {
+pub enum QSError {
     #[snafu(display("Syntax error: {}", source), context(false))]
     ParserError {
         #[snafu(backtrace)]
@@ -36,14 +36,14 @@ pub enum QVMError {
     Multiple {
         // This is assumed to be non-empty
         //
-        sources: Vec<QVMError>,
+        sources: Vec<QSError>,
     },
 }
 
-impl QVMError {
+impl QSError {
     pub fn format_backtrace(&self) -> Vec<FormattedError> {
         match self {
-            QVMError::Multiple { sources } => {
+            QSError::Multiple { sources } => {
                 let mut ret = Vec::new();
                 for source in sources {
                     ret.extend(source.format_backtrace());
@@ -62,7 +62,7 @@ impl QVMError {
 
     pub fn format_without_backtrace(&self) -> Vec<FormattedError> {
         match self {
-            QVMError::Multiple { sources } => {
+            QSError::Multiple { sources } => {
                 let mut ret = Vec::new();
                 for source in sources {
                     ret.extend(source.format_without_backtrace());
@@ -78,31 +78,31 @@ impl QVMError {
     }
 }
 
-impl PrettyError for QVMError {
+impl PrettyError for QSError {
     fn location(&self) -> ErrorLocation {
         match self {
-            QVMError::ParserError { source } => source.location(),
-            QVMError::CompileError { source } => source.location(),
-            QVMError::RuntimeError { file, .. } => ErrorLocation::File(file.clone()),
+            QSError::ParserError { source } => source.location(),
+            QSError::CompileError { source } => source.location(),
+            QSError::RuntimeError { file, .. } => ErrorLocation::File(file.clone()),
             _ => ErrorLocation::Unknown,
         }
     }
 }
 
-impl<Guard> From<std::sync::PoisonError<Guard>> for QVMError {
-    fn from(e: std::sync::PoisonError<Guard>) -> QVMError {
+impl<Guard> From<std::sync::PoisonError<Guard>> for QSError {
+    fn from(e: std::sync::PoisonError<Guard>) -> QSError {
         snafu::FromString::without_source(e.to_string())
     }
 }
 
-impl From<crate::compile::error::CompileError> for QVMError {
-    fn from(e: crate::compile::error::CompileError) -> QVMError {
+impl From<crate::compile::error::CompileError> for QSError {
+    fn from(e: crate::compile::error::CompileError) -> QSError {
         match e {
             crate::compile::error::CompileError::Multiple { sources } => {
                 let sources = sources.into_iter().map(|e| e.into()).collect();
-                QVMError::Multiple { sources }
+                QSError::Multiple { sources }
             }
-            _ => QVMError::CompileError { source: e },
+            _ => QSError::CompileError { source: e },
         }
     }
 }

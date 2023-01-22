@@ -2,7 +2,7 @@ mod db;
 
 #[cfg(test)]
 mod tests {
-    use qvm::types::arrow::ArrowRecordBatchRelation;
+    use queryscript::types::arrow::ArrowRecordBatchRelation;
     use sqllogictest::{parse, Record};
     use std::path::{Path, PathBuf};
     use walkdir;
@@ -31,7 +31,7 @@ mod tests {
             parse(&contents).expect(format!("Could not parse file {}", path.display()).as_str());
 
         // Read up to the last statement, save each table to a parquet file, and then run the remaining
-        // SELECT statements against DuckDB directly and QVM and compare the results.
+        // SELECT statements against DuckDB directly and QueryScript and compare the results.
         let mut last_statement = -1;
         for (i, record) in records.iter().enumerate() {
             match record {
@@ -56,7 +56,7 @@ mod tests {
             .join(test_suffix);
 
         let mut qs_tester = None;
-        let rt = qvm::runtime::build().unwrap();
+        let rt = queryscript::runtime::build().unwrap();
         let _ = rt.enter();
 
         for (i, record) in records.into_iter().enumerate() {
@@ -128,7 +128,8 @@ mod tests {
             assert!(
                 schema.len() == 1
                     && schema[0].name.as_str() == "Count"
-                    && schema[0].type_ == qvm::types::Type::Atom(qvm::types::AtomicType::Int64)
+                    && schema[0].type_
+                        == queryscript::types::Type::Atom(queryscript::types::AtomicType::Int64)
             );
         }
 

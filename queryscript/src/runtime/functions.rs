@@ -22,19 +22,19 @@ use super::{
 type TypeRef = schema::Ref<types::Type>;
 
 #[derive(Clone, Debug)]
-pub struct QVMFn {
+pub struct QSFn {
     type_: types::FnType,
     body: schema::TypedExpr<TypeRef>,
 }
 
-impl QVMFn {
+impl QSFn {
     pub fn new(type_: TypeRef, body: Arc<schema::Expr<TypeRef>>) -> Result<Value> {
         let type_ = match &*type_.read()? {
             types::Type::Fn(f) => f.clone(),
             _ => return fail!("Function must have function type"),
         };
         let body_type = schema::mkref(type_.ret.as_ref().clone());
-        Ok(Value::Fn(Arc::new(QVMFn {
+        Ok(Value::Fn(Arc::new(QSFn {
             type_,
             body: schema::TypedExpr {
                 type_: body_type,
@@ -45,7 +45,7 @@ impl QVMFn {
 }
 
 #[async_trait]
-impl FnValue for QVMFn {
+impl FnValue for QSFn {
     fn execute(&self, ctx: &Context, args: Vec<Value>) -> BoxFuture<Result<Value>> {
         let new_ctx = ctx.clone();
         let type_ = self.type_.clone();

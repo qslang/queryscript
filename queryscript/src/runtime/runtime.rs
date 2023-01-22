@@ -82,7 +82,7 @@ pub fn eval<'a>(
                         )
                     }
                 };
-                QVMFn::new(typed_expr.type_.clone(), body)
+                QSFn::new(typed_expr.type_.clone(), body)
             }
             schema::Expr::NativeFn(name) => {
                 use super::functions::*;
