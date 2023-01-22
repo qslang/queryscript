@@ -4,11 +4,11 @@ use snafu::{prelude::*, whatever};
 use std::fs;
 use std::path::Path;
 
-use qvm::compile;
-use qvm::error::*;
-use qvm::parser;
-use qvm::parser::error::PrettyError;
-use qvm::runtime;
+use queryscript::compile;
+use queryscript::error::*;
+use queryscript::parser;
+use queryscript::parser::error::PrettyError;
+use queryscript::runtime;
 
 mod repl;
 mod rustyline;
@@ -57,7 +57,7 @@ fn main() {
     }
 }
 
-fn main_result() -> Result<(), QVMError> {
+fn main_result() -> Result<(), QSError> {
     let cli = Cli::parse();
     if cli.verbose {
         std::env::set_var("RUST_BACKTRACE", "1");
@@ -75,7 +75,7 @@ fn main_result() -> Result<(), QVMError> {
         Mode::Execute
     };
 
-    let engine_type = qvm::runtime::SQLEngineType::from_name(&cli.engine).unwrap();
+    let engine_type = queryscript::runtime::SQLEngineType::from_name(&cli.engine).unwrap();
 
     match cli.file {
         Some(file) => {
@@ -135,12 +135,12 @@ fn main_result() -> Result<(), QVMError> {
 fn run_file(
     compiler: compile::Compiler,
     rt: &runtime::Runtime,
-    engine_type: qvm::runtime::SQLEngineType,
+    engine_type: queryscript::runtime::SQLEngineType,
     file: &str,
     mode: Mode,
     execute: Option<String>,
     ignore_errors: bool,
-) -> Result<(), QVMError> {
+) -> Result<(), QSError> {
     let path = Path::new(&file);
     if !path.exists() {
         whatever!("Path {:?} does not exist", path);
@@ -211,7 +211,7 @@ fn run_file(
         return Ok(());
     }
 
-    let ctx = qvm::runtime::Context::new(&schema, engine_type);
+    let ctx = queryscript::runtime::Context::new(&schema, engine_type);
     let locked_schema = schema.read()?;
     for expr in locked_schema.exprs.iter() {
         let expr = expr.to_runtime_type().context(RuntimeSnafu {

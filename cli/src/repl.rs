@@ -2,17 +2,17 @@ use rustyline::{error::ReadlineError, Editor};
 use snafu::prelude::*;
 
 use crate::rustyline::RustylineHelper;
-use qvm::compile;
-use qvm::compile::schema;
-use qvm::error::*;
-use qvm::parser;
-use qvm::parser::error::PrettyError;
-use qvm::runtime;
+use queryscript::compile;
+use queryscript::compile::schema;
+use queryscript::error::*;
+use queryscript::parser;
+use queryscript::parser::error::PrettyError;
+use queryscript::runtime;
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub fn run(rt: &runtime::Runtime, engine_type: qvm::runtime::SQLEngineType) {
+pub fn run(rt: &runtime::Runtime, engine_type: queryscript::runtime::SQLEngineType) {
     let cwd = std::env::current_dir()
         .expect("current working directory")
         .display()
@@ -35,16 +35,16 @@ pub fn run(rt: &runtime::Runtime, engine_type: qvm::runtime::SQLEngineType) {
     .expect("readline library failed");
     rl.set_helper(Some(helper));
 
-    let qvm_dir = get_qvm_dir();
-    let qvm_history = match &qvm_dir {
+    let qs_dir = get_qs_dir();
+    let qs_history = match &qs_dir {
         Some(p) => {
-            std::fs::create_dir_all(p).expect("failed to create qvm dir");
+            std::fs::create_dir_all(p).expect("failed to create qs dir");
             Some(p.join("history.txt").display().to_string())
         }
         None => None,
     };
 
-    if let Some(history_file) = &qvm_history {
+    if let Some(history_file) = &qs_history {
         // This function returns an error when the history file does not exist,
         // which is ok.
         match rl.load_history(history_file) {
@@ -55,9 +55,9 @@ pub fn run(rt: &runtime::Runtime, engine_type: qvm::runtime::SQLEngineType) {
 
     loop {
         let readline = rl.readline(if curr_buffer.borrow().len() == 0 {
-            "qvm> "
+            "qs> "
         } else {
-            "...> "
+            "..> "
         });
 
         match readline {
@@ -123,7 +123,7 @@ pub fn run(rt: &runtime::Runtime, engine_type: qvm::runtime::SQLEngineType) {
         }
     }
 
-    if let Some(history_file) = &qvm_history {
+    if let Some(history_file) = &qs_history {
         rl.save_history(history_file)
             .expect("failed to save history");
     }
@@ -139,8 +139,8 @@ fn run_command(
     compiler: compile::Compiler,
     repl_schema: schema::SchemaRef,
     cmd: &str,
-    engine_type: qvm::runtime::SQLEngineType,
-) -> Result<RunCommandResult, QVMError> {
+    engine_type: queryscript::runtime::SQLEngineType,
+) -> Result<RunCommandResult, QSError> {
     let file = "<repl>";
     let (tokens, eof) = parser::tokenize(file, &cmd)?;
     let mut parser = parser::Parser::new(file, tokens, eof);
@@ -170,7 +170,7 @@ fn run_command(
             };
 
             if let Some(compiled) = compiled {
-                let ctx = qvm::runtime::Context::new(&repl_schema, engine_type);
+                let ctx = queryscript::runtime::Context::new(&repl_schema, engine_type);
                 let expr = compiled.to_runtime_type().context(RuntimeSnafu {
                     file: file.to_string(),
                 })?;
@@ -188,6 +188,6 @@ fn run_command(
     }
 }
 
-fn get_qvm_dir() -> Option<std::path::PathBuf> {
-    home::home_dir().map(|p| p.join(".qvm"))
+fn get_qs_dir() -> Option<std::path::PathBuf> {
+    home::home_dir().map(|p| p.join(".qs"))
 }

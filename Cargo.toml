@@ -2,6 +2,6 @@
 
 members = [
     "queryscript",
-    "qvm-cli",
-    "qvm-lsp",
+    "cli",
+    "lsp",
 ]

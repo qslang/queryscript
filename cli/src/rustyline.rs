@@ -1,8 +1,9 @@
 use rustyline::{completion::*, highlight::*, hint::*, validate::*, Context, Helper, Result};
 
-use qvm::compile;
-use qvm::compile::autocomplete::AutoCompleter;
-use qvm::compile::schema;
+use queryscript::{
+    compile,
+    compile::{autocomplete::AutoCompleter, schema},
+};
 
 use std::cell::RefCell;
 use std::rc::Rc;
