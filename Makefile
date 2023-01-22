@@ -1,21 +1,22 @@
 ROOT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
 all: ${VENV_PRE_COMMIT}
-	cd qvm-cli && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build
+	cd cli && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build
 
-lsp:
-	cd qvm-lsp && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build
+lsp: deps
+	cd lsp && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build
 
 test:
-	cd qvm/src/ && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo test -- --nocapture
+	cd queryscript/src/ && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo test -- --nocapture
 
+.PHONY: deps
 deps:
-	cd qvm-lsp && yarn install
-	cd qvm-lsp/client && yarn install
-	cd qvm-lsp/webview && yarn install
+	cd lsp && yarn install
+	cd lsp/client && yarn install
+	cd lsp/webview && yarn install
 
 refresh-test-data: ${VENV_PYTHON_PACKAGES}
-	source venv/bin/activate && nba-scraper ${ROOT_DIR}/qvm/tests/nba/data
+	source venv/bin/activate && nba-scraper ${ROOT_DIR}/queryscript/tests/nba/data
 
 VENV_INITIALIZED := venv/.initialized
 
@@ -25,9 +26,9 @@ ${VENV_INITIALIZED}:
 
 VENV_PYTHON_PACKAGES := venv/.python_packages
 
-${VENV_PYTHON_PACKAGES}: ${VENV_INITIALIZED} py/setup.py
+${VENV_PYTHON_PACKAGES}: ${VENV_INITIALIZED} qsutils/setup.py
 	bash -c 'source venv/bin/activate && python -m pip install --upgrade pip setuptools'
-	bash -c 'source venv/bin/activate && python -m pip install -e ./py[dev]'
+	bash -c 'source venv/bin/activate && python -m pip install -e ./qsutils[dev]'
 	@touch $@
 
 VENV_PRE_COMMIT := venv/.pre_commit
