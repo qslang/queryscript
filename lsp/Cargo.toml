@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 tower-lsp = "0.17"
-tokio = { version = "^1.22", features = [
+tokio = { version = "^1.23", features = [
 	"io-util",
 	"io-std",
 	"macros",
