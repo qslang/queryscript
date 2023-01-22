@@ -1,14 +1,14 @@
 {
-	"name": "qvm-lsp",
+	"name": "queryscript-lsp",
 	"description": "LSP for QueryVM",
-	"author": "QueryVM Contributors",
+	"author": "QueryScript Contributors",
 	"license": "MIT",
 	"version": "1.0.0",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/TODO/qvm"
+		"url": "https://github.com/qscl/queryscript"
 	},
-	"publisher": "qvm",
+	"publisher": "QueryScript",
 	"categories": [],
 	"keywords": [
 		"multi-root ready"
@@ -60,7 +60,7 @@
 			"type": "object",
 			"title": "QueryVM Configuration",
 			"properties": {
-				"qvm.maxNumberOfRows": {
+				"queryscript.maxNumberOfRows": {
 					"scope": "resource",
 					"type": "number",
 					"default": 1000,

@@ -18,7 +18,7 @@ use tower_lsp::jsonrpc::{Error, Result};
 use tower_lsp::{lsp_types, lsp_types::*, LspServiceBuilder};
 use tower_lsp::{Client, LanguageServer};
 
-use qvm::{
+use queryscript::{
     ast,
     ast::{Location, Pretty, SourceLocation},
     compile,
@@ -30,7 +30,7 @@ use qvm::{
     },
     parser::{error::PrettyError, parse_schema},
     runtime,
-    types::Type as QVMType,
+    types::Type as QSType,
 };
 
 // XXX Do we need any of these settings? If not, we can probably remove them.
@@ -121,11 +121,11 @@ impl Backend {
     pub async fn build_compiler() -> Arc<Mutex<Compiler>> {
         task::spawn_blocking(move || {
             Arc::new(Mutex::new(
-                Compiler::new().expect("failed to initialize QVM compiler"),
+                Compiler::new().expect("failed to initialize QueryScript compiler"),
             ))
         })
         .await
-        .expect("failed to initialize QVM compiler (thread error)")
+        .expect("failed to initialize QueryScript compiler (thread error)")
     }
 
     pub fn new(client: Client, compiler: Arc<Mutex<Compiler>>) -> Result<Backend> {
@@ -154,7 +154,7 @@ impl Backend {
     }
 
     pub fn add_custom_methods(service: LspServiceBuilder<Backend>) -> LspServiceBuilder<Backend> {
-        service.custom_method("qvm/runExpr", Backend::run_expr)
+        service.custom_method("queryscript/runExpr", Backend::run_expr)
     }
 }
 
@@ -323,7 +323,7 @@ impl LanguageServer for Backend {
 
         let text = self.get_text(&uri).await?;
 
-        let mut loc = qvm::ast::Location {
+        let mut loc = queryscript::ast::Location {
             line: (position.line + 1) as u64,
             column: (position.character + 1) as u64,
         };
@@ -632,7 +632,7 @@ fn format_symbol(symbol: &Symbol) -> Result<String> {
 fn is_runnable_decl(e: &ExprEntry) -> Result<bool> {
     Ok(match e.to_runtime_type() {
         Ok(e) => match *(e.type_.read().map_err(log_internal_error)?) {
-            QVMType::Fn(_) => false,
+            QSType::Fn(_) => false,
             _ => true,
         },
         Err(_) => false,
@@ -641,7 +641,7 @@ fn is_runnable_decl(e: &ExprEntry) -> Result<bool> {
 
 fn get_runnable_expr_from_decl(
     expr: &ExprEntry,
-) -> Result<qvm::compile::schema::TypedExpr<qvm::compile::schema::Ref<QVMType>>> {
+) -> Result<queryscript::compile::schema::TypedExpr<queryscript::compile::schema::Ref<QSType>>> {
     Ok(expr.to_runtime_type().map_err(|e| {
         eprintln!("Failed to convert expression to runtime type: {:?}", e);
         Error::internal_error()
@@ -650,8 +650,8 @@ fn get_runnable_expr_from_decl(
 
 fn find_expr_by_location(
     schema: &Schema,
-    loc: &qvm::ast::Location,
-) -> Result<Option<qvm::compile::schema::TypedExpr<qvm::compile::schema::Ref<QVMType>>>> {
+    loc: &queryscript::ast::Location,
+) -> Result<Option<queryscript::compile::schema::TypedExpr<queryscript::compile::schema::Ref<QSType>>>> {
     if let Some(expr) = schema.exprs.iter().find(|expr| {
         let expr_loc = expr.location();
         expr_loc.contains(loc)
@@ -753,7 +753,7 @@ struct RunExprParams {
 #[derive(Debug, Clone, Serialize)]
 struct RunExprResult {
     value: serde_json::Value,
-    r#type: QVMType,
+    r#type: QSType,
 }
 
 impl Backend {
@@ -996,7 +996,7 @@ impl Backend {
                         Error::internal_error()
                     })?,
                 RunExprType::Position { line, character } => {
-                    let loc = qvm::ast::Location {
+                    let loc = queryscript::ast::Location {
                         line: line + 1,
                         column: character + 1,
                     };
@@ -1110,7 +1110,7 @@ impl compile::OnSchema for SchemaRecorder {
                     severity: Some(DiagnosticSeverity::ERROR),
                     range: loc.range,
                     message: err.pretty(),
-                    source: Some("qvm".to_string()),
+                    source: Some("QueryScript".to_string()),
                     ..Default::default()
                 });
             }
@@ -1152,7 +1152,7 @@ trait NormalizePosition<T> {
     fn normalize(&self) -> T;
 }
 
-impl NormalizePosition<Position> for qvm::ast::Location {
+impl NormalizePosition<Position> for queryscript::ast::Location {
     fn normalize(&self) -> Position {
         assert!(self.line > 0 && self.column > 0);
         // The locations are 1-indexed, but LSP diagnostics are 0-indexed

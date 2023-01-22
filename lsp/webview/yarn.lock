@@ -230,7 +230,7 @@ loose-envify@^1.1.0:
   dependencies:
     js-tokens "^3.0.0 || ^4.0.0"
 
-"qvm@file:../../qvm/bindings":
+"queryscript@file:../../queryscript/bindings":
   version "0.0.0"
 
 react-dom@^18.2.0:

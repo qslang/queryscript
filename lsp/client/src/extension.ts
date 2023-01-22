@@ -19,7 +19,7 @@ import { runExpr } from "./query";
 let client: LanguageClient;
 
 export function activate(context: ExtensionContext) {
-  const command = process.env.SERVER_PATH || "qvm-lsp";
+  const command = process.env.SERVER_PATH || "queryscript-lsp";
   const run: Executable = {
     command,
     options: {
@@ -47,8 +47,8 @@ export function activate(context: ExtensionContext) {
 
   // Create the language client and start the client.
   client = new LanguageClient(
-    "QVMLSP",
-    "QueryVM Language Server",
+    "QueryScriptLSP",
+    "QueryScript Language Server",
     serverOptions,
     clientOptions
   );

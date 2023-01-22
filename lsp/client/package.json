@@ -1,13 +1,13 @@
 {
-	"name": "qvm-lsp-client",
+	"name": "queryscript-lsp-client",
 	"description": "VSCode part of a language server",
-	"author": "QueryVM Contributors",
+	"author": "QueryScript Contributors",
 	"license": "MIT",
 	"version": "0.0.1",
 	"publisher": "vscode",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/TODO/qvm"
+		"url": "https://github.com/qscl/queryscript"
 	},
 	"engines": {
 		"vscode": "^1.63.0"
@@ -18,6 +18,6 @@
 	"devDependencies": {
 		"@types/vscode": "^1.63.0",
 		"@vscode/test-electron": "^2.1.2",
-		"qvm": "file:../../qvm/bindings"
+		"queryscript": "file:../../queryscript/bindings"
 	}
 }

@@ -1,5 +1,5 @@
 {
-  "name": "qvm-lsp-webview",
+  "name": "queryscript-lsp-webview",
   "version": "1.0.0",
   "main": "index.js",
   "license": "MIT",
@@ -9,7 +9,7 @@
     "@vscode/webview-ui-toolkit": "^1.2.0",
     "api": "file:../client/src/api",
     "esbuild": "0.16.9",
-    "qvm": "file:../../qvm/bindings",
+    "queryscript": "file:../../queryscript/bindings",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "ts-pattern": "^4.0.6",

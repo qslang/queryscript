@@ -17,7 +17,7 @@ suite("Should get diagnostics", () => {
           "Compiler error: Syntax error: SQL parser error: sql parser error: Expected ;, found: error",
         range: toRange(2, 0, 2, 12),
         severity: vscode.DiagnosticSeverity.Warning,
-        source: "qvm",
+        source: "QueryScript",
       },
     ]);
   });
@@ -30,7 +30,7 @@ suite("Should get diagnostics", () => {
         message: 'Compiler error: No such entry: "dne"',
         range: toRange(2, 8, 2, 10),
         severity: vscode.DiagnosticSeverity.Error,
-        source: "qvm",
+        source: "QueryScript",
       },
     ]);
   });

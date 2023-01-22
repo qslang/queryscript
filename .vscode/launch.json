@@ -7,7 +7,7 @@
 			"name": "Launch VSCode Extension",
 			"runtimeExecutable": "${execPath}",
 			"args": [
-				"--extensionDevelopmentPath=${workspaceRoot}/qvm-lsp"
+				"--extensionDevelopmentPath=${workspaceRoot}/lsp"
 			],
 			"outFiles": [
 				"${workspaceRoot}/client/out/**/*.js"
@@ -18,7 +18,7 @@
 				"script": "watch"
 			},
 			"env": {
-				"SERVER_PATH": "${workspaceFolder}/target/debug/qvm-lsp"
+				"SERVER_PATH": "${workspaceFolder}/target/debug/queryscript-lsp"
 			},
 		},
 		{
@@ -27,16 +27,16 @@
 			"request": "launch",
 			"runtimeExecutable": "${execPath}",
 			"args": [
-				"--extensionDevelopmentPath=${workspaceRoot}/qvm-lsp",
-				"--extensionTestsPath=${workspaceRoot}/qvm-lsp/client/out/test/index",
+				"--extensionDevelopmentPath=${workspaceRoot}/lsp",
+				"--extensionTestsPath=${workspaceRoot}/lsp/client/out/test/index",
 				"${workspaceRoot}/client/testFixture"
 			],
 			"outFiles": [
-				"${workspaceRoot}/qvm-lsp/client/out/test/**/*.js"
+				"${workspaceRoot}/lsp/client/out/test/**/*.js"
 			],
 			"autoAttachChildProcesses": true,
 			"env": {
-				"SERVER_PATH": "${workspaceRoot}/target/debug/qvm-lsp"
+				"SERVER_PATH": "${workspaceRoot}/target/debug/queryscript-lsp"
 			},
 		}
 	]
