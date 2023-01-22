@@ -23,24 +23,22 @@
 	"contributes": {
 		"languages": [
 			{
-				"id": "tql",
+				"id": "QueryScript",
 				"extensions": [
-					".tql"
+					".qs"
 				],
 				"aliases": [
-					"Typed Query Language",
-					"TypedQL",
-					"tql"
+					"qs"
 				],
 				"filenames": [],
-				"configuration": "./syntaxes/tql.configuration.json"
+				"configuration": "./syntaxes/qs.configuration.json"
 			}
 		],
 		"grammars": [
 			{
-				"language": "tql",
+				"language": "QueryScript",
 				"scopeName": "source.sql",
-				"path": "./syntaxes/TQL.plist"
+				"path": "./syntaxes/QueryScript.plist"
 			}
 		],
 		"commands": [

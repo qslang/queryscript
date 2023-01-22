@@ -422,7 +422,7 @@ impl LanguageServer for Backend {
             let formatted = format_symbol(&symbol)?;
             if formatted.len() > 0 {
                 contents.push(MarkedString::LanguageString(LanguageString {
-                    language: "tql".into(),
+                    language: "QueryScript".into(),
                     value: formatted,
                 }));
             }
