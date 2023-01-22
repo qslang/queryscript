@@ -1,0 +1,60 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let customers": [{
+        	customer_id Int32,
+        	first_name Utf8,
+        	last_name Utf8,
+        }],
+        "let orders": [{
+        	order_id Int32,
+        	customer_id Int32,
+        	order_date Date32,
+        	status Utf8,
+        }],
+        "let payments": [{
+        	payment_id Int32,
+        	order_id Int32,
+        	payment_method Utf8,
+        	amount Float64,
+        }],
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "min(order_id)",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| min(order_id) |\n|---------------|\n| 1             |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "max(order_id)",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| max(order_id) |\n|---------------|\n| 99            |",
+            },
+        ),
+    ],
+}

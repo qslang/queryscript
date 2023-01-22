@@ -1,0 +1,19 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let aircraft_models": [{
+        	number_value Int64,
+        }],
+        "type AircraftModel": {
+        	number_value Int64,
+        },
+    },
+    "queries": [
+        Err(
+            StringError {
+                what: "Parquet file \"tests/qs/faa/data/aircraft_models.parquet\" has a different schema than the target variable's type",
+                backtrace: None,
+            },
+        ),
+    ],
+}

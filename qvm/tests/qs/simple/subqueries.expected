@@ -1,0 +1,166 @@
+{
+    "compile_errors": [
+        (
+            None,
+            NoSuchEntry {
+                path: [
+                    "id",
+                ],
+                backtrace: None,
+            },
+        ),
+    ],
+    "decls": {
+        "let events": [{
+        	user_id Int32,
+        	description Utf8,
+        	ts Utf8,
+        }],
+        "let users": [{
+        	id Int32,
+        	org_id Int32,
+        	name Utf8,
+        	active Boolean,
+        }],
+        "type Event": {
+        	user_id Int32,
+        	description Utf8,
+        	ts Utf8,
+        },
+        "type User": {
+        	id Int32,
+        	org_id Int32,
+        	name Utf8,
+        	active Boolean,
+        },
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "org_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "name",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "active",
+                                type_: Atom(
+                                    Boolean,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| id | org_id | name | active |\n|----|--------|------|--------|\n| 1  | 1      | Foo  | true   |\n| 2  | 1      | Bar  | false  |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "org_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "name",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "active",
+                                type_: Atom(
+                                    Boolean,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| id | org_id | name | active |\n|----|--------|------|--------|\n| 1  | 1      | Foo  | true   |\n| 2  | 1      | Bar  | false  |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "org_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| org_id |\n|--------|\n| 1      |\n| 1      |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "org_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| id | org_id |\n|----|--------|\n| 1  | 1      |",
+            },
+        ),
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?async_slot?)",
+                backtrace: None,
+            },
+        ),
+    ],
+}

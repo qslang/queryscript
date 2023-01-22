@@ -1,0 +1,182 @@
+{
+    "compile_errors": [
+        (
+            Some(
+                6,
+            ),
+            WrongType {
+                lhs: {
+                	id ?field?,
+                },
+                rhs: "R",
+                backtrace: None,
+            },
+        ),
+        (
+            Some(
+                7,
+            ),
+            WrongType {
+                lhs: {
+                	foo ?field?,
+                },
+                rhs: "R",
+                backtrace: None,
+            },
+        ),
+        (
+            None,
+            NoSuchEntry {
+                path: [
+                    "R",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            None,
+            NoSuchEntry {
+                path: [
+                    "R",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            None,
+            RuntimeError {
+                source: StringError {
+                    what: "Unknown type cannot exist at runtime (?slot?)",
+                    backtrace: None,
+                },
+                loc: Range(
+                    "tests/qs/simple/fndef.qs",
+                    Range {
+                        start: Location {
+                            line: 25,
+                            column: 1,
+                        },
+                        end: Location {
+                            line: 25,
+                            column: 48,
+                        },
+                    },
+                ),
+            },
+        ),
+        (
+            None,
+            RuntimeError {
+                source: StringError {
+                    what: "Unknown type cannot exist at runtime (?slot?)",
+                    backtrace: None,
+                },
+                loc: Range(
+                    "tests/qs/simple/fndef.qs",
+                    Range {
+                        start: Location {
+                            line: 26,
+                            column: 1,
+                        },
+                        end: Location {
+                            line: 26,
+                            column: 51,
+                        },
+                    },
+                ),
+            },
+        ),
+        (
+            None,
+            RuntimeError {
+                source: StringError {
+                    what: "Unknown type cannot exist at runtime (?slot?)",
+                    backtrace: None,
+                },
+                loc: Range(
+                    "tests/qs/simple/fndef.qs",
+                    Range {
+                        start: Location {
+                            line: 28,
+                            column: 1,
+                        },
+                        end: Location {
+                            line: 28,
+                            column: 49,
+                        },
+                    },
+                ),
+            },
+        ),
+        (
+            None,
+            RuntimeError {
+                source: StringError {
+                    what: "Unknown type cannot exist at runtime (?slot?)",
+                    backtrace: None,
+                },
+                loc: Range(
+                    "tests/qs/simple/fndef.qs",
+                    Range {
+                        start: Location {
+                            line: 29,
+                            column: 1,
+                        },
+                        end: Location {
+                            line: 29,
+                            column: 52,
+                        },
+                    },
+                ),
+            },
+        ),
+    ],
+    "decls": {
+        "let bar": ∀ "R" λ {
+        	a "R",
+        } -> ?async_slot?,
+        "let foo": ∀ "R" λ {
+        	a "R",
+        } -> ?slot?,
+        "let rel_foo": ?rel_foo type?,
+        "let rel_id": ?rel_id type?,
+    },
+    "queries": [
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?slot?)",
+                backtrace: None,
+            },
+        ),
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?slot?)",
+                backtrace: None,
+            },
+        ),
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?async_slot?)",
+                backtrace: None,
+            },
+        ),
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?async_slot?)",
+                backtrace: None,
+            },
+        ),
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?async_slot?)",
+                backtrace: None,
+            },
+        ),
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?async_slot?)",
+                backtrace: None,
+            },
+        ),
+    ],
+}

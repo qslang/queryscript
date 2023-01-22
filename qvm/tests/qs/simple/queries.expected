@@ -1,0 +1,510 @@
+{
+    "compile_errors": [
+        (
+            Some(
+                17,
+            ),
+            DuplicateEntry {
+                path: [
+                    "users",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            None,
+            DuplicateEntry {
+                path: [
+                    "id",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            None,
+            DuplicateEntry {
+                path: [
+                    "id",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            None,
+            ScalarSubselectError {
+                what: "should return a single field (not 4)",
+                backtrace: None,
+                loc: Range(
+                    "tests/qs/simple/queries.qs",
+                    Range {
+                        start: Location {
+                            line: 38,
+                            column: 1,
+                        },
+                        end: Location {
+                            line: 38,
+                            column: 97,
+                        },
+                    },
+                ),
+            },
+        ),
+        (
+            None,
+            WrongType {
+                lhs: {
+                	a ?field?,
+                },
+                rhs: {
+                	id Int32,
+                	org_id Int32,
+                	name Utf8,
+                	active Boolean,
+                },
+                backtrace: None,
+            },
+        ),
+    ],
+    "decls": {
+        "let events": [{
+        	user_id Int32,
+        	description Utf8,
+        	ts Utf8,
+        }],
+        "let users": [{
+        	id Int32,
+        	org_id Int32,
+        	name Utf8,
+        	active Boolean,
+        }],
+        "type Event": {
+        	user_id Int32,
+        	description Utf8,
+        	ts Utf8,
+        },
+        "type User": {
+        	id Int32,
+        	org_id Int32,
+        	name Utf8,
+        	active Boolean,
+        },
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "COUNT(*)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| COUNT(*) |\n|----------|\n| 2        |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "COUNT(1)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| COUNT(1) |\n|----------|\n| 2        |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "COUNT(DISTINCT org_id)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| COUNT(DISTINCT org_id) |\n|------------------------|\n| 1                      |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "user_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "description",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "ts",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "org_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "name",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "active",
+                                type_: Atom(
+                                    Boolean,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| user_id | description | ts         | id | org_id | name | active |\n|---------|-------------|------------|----|--------|------|--------|\n| 1       | Loren Ipsum | 2020-01-01 | 1  | 1      | Foo  | true   |\n| 1       | Foo Bar     | 2020-01-02 | 1  | 1      | Foo  | true   |\n| 2       | Bing Baz    | 2020-01-03 | 1  | 1      | Foo  | true   |\n| 2       | Woo Hoo     | 2020-01-04 | 1  | 1      | Foo  | true   |\n| 1       | Loren Ipsum | 2020-01-01 | 2  | 1      | Bar  | false  |\n| 1       | Foo Bar     | 2020-01-02 | 2  | 1      | Bar  | false  |\n| 2       | Bing Baz    | 2020-01-03 | 2  | 1      | Bar  | false  |\n| 2       | Woo Hoo     | 2020-01-04 | 2  | 1      | Bar  | false  |",
+            },
+        ),
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?slot?)",
+                backtrace: None,
+            },
+        ),
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?slot?)",
+                backtrace: None,
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| id |\n|----|\n| 1  |\n| 2  |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "max_user",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| id | max_user |\n|----|----------|\n| 1  | 2        |\n| 2  | 2        |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| id |\n|----|\n| 2  |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "description",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "(SELECT name FROM users WHERE users.id = events.user_id)",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| description | (SELECT name FROM users WHERE users.id = events.user_id) |\n|-------------|----------------------------------------------------------|\n| Loren Ipsum | Foo                                                      |\n| Foo Bar     | Foo                                                      |\n| Bing Baz    | Bar                                                      |\n| Woo Hoo     | Bar                                                      |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "org_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "name",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "active",
+                                type_: Atom(
+                                    Boolean,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| org_id | name | active |\n|--------|------|--------|\n| 1      | Bar  | false  |\n| 1      | Foo  | true   |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "name",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "active",
+                                type_: Atom(
+                                    Boolean,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| name | active |\n|------|--------|\n| Bar  | false  |\n| Foo  | true   |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "org_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "name",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "active",
+                                type_: Atom(
+                                    Boolean,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| org_id | name | active |\n|--------|------|--------|\n| 1      | Bar  | false  |\n| 1      | Foo  | true   |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "name",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "active",
+                                type_: Atom(
+                                    Boolean,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| name | active |\n|------|--------|\n| Bar  | false  |\n| Foo  | true   |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "user_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "org_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "name",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "active",
+                                type_: Atom(
+                                    Boolean,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| user_id | org_id | name | active |\n|---------|--------|------|--------|\n| 1       | 1      | Foo  | true   |\n| 2       | 1      | Bar  | false  |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "org_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "name",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "active",
+                                type_: Atom(
+                                    Boolean,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| id | org_id | name | active |\n|----|--------|------|--------|\n| 1  | 1      | Foo  | true   |\n| 2  | 1      | Bar  | false  |",
+            },
+        ),
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?async_slot?)",
+                backtrace: None,
+            },
+        ),
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?async_slot?)",
+                backtrace: None,
+            },
+        ),
+    ],
+}

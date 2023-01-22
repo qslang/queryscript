@@ -1,0 +1,26 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let customers": [{
+        	customer_id Int32,
+        	first_name Utf8,
+        	last_name Utf8,
+        	first_order Date32,
+        	most_recent_order Date32,
+        	number_of_orders Int64,
+        	customer_lifetime_value SumAgg<Float64>,
+        }],
+        "let orders": [{
+        	order_id Int32,
+        	customer_id Int32,
+        	order_date Date32,
+        	status Utf8,
+        	credit_card_amount SumAgg<Float64>,
+        	coupon_amount SumAgg<Float64>,
+        	bank_transfer_amount SumAgg<Float64>,
+        	gift_card_amount SumAgg<Float64>,
+        	amount SumAgg<Float64>,
+        }],
+    },
+    "queries": [],
+}

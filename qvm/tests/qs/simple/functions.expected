@@ -1,0 +1,155 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let events": External<[{
+        	description Utf8,
+        	ts Utf8,
+        	user_id Int64,
+        }]>,
+        "let users": External<[{
+        	active Boolean,
+        	id Int64,
+        	name Utf8,
+        	org_id Int64,
+        }]>,
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "min(id)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| min(id) |\n|---------|\n| 1       |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "max(id)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| max(id) |\n|---------|\n| 2       |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "count(id)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| count(id) |\n|-----------|\n| 2         |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "count(*)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| count(*) |\n|----------|\n| 2        |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "sum(id)",
+                                type_: Atom(
+                                    Decimal128(
+                                        38,
+                                        0,
+                                    ),
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| sum(id) |\n|---------|\n| 3       |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "avg(id)",
+                                type_: Atom(
+                                    Float64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| avg(id) |\n|---------|\n| 1.5     |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "ARRAY_AGG(id)",
+                                type_: List(
+                                    Atom(
+                                        Int64,
+                                    ),
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| ARRAY_AGG(id)        |\n|----------------------|\n| [Int64(1), Int64(2)] |",
+            },
+        ),
+        Err(
+            Unimplemented {
+                what: "Function parameters",
+                backtrace: None,
+            },
+        ),
+    ],
+}

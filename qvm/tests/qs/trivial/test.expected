@@ -1,0 +1,42 @@
+{
+    "compile_errors": [],
+    "decls": {},
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "1",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| 1 |\n|---|\n| 1 |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "2",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| 2 |\n|---|\n| 2 |",
+            },
+        ),
+    ],
+}

@@ -1,0 +1,44 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let order_payments": [{
+        	order_id Int32,
+        	credit_card_amount SumAgg<Float64>,
+        	coupon_amount SumAgg<Float64>,
+        	bank_transfer_amount SumAgg<Float64>,
+        	gift_card_amount SumAgg<Float64>,
+        	total_amount SumAgg<Float64>,
+        }],
+        "let orders": [{
+        	order_id Int32,
+        	customer_id Int32,
+        	order_date Date32,
+        	status Utf8,
+        	credit_card_amount SumAgg<Float64>,
+        	coupon_amount SumAgg<Float64>,
+        	bank_transfer_amount SumAgg<Float64>,
+        	gift_card_amount SumAgg<Float64>,
+        	amount SumAgg<Float64>,
+        }],
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "COUNT(*)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| COUNT(*) |\n|----------|\n| 99       |",
+            },
+        ),
+    ],
+}

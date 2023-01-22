@@ -1,0 +1,151 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let raw_customers": [{
+        	id Int32,
+        	first_name Utf8,
+        	last_name Utf8,
+        }],
+        "let raw_orders": [{
+        	id Int32,
+        	user_id Int32,
+        	order_date Date32,
+        	status Utf8,
+        }],
+        "let raw_payments": [{
+        	id Int32,
+        	order_id Int32,
+        	payment_method Utf8,
+        	amount Int32,
+        }],
+        "type raw_customer": {
+        	id Int32,
+        	first_name Utf8,
+        	last_name Utf8,
+        },
+        "type raw_order": {
+        	id Int32,
+        	user_id Int32,
+        	order_date Date32,
+        	status Utf8,
+        },
+        "type raw_payment": {
+        	id Int32,
+        	order_id Int32,
+        	payment_method Utf8,
+        	amount Int32,
+        },
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "user_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "order_date",
+                                type_: Atom(
+                                    Date32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "status",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| id | user_id | order_date | status    |\n|----|---------|------------|-----------|\n| 1  | 1       | 2018-01-01 | returned  |\n| 2  | 3       | 2018-01-02 | completed |\n| 3  | 94      | 2018-01-04 | completed |\n| 4  | 50      | 2018-01-05 | completed |\n| 5  | 64      | 2018-01-05 | completed |\n| 6  | 54      | 2018-01-07 | completed |\n| 7  | 88      | 2018-01-09 | completed |\n| 8  | 2       | 2018-01-11 | returned  |\n| 9  | 53      | 2018-01-12 | completed |\n| 10 | 7       | 2018-01-14 | completed |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "order_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "payment_method",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "amount",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| id | order_id | payment_method | amount |\n|----|----------|----------------|--------|\n| 1  | 1        | credit_card    | 1000   |\n| 2  | 2        | credit_card    | 2000   |\n| 3  | 3        | coupon         | 100    |\n| 4  | 4        | coupon         | 2500   |\n| 5  | 5        | bank_transfer  | 1700   |\n| 6  | 6        | credit_card    | 600    |\n| 7  | 7        | credit_card    | 1600   |\n| 8  | 8        | credit_card    | 2300   |\n| 9  | 9        | gift_card      | 2300   |\n| 10 | 9        | bank_transfer  | 0      |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "first_name",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "last_name",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| id | first_name | last_name |\n|----|------------|-----------|\n| 1  | Michael    | P.        |\n| 2  | Shawn      | M.        |\n| 3  | Kathleen   | P.        |\n| 4  | Jimmy      | C.        |\n| 5  | Katherine  | R.        |\n| 6  | Sarah      | R.        |\n| 7  | Martin     | M.        |\n| 8  | Frank      | R.        |\n| 9  | Jennifer   | F.        |\n| 10 | Henry      | W.        |",
+            },
+        ),
+    ],
+}

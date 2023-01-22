@@ -1,0 +1,9 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "type Foo": {
+        	bar Float64,
+        },
+    },
+    "queries": [],
+}

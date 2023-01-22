@@ -1,0 +1,52 @@
+{
+    "compile_errors": [
+        (
+            None,
+            NoSuchEntry {
+                path: [
+                    "invalid_field",
+                ],
+                backtrace: None,
+            },
+        ),
+    ],
+    "decls": {},
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "COUNT(*)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| COUNT(*) |\n|----------|\n| 4        |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "COUNT(*)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| COUNT(*) |\n|----------|\n| 2        |",
+            },
+        ),
+    ],
+}

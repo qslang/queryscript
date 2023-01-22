@@ -1,0 +1,327 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let airports": [{
+        	id Int64,
+        	code Utf8,
+        	site_number Utf8,
+        	fac_type Utf8,
+        	fac_use Utf8,
+        	faa_region Utf8,
+        	faa_dist Utf8,
+        	city Utf8,
+        	county Utf8,
+        	state Utf8,
+        	full_name Utf8,
+        	own_type Utf8,
+        	longitude Float64,
+        	latitude Float64,
+        	elevation Int64,
+        	aero_cht Utf8,
+        	cbd_dist Int64,
+        	cbd_dir Utf8,
+        	act_date Utf8,
+        	cert Utf8,
+        	fed_agree Utf8,
+        	cust_intl Utf8,
+        	c_ldg_rts Utf8,
+        	joint_use Utf8,
+        	mil_rts Utf8,
+        	cntl_twr Utf8,
+        	major Utf8,
+        }],
+        "let airports_by_region_dashboard": [{
+        	faa_region Utf8,
+        	airport_count Int64,
+        	by_facility_type [{
+        	fac_type Utf8,
+        	airport_count Int64,
+        	avg_elevation Float64,
+        }],
+        	by_state_shape_map [{
+        	state Utf8,
+        	airport_count Int64,
+        }],
+        }],
+        "let by_facility_type": λ {
+        	a2 [{
+        	id Int64,
+        	code Utf8,
+        	site_number Utf8,
+        	fac_type Utf8,
+        	fac_use Utf8,
+        	faa_region Utf8,
+        	faa_dist Utf8,
+        	city Utf8,
+        	county Utf8,
+        	state Utf8,
+        	full_name Utf8,
+        	own_type Utf8,
+        	longitude Float64,
+        	latitude Float64,
+        	elevation Int64,
+        	aero_cht Utf8,
+        	cbd_dist Int64,
+        	cbd_dir Utf8,
+        	act_date Utf8,
+        	cert Utf8,
+        	fed_agree Utf8,
+        	cust_intl Utf8,
+        	c_ldg_rts Utf8,
+        	joint_use Utf8,
+        	mil_rts Utf8,
+        	cntl_twr Utf8,
+        	major Utf8,
+        }],
+        } -> [{
+        	fac_type Utf8,
+        	airport_count Int64,
+        	avg_elevation Float64,
+        }],
+        "let by_region_dashboard": λ {
+        	a3 [{
+        	id Int64,
+        	code Utf8,
+        	site_number Utf8,
+        	fac_type Utf8,
+        	fac_use Utf8,
+        	faa_region Utf8,
+        	faa_dist Utf8,
+        	city Utf8,
+        	county Utf8,
+        	state Utf8,
+        	full_name Utf8,
+        	own_type Utf8,
+        	longitude Float64,
+        	latitude Float64,
+        	elevation Int64,
+        	aero_cht Utf8,
+        	cbd_dist Int64,
+        	cbd_dir Utf8,
+        	act_date Utf8,
+        	cert Utf8,
+        	fed_agree Utf8,
+        	cust_intl Utf8,
+        	c_ldg_rts Utf8,
+        	joint_use Utf8,
+        	mil_rts Utf8,
+        	cntl_twr Utf8,
+        	major Utf8,
+        }],
+        } -> [{
+        	faa_region Utf8,
+        	airport_count Int64,
+        	by_facility_type [{
+        	fac_type Utf8,
+        	airport_count Int64,
+        	avg_elevation Float64,
+        }],
+        	by_state_shape_map [{
+        	state Utf8,
+        	airport_count Int64,
+        }],
+        }],
+        "let by_state": λ {
+        	a1 [{
+        	id Int64,
+        	code Utf8,
+        	site_number Utf8,
+        	fac_type Utf8,
+        	fac_use Utf8,
+        	faa_region Utf8,
+        	faa_dist Utf8,
+        	city Utf8,
+        	county Utf8,
+        	state Utf8,
+        	full_name Utf8,
+        	own_type Utf8,
+        	longitude Float64,
+        	latitude Float64,
+        	elevation Int64,
+        	aero_cht Utf8,
+        	cbd_dist Int64,
+        	cbd_dir Utf8,
+        	act_date Utf8,
+        	cert Utf8,
+        	fed_agree Utf8,
+        	cust_intl Utf8,
+        	c_ldg_rts Utf8,
+        	joint_use Utf8,
+        	mil_rts Utf8,
+        	cntl_twr Utf8,
+        	major Utf8,
+        }],
+        } -> [{
+        	state Utf8,
+        	airport_count Int64,
+        }],
+        "type Airport": {
+        	id Int64,
+        	code Utf8,
+        	site_number Utf8,
+        	fac_type Utf8,
+        	fac_use Utf8,
+        	faa_region Utf8,
+        	faa_dist Utf8,
+        	city Utf8,
+        	county Utf8,
+        	state Utf8,
+        	full_name Utf8,
+        	own_type Utf8,
+        	longitude Float64,
+        	latitude Float64,
+        	elevation Int64,
+        	aero_cht Utf8,
+        	cbd_dist Int64,
+        	cbd_dir Utf8,
+        	act_date Utf8,
+        	cert Utf8,
+        	fed_agree Utf8,
+        	cust_intl Utf8,
+        	c_ldg_rts Utf8,
+        	joint_use Utf8,
+        	mil_rts Utf8,
+        	cntl_twr Utf8,
+        	major Utf8,
+        },
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "state",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "airport_count",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| state | airport_count |\n|-------|---------------|\n| AK    | 608           |\n| AL    | 260           |\n| AR    | 299           |\n| AS    | 4             |\n| AZ    | 319           |\n| CA    | 984           |\n| CO    | 425           |\n| CQ    | 11            |\n| CT    | 153           |\n| DC    | 20            |\n| DE    | 42            |\n| FL    | 856           |\n| GA    | 440           |\n| GU    | 3             |\n| HI    | 52            |\n| IA    | 319           |\n| ID    | 238           |\n| IL    | 890           |\n| IN    | 643           |\n| KS    | 415           |\n| KY    | 202           |\n| LA    | 500           |\n| MA    | 225           |\n| MD    | 229           |\n| ME    | 164           |\n| MI    | 489           |\n| MN    | 507           |\n| MO    | 537           |\n| MQ    | 1             |\n| MS    | 243           |\n| MT    | 259           |\n| NC    | 400           |\n| ND    | 436           |\n| NE    | 308           |\n| NH    | 112           |\n| NJ    | 378           |\n| NM    | 181           |\n| NV    | 128           |\n| NY    | 576           |\n| OH    | 749           |\n| OK    | 443           |\n| OR    | 441           |\n| PA    | 804           |\n| PR    | 40            |\n| RI    | 28            |\n| SC    | 189           |\n| SD    | 180           |\n| TN    | 285           |\n| TX    | 1845          |\n| UT    | 140           |\n| VA    | 421           |\n| VI    | 9             |\n| VT    | 81            |\n| WA    | 484           |\n| WI    | 543           |\n| WQ    | 1             |\n| WV    | 116           |\n| WY    | 115           |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "fac_type",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "airport_count",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "avg_elevation",
+                                type_: Atom(
+                                    Float64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| fac_type      | airport_count | avg_elevation      |\n|---------------|---------------|--------------------|\n| AIRPORT       | 13925         | 1237.0441651705567 |\n| BALLOONPORT   | 12            | 1047.25            |\n| GLIDERPORT    | 37            | 1611.4054054054054 |\n| HELIPORT      | 5135          | 950.5125608568646  |\n| SEAPLANE BASE | 473           | 488.82241014799155 |\n| STOLPORT      | 86            | 1375.046511627907  |\n| ULTRALIGHT    | 125           | 806.144            |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "faa_region",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "airport_count",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "by_facility_type",
+                                type_: List(
+                                    Record(
+                                        [
+                                            Field {
+                                                name: "fac_type",
+                                                type_: Atom(
+                                                    Utf8,
+                                                ),
+                                                nullable: true,
+                                            },
+                                            Field {
+                                                name: "airport_count",
+                                                type_: Atom(
+                                                    Int64,
+                                                ),
+                                                nullable: true,
+                                            },
+                                            Field {
+                                                name: "avg_elevation",
+                                                type_: Atom(
+                                                    Float64,
+                                                ),
+                                                nullable: true,
+                                            },
+                                        ],
+                                    ),
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "by_state_shape_map",
+                                type_: List(
+                                    Record(
+                                        [
+                                            Field {
+                                                name: "state",
+                                                type_: Atom(
+                                                    Utf8,
+                                                ),
+                                                nullable: true,
+                                            },
+                                            Field {
+                                                name: "airport_count",
+                                                type_: Atom(
+                                                    Int64,
+                                                ),
+                                                nullable: true,
+                                            },
+                                        ],
+                                    ),
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| faa_region | airport_count | by_facility_type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | by_state_shape_map                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |\n|------------|---------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|\n| null       | 23            | [Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"AIRPORT\"), Int64(23), Float64(18.26086956521739)] })]                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | null                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |\n| AAL        | 608           | [Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"AIRPORT\"), Int64(474), Float64(503.65822784810126)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"HELIPORT\"), Int64(30), Float64(284.06666666666666)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"SEAPLANE BASE\"), Int64(104), Float64(132.04807692307693)] })]                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | [Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"AK\"), Int64(608)] })]                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |\n| ACE        | 1579          | [Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"AIRPORT\"), Int64(1278), Float64(1421.0226917057903)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"BALLOONPORT\"), Int64(1), Float64(1250.0)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"GLIDERPORT\"), Int64(2), Float64(2088.5)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"HELIPORT\"), Int64(282), Float64(982.968085106383)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"SEAPLANE BASE\"), Int64(5), Float64(978.8)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"STOLPORT\"), Int64(4), Float64(903.0)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"ULTRALIGHT\"), Int64(7), Float64(1015.1428571428571)] })]                                       | [Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"IA\"), Int64(319)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"KS\"), Int64(415)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"MO\"), Int64(537)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"NE\"), Int64(308)] })]                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |\n| AEA        | 2586          | [Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"AIRPORT\"), Int64(1525), Float64(748.7429508196722)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"BALLOONPORT\"), Int64(3), Float64(326.6666666666667)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"GLIDERPORT\"), Int64(7), Float64(1086.2857142857142)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"HELIPORT\"), Int64(964), Float64(499.79253112033194)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"SEAPLANE BASE\"), Int64(61), Float64(449.21311475409834)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"STOLPORT\"), Int64(8), Float64(707.0)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"ULTRALIGHT\"), Int64(18), Float64(940.3888888888889)] })] | [Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"DC\"), Int64(20)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"DE\"), Int64(42)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"MD\"), Int64(229)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"NJ\"), Int64(378)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"NY\"), Int64(576)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"PA\"), Int64(804)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"VA\"), Int64(421)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"WV\"), Int64(116)] })]                                                                                                                                                                                                                                                                                                                                                                                                |\n| AGL        | 4437          | [Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"AIRPORT\"), Int64(3443), Float64(1013.9262271275051)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"BALLOONPORT\"), Int64(4), Float64(941.75)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"GLIDERPORT\"), Int64(4), Float64(808.75)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"HELIPORT\"), Int64(826), Float64(861.3414043583535)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"SEAPLANE BASE\"), Int64(119), Float64(1029.3529411764705)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"STOLPORT\"), Int64(11), Float64(865.3636363636364)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"ULTRALIGHT\"), Int64(30), Float64(742.3666666666667)] })]          | [Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"IL\"), Int64(890)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"IN\"), Int64(643)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"MI\"), Int64(489)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"MN\"), Int64(507)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"ND\"), Int64(436)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"OH\"), Int64(749)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"SD\"), Int64(180)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"WI\"), Int64(543)] })]                                                                                                                                                                                                                                                                                                                                                                                              |\n| ANE        | 763           | [Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"AIRPORT\"), Int64(362), Float64(468.01657458563534)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"BALLOONPORT\"), Int64(2), Float64(360.0)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"HELIPORT\"), Int64(320), Float64(284.234375)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"SEAPLANE BASE\"), Int64(71), Float64(327.4225352112676)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"STOLPORT\"), Int64(4), Float64(983.75)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"ULTRALIGHT\"), Int64(4), Float64(244.0)] })]                                                                                                                                                                                                                                                                                                                                               | [Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"CT\"), Int64(153)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"MA\"), Int64(225)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"ME\"), Int64(164)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"NH\"), Int64(112)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"RI\"), Int64(28)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"VT\"), Int64(81)] })]                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |\n| ANM        | 2102          | [Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"AIRPORT\"), Int64(1524), Float64(3233.5708661417325)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"BALLOONPORT\"), Int64(1), Float64(5050.0)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"GLIDERPORT\"), Int64(4), Float64(5348.75)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"HELIPORT\"), Int64(527), Float64(3534.123339658444)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"SEAPLANE BASE\"), Int64(25), Float64(658.76)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"STOLPORT\"), Int64(13), Float64(4169.461538461538)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"ULTRALIGHT\"), Int64(8), Float64(2028.5)] })]                                  | [Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"CO\"), Int64(425)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"ID\"), Int64(238)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"MT\"), Int64(259)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"OR\"), Int64(441)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"UT\"), Int64(140)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"WA\"), Int64(484)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"WY\"), Int64(115)] })]                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |\n| ASO        | 2924          | [Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"AIRPORT\"), Int64(2038), Float64(424.09077526987244)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"BALLOONPORT\"), Int64(1), Float64(800.0)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"GLIDERPORT\"), Int64(8), Float64(359.375)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"HELIPORT\"), Int64(770), Float64(410.3545454545455)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"SEAPLANE BASE\"), Int64(57), Float64(100.2280701754386)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"STOLPORT\"), Int64(33), Float64(526.6060606060606)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"ULTRALIGHT\"), Int64(17), Float64(587.3529411764706)] })]            | [Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"AL\"), Int64(260)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"FL\"), Int64(856)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"GA\"), Int64(440)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"KY\"), Int64(202)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"MS\"), Int64(243)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"NC\"), Int64(400)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"PR\"), Int64(40)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"SC\"), Int64(189)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"TN\"), Int64(285)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"VI\"), Int64(9)] })] |\n| ASW        | 3268          | [Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"AIRPORT\"), Int64(2341), Float64(1194.9709525843657)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"GLIDERPORT\"), Int64(6), Float64(938.8333333333334)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"HELIPORT\"), Int64(861), Float64(542.5853658536586)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"SEAPLANE BASE\"), Int64(19), Float64(261.36842105263156)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"STOLPORT\"), Int64(9), Float64(688.6666666666666)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"ULTRALIGHT\"), Int64(32), Float64(325.78125)] })]                                                                                                                                                                                                                                                                                                           | [Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"AR\"), Int64(299)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"LA\"), Int64(500)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"NM\"), Int64(181)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"OK\"), Int64(443)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"TX\"), Int64(1845)] })]                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |\n| AWP        | 1503          | [Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"AIRPORT\"), Int64(917), Float64(1939.7273718647764)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"GLIDERPORT\"), Int64(6), Float64(2450.5)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"HELIPORT\"), Int64(555), Float64(1198.771171171171)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"SEAPLANE BASE\"), Int64(12), Float64(1024.6666666666667)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"STOLPORT\"), Int64(4), Float64(4438.25)] }), Record(VecRow { schema: [Field { name: \"fac_type\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }, Field { name: \"avg_elevation\", type_: Atom(Float64), nullable: true }], values: [Utf8(\"ULTRALIGHT\"), Int64(9), Float64(1872.2222222222222)] })]                                                                                                                                                                                                                                                                                                                         | [Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"AS\"), Int64(4)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"AZ\"), Int64(319)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"CA\"), Int64(984)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"CQ\"), Int64(11)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"GU\"), Int64(3)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"HI\"), Int64(52)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"MQ\"), Int64(1)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"NV\"), Int64(128)] }), Record(VecRow { schema: [Field { name: \"state\", type_: Atom(Utf8), nullable: true }, Field { name: \"airport_count\", type_: Atom(Int64), nullable: true }], values: [Utf8(\"WQ\"), Int64(1)] })]                                                                                                                                                                                                        |",
+            },
+        ),
+    ],
+}

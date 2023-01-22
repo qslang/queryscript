@@ -1,0 +1,141 @@
+{
+    "parse_errors": [
+        Multiple {
+            sources: [
+                SQLParserError {
+                    source: ParserError(
+                        "Expected an expression:, found: =",
+                    ),
+                    backtrace: None,
+                    loc: Range(
+                        "tests/qs/simple/parsing.qs",
+                        Range {
+                            start: Location {
+                                line: 2,
+                                column: 10,
+                            },
+                            end: Location {
+                                line: 2,
+                                column: 10,
+                            },
+                        },
+                    ),
+                },
+                SQLParserError {
+                    source: ParserError(
+                        "Expected identifier, found: :",
+                    ),
+                    backtrace: None,
+                    loc: Range(
+                        "tests/qs/simple/parsing.qs",
+                        Range {
+                            start: Location {
+                                line: 3,
+                                column: 8,
+                            },
+                            end: Location {
+                                line: 3,
+                                column: 8,
+                            },
+                        },
+                    ),
+                },
+                SQLParserError {
+                    source: ParserError(
+                        "Expected identifier, found: :",
+                    ),
+                    backtrace: None,
+                    loc: Range(
+                        "tests/qs/simple/parsing.qs",
+                        Range {
+                            start: Location {
+                                line: 6,
+                                column: 9,
+                            },
+                            end: Location {
+                                line: 6,
+                                column: 9,
+                            },
+                        },
+                    ),
+                },
+                SQLParserError {
+                    source: ParserError(
+                        "Expected identifier, found: :",
+                    ),
+                    backtrace: None,
+                    loc: Range(
+                        "tests/qs/simple/parsing.qs",
+                        Range {
+                            start: Location {
+                                line: 10,
+                                column: 6,
+                            },
+                            end: Location {
+                                line: 10,
+                                column: 6,
+                            },
+                        },
+                    ),
+                },
+                SQLParserError {
+                    source: ParserError(
+                        "Expected from, found: d",
+                    ),
+                    backtrace: None,
+                    loc: Range(
+                        "tests/qs/simple/parsing.qs",
+                        Range {
+                            start: Location {
+                                line: 16,
+                                column: 22,
+                            },
+                            end: Location {
+                                line: 16,
+                                column: 22,
+                            },
+                        },
+                    ),
+                },
+                SQLParserError {
+                    source: ParserError(
+                        "Expected ;, found: ,",
+                    ),
+                    backtrace: None,
+                    loc: Range(
+                        "tests/qs/simple/parsing.qs",
+                        Range {
+                            start: Location {
+                                line: 17,
+                                column: 22,
+                            },
+                            end: Location {
+                                line: 17,
+                                column: 22,
+                            },
+                        },
+                    ),
+                },
+                SQLParserError {
+                    source: ParserError(
+                        "Expected from, found: .",
+                    ),
+                    backtrace: None,
+                    loc: Range(
+                        "tests/qs/simple/parsing.qs",
+                        Range {
+                            start: Location {
+                                line: 18,
+                                column: 9,
+                            },
+                            end: Location {
+                                line: 18,
+                                column: 9,
+                            },
+                        },
+                    ),
+                },
+            ],
+        },
+    ],
+}

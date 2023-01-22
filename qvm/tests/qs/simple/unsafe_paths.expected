@@ -1,0 +1,120 @@
+{
+    "compile_errors": [
+        (
+            None,
+            RuntimeError {
+                source: DuckDBError {
+                    source: DuckDBFailure(
+                        Error {
+                            code: Unknown,
+                            extended_code: 1,
+                        },
+                        Some(
+                            "Catalog Error: Schema with name schema does not exist!\nLINE 1: SELECT * FROM \"schema\".\"users\" LIMIT 0\n                      ^",
+                        ),
+                    ),
+                    backtrace: None,
+                },
+                loc: Unknown,
+            },
+        ),
+        (
+            None,
+            RuntimeError {
+                source: DuckDBError {
+                    source: DuckDBFailure(
+                        Error {
+                            code: Unknown,
+                            extended_code: 1,
+                        },
+                        Some(
+                            "Parser Error: syntax error at or near \"$1\"\nLINE 1: SELECT $1 AS $1 FROM \"bar\" LIMIT 0\n                     ^",
+                        ),
+                    ),
+                    backtrace: None,
+                },
+                loc: Unknown,
+            },
+        ),
+    ],
+    "decls": {
+        "let bar": [{
+        	id Int32,
+        	org_id Int32,
+        	name Utf8,
+        	active Boolean,
+        }],
+        "let baz": Int64,
+    },
+    "queries": [
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?unsafe expr?)",
+                backtrace: None,
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "org_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "name",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "active",
+                                type_: Atom(
+                                    Boolean,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| id | org_id | name | active |\n|----|--------|------|--------|\n| 1  | 1      | Foo  | true   |\n| 2  | 1      | Bar  | false  |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "$1",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| $1 |\n|----|\n| 1  |\n| 1  |",
+            },
+        ),
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?unsafe expr?)",
+                backtrace: None,
+            },
+        ),
+    ],
+}

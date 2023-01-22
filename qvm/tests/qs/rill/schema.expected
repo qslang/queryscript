@@ -1,0 +1,72 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let actors": [{
+        	aid Utf8,
+        	url Utf8,
+        	type Utf8,
+        	gender Utf8,
+        }],
+        "let appearances": [{
+        	aid Utf8,
+        	tid Int64,
+        	capacity Utf8,
+        	role Utf8,
+        	charid Float64,
+        	impid Float64,
+        	voice Boolean,
+        	epid Int64,
+        	sid Int64,
+        }],
+        "let characters": [{
+        	charid Int64,
+        	aid Utf8,
+        	name Utf8,
+        }],
+        "let episodes": [{
+        	sid Int64,
+        	epid Int64,
+        	aired Utf8,
+        	epno Int64,
+        }],
+        "let impressions": [{
+        	impid Int64,
+        	aid Utf8,
+        	name Utf8,
+        }],
+        "type Actor": {
+        	aid Utf8,
+        	url Utf8,
+        	type Utf8,
+        	gender Utf8,
+        },
+        "type Appearance": {
+        	aid Utf8,
+        	tid Int64,
+        	capacity Utf8,
+        	role Utf8,
+        	charid Float64,
+        	impid Float64,
+        	voice Boolean,
+        	epid Int64,
+        	sid Int64,
+        },
+        "type Character": {
+        	charid Int64,
+        	aid Utf8,
+        	name Utf8,
+        },
+        "type Episode": {
+        	sid Int64,
+        	epid Int64,
+        	aired Utf8,
+        	epno Int64,
+        },
+        "type Impression": {
+        	impid Int64,
+        	aid Utf8,
+        	name Utf8,
+        },
+    },
+    "queries": [],
+}

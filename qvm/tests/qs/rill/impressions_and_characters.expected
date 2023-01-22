@@ -1,0 +1,141 @@
+{
+    "parse_errors": [
+        Multiple {
+            sources: [
+                SQLParserError {
+                    source: ParserError(
+                        "Expected ), found: episodes",
+                    ),
+                    backtrace: None,
+                    loc: Range(
+                        "tests/qs/rill/impressions_and_characters.qs",
+                        Range {
+                            start: Location {
+                                line: 10,
+                                column: 18,
+                            },
+                            end: Location {
+                                line: 11,
+                                column: 8,
+                            },
+                        },
+                    ),
+                },
+                SQLParserError {
+                    source: ParserError(
+                        "Expected ;, found: )",
+                    ),
+                    backtrace: None,
+                    loc: Range(
+                        "tests/qs/rill/impressions_and_characters.qs",
+                        Range {
+                            start: Location {
+                                line: 19,
+                                column: 1,
+                            },
+                            end: Location {
+                                line: 19,
+                                column: 1,
+                            },
+                        },
+                    ),
+                },
+                SQLParserError {
+                    source: ParserError(
+                        "Expected ), found: impressions",
+                    ),
+                    backtrace: None,
+                    loc: Range(
+                        "tests/qs/rill/impressions_and_characters.qs",
+                        Range {
+                            start: Location {
+                                line: 26,
+                                column: 31,
+                            },
+                            end: Location {
+                                line: 27,
+                                column: 8,
+                            },
+                        },
+                    ),
+                },
+                SQLParserError {
+                    source: ParserError(
+                        "Expected SELECT, VALUES, or a subquery in the query body, found: FROM",
+                    ),
+                    backtrace: None,
+                    loc: Range(
+                        "tests/qs/rill/impressions_and_characters.qs",
+                        Range {
+                            start: Location {
+                                line: 27,
+                                column: 22,
+                            },
+                            end: Location {
+                                line: 28,
+                                column: 9,
+                            },
+                        },
+                    ),
+                },
+                SQLParserError {
+                    source: ParserError(
+                        "Expected ;, found: )",
+                    ),
+                    backtrace: None,
+                    loc: Range(
+                        "tests/qs/rill/impressions_and_characters.qs",
+                        Range {
+                            start: Location {
+                                line: 30,
+                                column: 1,
+                            },
+                            end: Location {
+                                line: 30,
+                                column: 1,
+                            },
+                        },
+                    ),
+                },
+                SQLParserError {
+                    source: ParserError(
+                        "Expected ;, found: Timeseries",
+                    ),
+                    backtrace: None,
+                    loc: Range(
+                        "tests/qs/rill/impressions_and_characters.qs",
+                        Range {
+                            start: Location {
+                                line: 33,
+                                column: 6,
+                            },
+                            end: Location {
+                                line: 33,
+                                column: 15,
+                            },
+                        },
+                    ),
+                },
+                SQLParserError {
+                    source: ParserError(
+                        "Expected a value, found: ]",
+                    ),
+                    backtrace: None,
+                    loc: Range(
+                        "tests/qs/rill/impressions_and_characters.qs",
+                        Range {
+                            start: Location {
+                                line: 37,
+                                column: 1,
+                            },
+                            end: Location {
+                                line: 47,
+                                column: 41,
+                            },
+                        },
+                    ),
+                },
+            ],
+        },
+    ],
+}

@@ -1,0 +1,84 @@
+{
+    "compile_errors": [
+        (
+            Some(
+                5,
+            ),
+            Unimplemented {
+                what: "HAVING",
+                backtrace: None,
+                loc: Range(
+                    "tests/qs/simple/demo.qs",
+                    Range {
+                        start: Location {
+                            line: 25,
+                            column: 1,
+                        },
+                        end: Location {
+                            line: 25,
+                            column: 98,
+                        },
+                    },
+                ),
+            },
+        ),
+        (
+            None,
+            WrongType {
+                lhs: Int64,
+                rhs: Int32,
+                backtrace: None,
+            },
+        ),
+    ],
+    "decls": {
+        "let active_users": [{
+        	id Int32,
+        	org_id Int32,
+        	name Utf8,
+        	active Boolean,
+        }],
+        "let events": [{
+        	user_id Int32,
+        	description Utf8,
+        	ts Utf8,
+        }],
+        "let username": λ {
+        	user_id Int64,
+        } -> [{
+        	name Utf8,
+        }],
+        "let users": [{
+        	id Int32,
+        	org_id Int32,
+        	name Utf8,
+        	active Boolean,
+        }],
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "COUNT(*)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| COUNT(*) |\n|----------|\n| 1        |",
+            },
+        ),
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?async_slot?)",
+                backtrace: None,
+            },
+        ),
+    ],
+}

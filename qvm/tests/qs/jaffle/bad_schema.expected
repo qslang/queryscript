@@ -1,0 +1,21 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let orders": [{
+        	bool_value Boolean,
+        }],
+        "type raw_order": {
+        	bool_value Boolean,
+        },
+    },
+    "queries": [
+        Err(
+            ArrowError {
+                source: ParseError(
+                    "Error while parsing value 1 for column 0 at line 1",
+                ),
+                backtrace: None,
+            },
+        ),
+    ],
+}

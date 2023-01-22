@@ -1,0 +1,26 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let foo": Int64,
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "foo",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| foo |\n|-----|\n| 1   |",
+            },
+        ),
+    ],
+}

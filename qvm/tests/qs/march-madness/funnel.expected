@@ -1,0 +1,386 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let cities": External<[{
+        	CityID Int64,
+        	City Utf8,
+        	State Utf8,
+        }]>,
+        "let conference_tourney_games": External<[{
+        	Season Int64,
+        	ConfAbbrev Utf8,
+        	DayNum Int64,
+        	WTeamID Int64,
+        	LTeamID Int64,
+        }]>,
+        "let conferences": External<[{
+        	ConfAbbrev Utf8,
+        	Description Utf8,
+        }]>,
+        "let day_to_round": λ {
+        	day Int64,
+        } -> Utf8,
+        "let game_cities": External<[{
+        	Season Int64,
+        	DayNum Int64,
+        	WTeamID Int64,
+        	LTeamID Int64,
+        	CRType Utf8,
+        	CityID Int64,
+        }]>,
+        "let massey_ordinals_thruday_128": External<[{
+        	Season Int64,
+        	RankingDayNum Int64,
+        	SystemName Utf8,
+        	TeamID Int64,
+        	OrdinalRank Int64,
+        }]>,
+        "let ncaa_tourney_compact_results": External<[{
+        	Season Int64,
+        	DayNum Int64,
+        	WTeamID Int64,
+        	WScore Int64,
+        	LTeamID Int64,
+        	LScore Int64,
+        	WLoc Utf8,
+        	NumOT Int64,
+        }]>,
+        "let ncaa_tourney_detailed_results": External<[{
+        	Season Int64,
+        	DayNum Int64,
+        	WTeamID Int64,
+        	WScore Int64,
+        	LTeamID Int64,
+        	LScore Int64,
+        	WLoc Utf8,
+        	NumOT Int64,
+        	WFGM Int64,
+        	WFGA Int64,
+        	WFGM3 Int64,
+        	WFGA3 Int64,
+        	WFTM Int64,
+        	WFTA Int64,
+        	WOR Int64,
+        	WDR Int64,
+        	WAst Int64,
+        	WTO Int64,
+        	WStl Int64,
+        	WBlk Int64,
+        	WPF Int64,
+        	LFGM Int64,
+        	LFGA Int64,
+        	LFGM3 Int64,
+        	LFGA3 Int64,
+        	LFTM Int64,
+        	LFTA Int64,
+        	LOR Int64,
+        	LDR Int64,
+        	LAst Int64,
+        	LTO Int64,
+        	LStl Int64,
+        	LBlk Int64,
+        	LPF Int64,
+        }]>,
+        "let ncaa_tourney_seed_round_slots": External<[{
+        	Seed Utf8,
+        	GameRound Int64,
+        	GameSlot Utf8,
+        	EarlyDayNum Int64,
+        	LateDayNum Int64,
+        }]>,
+        "let ncaa_tourney_seeds": External<[{
+        	Season Int64,
+        	Seed Utf8,
+        	TeamID Int64,
+        }]>,
+        "let ncaa_tourney_slots": External<[{
+        	Season Int64,
+        	Slot Utf8,
+        	StrongSeed Utf8,
+        	WeakSeed Utf8,
+        }]>,
+        "let regular_season_compact_results": External<[{
+        	Season Int64,
+        	DayNum Int64,
+        	WTeamID Int64,
+        	WScore Int64,
+        	LTeamID Int64,
+        	LScore Int64,
+        	WLoc Utf8,
+        	NumOT Int64,
+        }]>,
+        "let regular_season_detailed_results": External<[{
+        	Season Int64,
+        	DayNum Int64,
+        	WTeamID Int64,
+        	WScore Int64,
+        	LTeamID Int64,
+        	LScore Int64,
+        	WLoc Utf8,
+        	NumOT Int64,
+        	WFGM Int64,
+        	WFGA Int64,
+        	WFGM3 Int64,
+        	WFGA3 Int64,
+        	WFTM Int64,
+        	WFTA Int64,
+        	WOR Int64,
+        	WDR Int64,
+        	WAst Int64,
+        	WTO Int64,
+        	WStl Int64,
+        	WBlk Int64,
+        	WPF Int64,
+        	LFGM Int64,
+        	LFGA Int64,
+        	LFGM3 Int64,
+        	LFGA3 Int64,
+        	LFTM Int64,
+        	LFTA Int64,
+        	LOR Int64,
+        	LDR Int64,
+        	LAst Int64,
+        	LTO Int64,
+        	LStl Int64,
+        	LBlk Int64,
+        	LPF Int64,
+        }]>,
+        "let seasons": External<[{
+        	Season Int64,
+        	DayZero Utf8,
+        	RegionW Utf8,
+        	RegionX Utf8,
+        	RegionY Utf8,
+        	RegionZ Utf8,
+        }]>,
+        "let secondary_tourney_compact_results": External<[{
+        	Season Int64,
+        	DayNum Int64,
+        	WTeamID Int64,
+        	WScore Int64,
+        	LTeamID Int64,
+        	LScore Int64,
+        	WLoc Utf8,
+        	NumOT Int64,
+        	SecondaryTourney Utf8,
+        }]>,
+        "let secondary_tourney_teams": External<[{
+        	Season Int64,
+        	SecondaryTourney Utf8,
+        	TeamID Int64,
+        }]>,
+        "let team_coaches": External<[{
+        	Season Int64,
+        	TeamID Int64,
+        	FirstDayNum Int64,
+        	LastDayNum Int64,
+        	CoachName Utf8,
+        }]>,
+        "let team_conferences": External<[{
+        	Season Int64,
+        	TeamID Int64,
+        	ConfAbbrev Utf8,
+        }]>,
+        "let teams": External<[{
+        	TeamID Int64,
+        	TeamName Utf8,
+        	FirstD1Season Int64,
+        	LastD1Season Int64,
+        }]>,
+        "let tournament_stages": [{
+        	Season Int64,
+        	DayNum Int64,
+        	WTeamID Int64,
+        	WScore Int64,
+        	LTeamID Int64,
+        	LScore Int64,
+        	WLoc Utf8,
+        	NumOT Int64,
+        	TeamID Int64,
+        	TeamName Utf8,
+        	FirstD1Season Int64,
+        	LastD1Season Int64,
+        	CoachName Utf8,
+        	stage Utf8,
+        }],
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "DayNum",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| DayNum |\n|--------|\n| 134    |\n| 135    |\n| 136    |\n| 137    |\n| 138    |\n| 139    |\n| 140    |\n| 143    |\n| 144    |\n| 145    |\n| 146    |\n| 147    |\n| 148    |\n| 152    |\n| 154    |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "Season",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "DayNum",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "WTeamID",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "WScore",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "LTeamID",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "LScore",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "WLoc",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "NumOT",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "TeamID",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "TeamName",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "FirstD1Season",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "LastD1Season",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "CoachName",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "stage",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| Season | DayNum | WTeamID | WScore | LTeamID | LScore | WLoc | NumOT | TeamID | TeamName       | FirstD1Season | LastD1Season | CoachName        | stage       |\n|--------|--------|---------|--------|---------|--------|------|-------|--------|----------------|---------------|--------------|------------------|-------------|\n| 1985   | 136    | 1116    | 63     | 1234    | 54     | N    | 0     | 1116   | Arkansas       | 1985          | 2022         | eddie_sutton     | Round 1: 64 |\n| 1985   | 136    | 1120    | 59     | 1345    | 58     | N    | 0     | 1120   | Auburn         | 1985          | 2022         | sonny_smith      | Round 1: 64 |\n| 1985   | 136    | 1207    | 68     | 1250    | 43     | N    | 0     | 1207   | Georgetown     | 1985          | 2022         | john_thompson_jr | Round 1: 64 |\n| 1985   | 136    | 1229    | 58     | 1425    | 55     | N    | 0     | 1229   | Illinois St    | 1985          | 2022         | bob_donewald     | Round 1: 64 |\n| 1985   | 136    | 1242    | 49     | 1325    | 38     | N    | 0     | 1242   | Kansas         | 1985          | 2022         | larry_brown      | Round 1: 64 |\n| 1985   | 136    | 1246    | 66     | 1449    | 58     | N    | 0     | 1246   | Kentucky       | 1985          | 2022         | joe_b_hall       | Round 1: 64 |\n| 1985   | 136    | 1256    | 78     | 1338    | 54     | N    | 0     | 1256   | Louisiana Tech | 1985          | 2022         | andy_russo       | Round 1: 64 |\n| 1985   | 136    | 1260    | 59     | 1233    | 58     | N    | 0     | 1260   | Loyola-Chicago | 1985          | 2022         | gene_sullivan    | Round 1: 64 |\n| 1985   | 136    | 1314    | 76     | 1292    | 57     | N    | 0     | 1314   | North Carolina | 1985          | 2022         | dean_smith       | Round 1: 64 |\n| 1985   | 136    | 1323    | 79     | 1333    | 70     | N    | 0     | 1323   | Notre Dame     | 1985          | 2022         | digger_phelps    | Round 1: 64 |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "stage",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "COUNT(DISTINCT \"TeamName\")",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| stage                   | COUNT(DISTINCT \"TeamName\") |\n|-------------------------|----------------------------|\n| Round 1: 64             | 188                        |\n| Round 2: 32 teams       | 120                        |\n| Round 3: Sweet Sixteen  | 74                         |\n| Round 4: Elite Eight    | 53                         |\n| Round 5: Final Four     | 31                         |\n| Round 6: National Final | 19                         |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "stage",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "COUNT(DISTINCT \"CoachName\")",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| stage                   | COUNT(DISTINCT \"CoachName\") |\n|-------------------------|-----------------------------|\n| Round 1: 64             | 306                         |\n| Round 2: 32 teams       | 185                         |\n| Round 3: Sweet Sixteen  | 105                         |\n| Round 4: Elite Eight    | 72                          |\n| Round 5: Final Four     | 41                          |\n| Round 6: National Final | 26                          |",
+            },
+        ),
+    ],
+}

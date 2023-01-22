@@ -1,0 +1,28 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let events": [{
+        	user_id Int32,
+        	description Utf8,
+        	ts Utf8,
+        }],
+        "let users": [{
+        	id Int32,
+        	org_id Int32,
+        	name Utf8,
+        	active Boolean,
+        }],
+        "type Event": {
+        	user_id Int32,
+        	description Utf8,
+        	ts Utf8,
+        },
+        "type User": {
+        	id Int32,
+        	org_id Int32,
+        	name Utf8,
+        	active Boolean,
+        },
+    },
+    "queries": [],
+}

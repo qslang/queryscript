@@ -1,0 +1,98 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let users": [{
+        	id Int64,
+        	paying Boolean,
+        	city Utf8,
+        	company_name Utf8,
+        }],
+        "type User": {
+        	id Int64,
+        	paying Boolean,
+        	city Utf8,
+        	company_name Utf8,
+        },
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "count(*)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| count(*) |\n|----------|\n| 5        |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "city",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "count(id)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| city          | count(id) |\n|---------------|-----------|\n| San Francisco | 1         |\n| Palo Alto     | 1         |\n| Redwood       | 1         |\n| Mountain View | 1         |\n| Santa Cruz    | 1         |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "COUNT(*)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| COUNT(*) |\n|----------|\n| 3        |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "100.0 * COUNT(CASE WHEN paying THEN users.id END) / COUNT(users.id)",
+                                type_: Atom(
+                                    Float64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| 100.0 * COUNT(CASE WHEN paying THEN users.id END) / COUNT(users.id) |\n|---------------------------------------------------------------------|\n| 60.0                                                                |",
+            },
+        ),
+    ],
+}

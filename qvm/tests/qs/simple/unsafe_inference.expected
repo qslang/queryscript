@@ -1,0 +1,243 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let bogus_type_unsafe": [{
+        	bottom Int32,
+        	top Utf8,
+        }],
+        "let correct_type_safe": [{
+        	bottom Int64,
+        	top Int64,
+        }],
+        "let correct_type_unsafe": [{
+        	bottom Int64,
+        	top Int64,
+        }],
+        "let events": External<[{
+        	description Utf8,
+        	ts Utf8,
+        	user_id Int64,
+        }]>,
+        "let ordered_events": External<[{
+        	rn Int64,
+        }]>,
+        "let user_count": [{
+        	COUNT(*) Int64,
+        }],
+        "let users": External<[{
+        	active Boolean,
+        	id Int64,
+        	name Utf8,
+        	org_id Int64,
+        }]>,
+        "type BogusEventRange": {
+        	bottom Int32,
+        	top Utf8,
+        },
+        "type EventRange": {
+        	bottom Int64,
+        	top Int64,
+        },
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "COUNT(*)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| COUNT(*) |\n|----------|\n| 1        |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "count_star()",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| count_star() |\n|--------------|\n| 1            |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "MIN(rn)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "MAX(rn)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| MIN(rn) | MAX(rn) |\n|---------|---------|\n| 1       | 4       |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "min(rn)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "max(rn)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| min(rn) | max(rn) |\n|---------|---------|\n| 1       | 4       |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "bottom",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "top",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| bottom | top |\n|--------|-----|\n| 1      | 4   |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "bottom",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "top",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| bottom | top |\n|--------|-----|\n| 1      | 4   |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "'bogus types'",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| 'bogus types' |\n|---------------|\n| bogus types   |",
+            },
+        ),
+        Err(
+            TypeMismatch {
+                expected_type: List(
+                    Record(
+                        [
+                            Field {
+                                name: "bottom",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "top",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                actual_type: List(
+                    Record(
+                        [
+                            Field {
+                                name: "bottom",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "top",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                backtrace: None,
+            },
+        ),
+    ],
+}

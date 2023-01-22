@@ -1,0 +1,740 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let aircraft": External<[{
+        	id Int64,
+        	tail_num Utf8,
+        	aircraft_serial Utf8,
+        	aircraft_model_code Utf8,
+        	aircraft_engine_code Utf8,
+        	year_built Int64,
+        	aircraft_type_id Int64,
+        	aircraft_engine_type_id Int64,
+        	registrant_type_id Int64,
+        	name Utf8,
+        	address1 Utf8,
+        	address2 Utf8,
+        	city Utf8,
+        	state Utf8,
+        	zip Utf8,
+        	region Utf8,
+        	county Utf8,
+        	country Utf8,
+        	certification Utf8,
+        	status_code Utf8,
+        	mode_s_code Utf8,
+        	fract_owner Utf8,
+        	last_action_date Date32,
+        	cert_issue_date Date32,
+        	air_worth_date Date32,
+        }]>,
+        "let aircraft_models": External<[{
+        	aircraft_model_code Utf8,
+        	manufacturer Utf8,
+        	model Utf8,
+        	aircraft_type_id Int64,
+        	aircraft_engine_type_id Int64,
+        	aircraft_category_id Int64,
+        	amateur Int64,
+        	engines Int64,
+        	seats Int64,
+        	weight Int64,
+        	speed Int64,
+        }]>,
+        "let airports": External<[{
+        	id Int64,
+        	code Utf8,
+        	site_number Utf8,
+        	fac_type Utf8,
+        	fac_use Utf8,
+        	faa_region Utf8,
+        	faa_dist Utf8,
+        	city Utf8,
+        	county Utf8,
+        	state Utf8,
+        	full_name Utf8,
+        	own_type Utf8,
+        	longitude Float64,
+        	latitude Float64,
+        	elevation Int64,
+        	aero_cht Utf8,
+        	cbd_dist Int64,
+        	cbd_dir Utf8,
+        	act_date Utf8,
+        	cert Utf8,
+        	fed_agree Utf8,
+        	cust_intl Utf8,
+        	c_ldg_rts Utf8,
+        	joint_use Utf8,
+        	mil_rts Utf8,
+        	cntl_twr Utf8,
+        	major Utf8,
+        }]>,
+        "let carriers": External<[{
+        	code Utf8,
+        	name Utf8,
+        	nickname Utf8,
+        }]>,
+        "let flights": External<[{
+        	carrier Utf8,
+        	origin Utf8,
+        	destination Utf8,
+        	flight_num Utf8,
+        	flight_time Int64,
+        	tail_num Utf8,
+        	dep_time Timestamp(
+            Microsecond,
+            None,
+        ),
+        	arr_time Timestamp(
+            Microsecond,
+            None,
+        ),
+        	dep_delay Int64,
+        	arr_delay Int64,
+        	taxi_out Int64,
+        	taxi_in Int64,
+        	distance Int64,
+        	cancelled Utf8,
+        	diverted Utf8,
+        	id2 Int64,
+        }]>,
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "tail_num",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "aircraft_serial",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "aircraft_model_code",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "aircraft_engine_code",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "year_built",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "aircraft_type_id",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "aircraft_engine_type_id",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "registrant_type_id",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "name",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "address1",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "address2",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "city",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "state",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "zip",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "region",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "county",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "country",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "certification",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "status_code",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "mode_s_code",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "fract_owner",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "last_action_date",
+                                type_: Atom(
+                                    Date32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "cert_issue_date",
+                                type_: Atom(
+                                    Date32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "air_worth_date",
+                                type_: Atom(
+                                    Date32,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| id   | tail_num | aircraft_serial | aircraft_model_code | aircraft_engine_code | year_built | aircraft_type_id | aircraft_engine_type_id | registrant_type_id | name                          | address1                | address2 | city         | state | zip        | region | county | country | certification | status_code | mode_s_code | fract_owner | last_action_date | cert_issue_date | air_worth_date |\n|------|----------|-----------------|---------------------|----------------------|------------|------------------|-------------------------|--------------------|-------------------------------|-------------------------|----------|--------------|-------|------------|--------|--------|---------|---------------|-------------|-------------|-------------|------------------|-----------------|----------------|\n| 100  | N10036   | 11906           | 7100510             | 17003                | 1944       | 4                | 1                       | 1                  | FORSBERG CHARLES P            | PO BOX 1                | null     | NORTH SUTTON | NH    | 03260-0001 | E      | 013    | US      | 1N            | A           | 50003624    | null        | 2006-01-17       | 1982-04-27      | 1972-09-11     |\n| 200  | N1006L   | 1234            | 05620R2             | null                 | 2000       | 4                | 1                       | 1                  | BOEGER BOGIE M                | 7246 235TH ST           | null     | MEDIAPOLIS   | IA    | 52637-9184 | 3      | 057    | US      | null          | V           | 50003751    | null        | 2005-10-27       | 2005-10-27      | null           |\n| 300  | N1009P   | 34994           | 2072704             | 17026                | 1958       | 4                | 1                       | 4                  | FERRIER WILLIAM T             | 221 N CENTRAL AVE # D86 | null     | MEDFORD      | OR    | 97501-5927 | S      | 029    | US      | 1             | V           | 50004125    | null        | 2003-09-19       | 2003-09-19      | 1958-02-21     |\n| 400  | N100EJ   | 380-1           | 6402618             | 30010                | 1973       | 5                | 4                       | 3                  | CENTURION INVESTMENTS INC DBA | 18377 EDISON AVE        | null     | CHESTERFIELD | MO    | 63005-3628 | 3      | 189    | US      | 1T            | A           | 50002441    | null        | 2004-03-16       | 2001-03-22      | 1974-02-18     |\n| 500  | N100KW   | D-10336         | 1151548             | 17032                | 1980       | 4                | 1                       | 3                  | MIKRON AIR CORP               | 3505 TEXOMA PKWY        | null     | SHERMAN      | TX    | 75090      | 2      | 181    | US      | 1U            | A           | 50002652    | null        | 2003-12-16       | 1994-12-22      | 1980-01-29     |\n| 600  | N100RR   | 179             | 2730101             | 29001                | 1981       | 5                | 4                       | 3                  | WESTERN WINGS CORP            | PO BOX 2107             | null     | ROSEBURG     | OR    | 97470-0447 | S      | 019    | US      | 1T            | V           | 50003073    | null        | 2005-12-20       | 2005-12-20      | 2000-04-20     |\n| 700  | N100XH   | E-3249          | 7150001             | 17042                | 1999       | 4                | 1                       | 3                  | BIGGS AIRCRAFT INC            | RR 3 BOX 86             | null     | WELLSTON     | OK    | 74881-9422 | 2      | 081    | US      | 1U            | V           | 50003311    | null        | 2003-08-27       | null            | 1999-06-30     |\n| 800  | N1012B   | 402-0712        | 0390205             | 52034                | 1989       | 4                | 1                       | 3                  | KINDER AG SERVICE INC         | 238 PLANTATION PT       | null     | NATCHITOCHES | LA    | 71457-2853 | 2      | 069    | US      | 31            | V           | 50005413    | null        | 2005-04-18       | 2005-04-18      | 1989-04-04     |\n| 900  | N10159   | 18281774        | 2072703             | null                 | 2000       | 4                | 1                       | 3                  | CESSNA AIRCRAFT COMPANY       | PO BOX 7706             | null     | WICHITA      | KS    | 67277-7706 | 3      | 173    | US      | null          | M           | 50005624    | null        | 2006-01-23       | null            | null           |\n| 1000 | N1018F   | 710             | 2800108             | 52008                | 1954       | 4                | 1                       | 3                  | KENMORE AIR HARBOR INC        | PO BOX 82064            | null     | KENMORE      | WA    | 98028-0064 | S      | 033    | US      | 1N            | A           | 50005741    | null        | 2003-04-15       | 1996-04-01      | 1981-03-20     |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "code",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "site_number",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "fac_type",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "fac_use",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "faa_region",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "faa_dist",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "city",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "county",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "state",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "full_name",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "own_type",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "longitude",
+                                type_: Atom(
+                                    Float64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "latitude",
+                                type_: Atom(
+                                    Float64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "elevation",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "aero_cht",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "cbd_dist",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "cbd_dir",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "act_date",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "cert",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "fed_agree",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "cust_intl",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "c_ldg_rts",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "joint_use",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "mil_rts",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "cntl_twr",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "major",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| id | code | site_number | fac_type      | fac_use | faa_region | faa_dist | city        | county           | state | full_name       | own_type | longitude | latitude | elevation | aero_cht        | cbd_dist | cbd_dir | act_date | cert       | fed_agree | cust_intl | c_ldg_rts | joint_use | mil_rts | cntl_twr | major |\n|----|------|-------------|---------------|---------|------------|----------|-------------|------------------|-------|-----------------|----------|-----------|----------|-----------|-----------------|----------|---------|----------|------------|-----------|-----------|-----------|-----------|---------|----------|-------|\n| 1  | ADK  | 50009.*A    | AIRPORT       | PU      | AAL        | NONE     | ADAK ISLAND | ALEUTIAN ISLANDS | AK    | ADAK            | MN       | -176.64   | 51.87    | 18        | W ALEUTIAN ISLS | 0        | W       | null     | BS 05/1973 | null      | N         | N         | N         | Y       | N        | Y     |\n| 2  | AKK  | 50016.1*A   | AIRPORT       | PU      | AAL        | NONE     | AKHIOK      | KODIAK           | AK    | AKHIOK          | PU       | -154.18   | 56.93    | 44        | KODIAK          | 1        | SW      | null     | null       | NGY       | N         | N         | null      | Y       | N        | N     |\n| 3  | Z13  | 50017.*A    | AIRPORT       | PU      | AAL        | NONE     | AKIACHAK    | BETHEL           | AK    | AKIACHAK        | PU       | -161.42   | 60.9     | 25        | MC GRATH        | 0        | SE      | null     | null       | N         | N         | N         | N         | Y       | N        | N     |\n| 4  | KKI  | 50017.1*C   | SEAPLANE BASE | PU      | AAL        | NONE     | AKIACHAK    | BETHEL           | AK    | AKIACHAK        | PU       | -161.43   | 60.9     | 18        | MC GRATH        | 0        | S       | null     | null       | null      | N         | N         | N         | N       | N        | N     |\n| 5  | AKI  | 50020.*A    | AIRPORT       | PU      | AAL        | NONE     | AKIAK       | BETHEL           | AK    | AKIAK           | PU       | -161.22   | 60.9     | 22        | MC GRATH        | 0        | SW      | null     | null       | N1        | N         | N         | N         | Y       | N        | N     |\n| 6  | KQA  | 50022.*C    | SEAPLANE BASE | PU      | AAL        | NONE     | AKUTAN      | ALEUTIAN ISLANDS | AK    | AKUTAN          | PU       | -165.78   | 54.13    | 0         | DUTCH HARBOR    | 0        | S       | null     | null       | N         | N         | N         | N         | N       | N        | N     |\n| 7  | AUK  | 50024.1*A   | AIRPORT       | PU      | AAL        | NONE     | ALAKANUK    | WADE HAMPTON     | AK    | ALAKANUK        | PU       | -164.65   | 62.68    | 10        | BETHEL          | 1        | SW      | null     | null       | N         | N         | N         | N         | Y       | N        | N     |\n| 8  | Z25  | 50027.51*A  | AIRPORT       | PU      | AAL        | NONE     | ALEKNAGIK   | BRISTOL BAY      | AK    | TRIPOD          | PU       | -158.55   | 59.26    | 225       | KODIAK          | 2        | SE      | null     | null       | null      | N         | N         | N         | N       | N        | N     |\n| 9  | Z33  | 50027.52*C  | SEAPLANE BASE | PU      | AAL        | NONE     | ALEKNAGIK   | BRISTOL BAY      | AK    | ALEKNAGIK       | PR       | -158.62   | 59.27    | 7         | KODIAK          | 0        | NW      | null     | null       | null      | N         | N         | N         | N       | N        | N     |\n| 10 | 5A8  | 50027.53*A  | AIRPORT       | PU      | AAL        | NONE     | ALEKNAGIK   | BRISTOL BAY      | AK    | ALEKNAGIK /NEW/ | PU       | -158.61   | 59.28    | 66        | KODIAK          | 1        | E       | null     | null       | null      | null      | null      | null      | Y       | N        | N     |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "code",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "name",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "nickname",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| code | name                        | nickname           |\n|------|-----------------------------|--------------------|\n| AA   | American Airlines           | American           |\n| AQ   | Aloha Airlines              | Aloha              |\n| AS   | Alaska Airlines             | Alaska             |\n| B6   | Jetblue Airways             | Jetblue            |\n| CO   | Continental Airlines        | Continental        |\n| DH   | Atlantic Coast Airlines     | Atlantic Coast     |\n| DL   | Delta Air Lines             | Delta              |\n| EV   | Atlantic Southeast Airlines | Atlantic Southeast |\n| FL   | Airtran Airways Corporation | Airtran            |\n| HA   | Hawaiian Airlines           | Hawaiian           |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "carrier",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "origin",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "destination",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "flight_num",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "flight_time",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "tail_num",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "dep_time",
+                                type_: Atom(
+                                    Timestamp(
+                                        Microsecond,
+                                        None,
+                                    ),
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "arr_time",
+                                type_: Atom(
+                                    Timestamp(
+                                        Microsecond,
+                                        None,
+                                    ),
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "dep_delay",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "arr_delay",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "taxi_out",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "taxi_in",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "distance",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "cancelled",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "diverted",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "id2",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| carrier | origin | destination | flight_num | flight_time | tail_num | dep_time                  | arr_time                  | dep_delay | arr_delay | taxi_out | taxi_in | distance | cancelled | diverted | id2 |\n|---------|--------|-------------|------------|-------------|----------|---------------------------|---------------------------|-----------|-----------|----------|---------|----------|-----------|----------|-----|\n| DL      | MCO    | ABE         | 2382       | 129         | N313DL   | 2000-01-27T09:11:00+00:00 | 2000-01-27T11:36:00+00:00 | -4        | -9        | 12       | 4       | 906      | N         | N        | 202 |\n| DL      | MDT    | ABE         | 882        | 21          | N242DL   | 2000-01-17T00:00:00+00:00 | 2000-01-17T01:23:00+00:00 | 56        | 63        | 16       | 5       | 77       | N         | N        | 254 |\n| DL      | MDT    | ABE         | 1037       | 17          | N242DL   | 2000-01-10T16:14:00+00:00 | 2000-01-10T16:44:00+00:00 | -1        | -6        | 10       | 3       | 77       | N         | N        | 278 |\n| DL      | MDT    | ABE         | 1037       | 19          | N242DL   | 2000-01-15T16:05:00+00:00 | 2000-01-15T16:40:00+00:00 | -10       | -10       | 12       | 4       | 77       | N         | N        | 283 |\n| DL      | MDT    | ABE         | 1037       | 0           | N242DL   | 2000-01-25T00:00:00+00:00 | 2000-01-25T00:00:00+00:00 | 0         | 0         | 0        | 0       | 77       | Y         | N        | 293 |\n| US      | PIT    | ABE         | 1963       | 41          | N507AU   | 2000-01-09T07:44:00+00:00 | 2000-01-09T08:47:00+00:00 | -3        | 3         | 18       | 4       | 253      | N         | N        | 436 |\n| WN      | AMA    | ABQ         | 552        | 48          | N628SW   | 2000-01-06T14:15:00+00:00 | 2000-01-06T14:10:00+00:00 | 0         | 0         | 4        | 3       | 277      | N         | N        | 547 |\n| DL      | ATL    | ABQ         | 2173       | 185         | N242DL   | 2000-01-14T23:41:00+00:00 | 2000-01-14T01:07:00+00:00 | 16        | 15        | 15       | 6       | 1269     | N         | N        | 646 |\n| DL      | ATL    | ABQ         | 2173       | 0           | N242DL   | 2000-01-16T00:00:00+00:00 | 2000-01-16T00:00:00+00:00 | 0         | 0         | 0        | 0       | 1269     | Y         | N        | 648 |\n| DL      | ATL    | ABQ         | 2173       | 197         | N242DL   | 2000-01-25T23:19:00+00:00 | 2000-01-25T00:00:00+00:00 | -6        | 0         | 11       | 5       | 1269     | N         | N        | 657 |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "aircraft_model_code",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "manufacturer",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "model",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "aircraft_type_id",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "aircraft_engine_type_id",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "aircraft_category_id",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "amateur",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "engines",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "seats",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "weight",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "speed",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| aircraft_model_code | manufacturer   | model             | aircraft_type_id | aircraft_engine_type_id | aircraft_category_id | amateur | engines | seats | weight | speed |\n|---------------------|----------------|-------------------|------------------|-------------------------|----------------------|---------|---------|-------|--------|-------|\n| 0030109             | EXLINE ACE-C   | ACE-C             | 4                | 1                       | 1                    | 1       | 1       | 1     | 0      | 82    |\n| 003010D             | DELEBAUGH      | P                 | 4                | 1                       | 1                    | 1       | 1       | 1     | 0      | 82    |\n| 003010H             | DAL PORTO      | BABY ACE D        | 4                | 1                       | 1                    | 1       | 1       | 1     | 0      | 82    |\n| 003010P             | DUNN           | BABY ACE          | 4                | 1                       | 1                    | 1       | 1       | 1     | 0      | 82    |\n| 003010Z             | EMMERT SPECIAL | MODIFIED BABY ACE | 4                | 1                       | 1                    | 1       | 1       | 1     | 0      | 82    |\n| 0030115             | HEYER-BARNES   | BABY ACE          | 4                | 1                       | 1                    | 1       | 1       | 1     | 0      | 82    |\n| 0030119             | HILTON ACE     | A                 | 4                | 1                       | 1                    | 1       | 1       | 1     | 0      | 82    |\n| 003011H             | FERNANDEZ      | BABY ACE D        | 4                | 1                       | 1                    | 1       | 1       | 1     | 0      | 82    |\n| 003011J             | MATTSON        | BABY ACE          | 4                | 1                       | 1                    | 1       | 1       | 1     | 0      | 82    |\n| 003011K             | FARDY BABY ACE | C                 | 4                | 1                       | 1                    | 1       | 1       | 1     | 0      | 82    |",
+            },
+        ),
+    ],
+}
