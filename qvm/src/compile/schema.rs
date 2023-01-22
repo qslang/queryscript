@@ -1101,4 +1101,4 @@ impl Schema {
     }
 }
 
-pub const SCHEMA_EXTENSIONS: &[&str] = &["tql"];
+pub const SCHEMA_EXTENSIONS: &[&str] = &["qs"];
