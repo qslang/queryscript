@@ -1,19 +1,29 @@
 ROOT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
-all: ${VENV_PRE_COMMIT}
+.PHONY: all
+all: ${VENV_PRE_COMMIT} lsp qs
+
+.PHONY: qs
+qs:
 	cd cli && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build
 
-lsp: deps
+.PHONY: lsp lsp-rust yarn-deps
+lsp: lsp-rust yarn-deps
+	cd lsp && yarn compile
+
+lsp-rust:
 	cd lsp && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build
 
-test:
+yarn-deps:
+	cd lsp && yarn install
+
+
+.PHONY: test lfs refresh-test-data
+test: lfs
 	cd queryscript/src/ && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo test -- --nocapture
 
-.PHONY: deps
-deps:
-	cd lsp && yarn install
-	cd lsp/client && yarn install
-	cd lsp/webview && yarn install
+lfs:
+	git lfs install && git lfs fetch
 
 refresh-test-data: ${VENV_PYTHON_PACKAGES}
 	source venv/bin/activate && nba-scraper ${ROOT_DIR}/queryscript/tests/nba/data
@@ -37,9 +47,8 @@ ${VENV_PRE_COMMIT}: ${VENV_PYTHON_PACKAGES}
 	bash -c 'source venv/bin/activate && pre-commit install'
 	@touch $@
 
-.PHONY: develop fixup test
-develop: ${VENV_PRE_COMMIT}
-	@echo 'Run "source venv/bin/activate" to enter development mode'
+develop: ${VENV_PRE_COMMIT} lsp qs lfs
+	@echo "--\nRun "source env.sh" to enter development mode!"
 
 fixup:
 	pre-commit run --all-files

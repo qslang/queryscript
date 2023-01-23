@@ -75,7 +75,7 @@
 		"watch": "tsc -b -w",
 		"watch-webview": "cd webview && yarn run watch",
 		"lint": "eslint ./client/src ./webview/src --ext .ts,.tsx --fix",
-		"postinstall": "cd client && yarn install && cd ..",
+		"postinstall": "cd client && yarn install && cd .. && cd webview && yarn install && cd ..",
 		"test": "sh ./scripts/e2e.sh"
 	},
 	"devDependencies": {
