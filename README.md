@@ -2,8 +2,8 @@
 
 _Do more with SQL!_
 
-Queryscript is a SQL dialect that allows you to use higher order abstractions like
-variables, functions, and modules directly in SQL. The QueryScript compiler typechecks
+Queryscript is a SQL-based language that allows you to use higher order abstractions like
+variables, functions, and modules alongside SQL queries. The QueryScript compiler typechecks
 your queries and then compiles away these abstractions into vanilla ANSI SQL that runs
 directly against your favorite databases. QueryScript aims to do for SQL what TypeScript
 did for JavaScript.
@@ -54,11 +54,12 @@ SELECT username(user_id), most_popular_events(e) FROM events e GROUP BY 1;
 
 ## Installation
 
-Right now, the only way to install QuerySCript is to [build it from source](#building-from-source).
+Right now, the only way to install QueryScript is to [build it from source](#building-from-source). We'll enable a more streamlined
+install in the coming weeks.
 
 ## Building from source
 
-To build QueryScript from source, you'll need to have [Git](https://git-scm.com/), [Rust](https://www.rust-lang.org/tools/install), and [Clang++](https://clang.llvm.org/).
+To build QueryScript from source, you'll need [Git](https://git-scm.com/), [Rust](https://www.rust-lang.org/tools/install), and [Clang++](https://clang.llvm.org/).
 
 ```bash
 git clone https://github.com/qscl/queryscript.git
