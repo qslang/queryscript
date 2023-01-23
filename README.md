@@ -58,7 +58,7 @@ Right now, the only way to install QuerySCript is to [build it from source](#bui
 
 ## Building from source
 
-To build QueryScript from source, you'll need to have [Git](https://git-scm.com/) and [Rust](https://www.rust-lang.org/tools/install).
+To build QueryScript from source, you'll need to have [Git](https://git-scm.com/), [Rust](https://www.rust-lang.org/tools/install), and [Clang++](https://clang.llvm.org/).
 
 ```bash
 git clone https://github.com/qscl/queryscript.git
@@ -71,7 +71,7 @@ The QueryScript compiler will be available at `target/release/qs`.
 
 ### Building development environment
 
-If you'd like to contribute or otherwise hack on QueryScript, you'll need a few more dependencies: [Python >= 3.7](https://www.python.org/downloads/), [Git LFS](https://git-lfs.com/), [Node.js](https://nodejs.org/en/download/), and [Yarn](https://classic.yarnpkg.com/en/docs/install/).
+If you'd like to contribute or otherwise hack on QueryScript, you'll need a few more dependencies: [Python >= 3.7](https://www.python.org/downloads/), [Python venv](https://docs.python.org/3/library/venv.html), [Git LFS](https://git-lfs.com/), [Node.js](https://nodejs.org/en/download/), and [Yarn](https://classic.yarnpkg.com/en/docs/install/).
 
 First, run the above commands (although you can skip `cargo build --release`). Then, run
 

@@ -4,8 +4,11 @@ ROOT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 all: ${VENV_PRE_COMMIT} lsp qs
 
 .PHONY: qs
-qs:
+qs: sqlparser-rs/Cargo.toml
 	cd cli && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build
+
+sqlparser-rs/Cargo.toml:
+	git submodule update --init --recursive
 
 .PHONY: lsp lsp-rust yarn-deps
 lsp: lsp-rust yarn-deps
