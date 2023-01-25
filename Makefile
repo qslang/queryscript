@@ -4,8 +4,11 @@ ROOT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 all: ${VENV_PRE_COMMIT} lsp qs
 
 .PHONY: qs
-qs: sqlparser-rs/Cargo.toml
+qs: submodules
 	cd cli && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build
+
+.PHONY: submodules
+submodules: sqlparser-rs/Cargo.toml
 
 sqlparser-rs/Cargo.toml:
 	git submodule update --init --recursive
@@ -14,7 +17,7 @@ sqlparser-rs/Cargo.toml:
 lsp: lsp-rust yarn-deps
 	cd lsp && yarn compile
 
-lsp-rust:
+lsp-rust: submodules
 	cd lsp && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build
 
 yarn-deps:
@@ -22,7 +25,7 @@ yarn-deps:
 
 
 .PHONY: test lfs refresh-test-data
-test: lfs
+test: lfs submodules
 	cd queryscript/src/ && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo test -- --nocapture
 
 lfs:
