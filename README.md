@@ -2,6 +2,9 @@
 
 _Do more with SQL!_
 
+What happens when you combine the power of a proper programming language like TypeScript with 
+the power of SQL? You get QueryScript, a new language that makes writing SQL feel like actual programming.
+
 Queryscript is a SQL-based language that allows you to use higher order abstractions like
 variables, functions, and modules alongside SQL queries. The QueryScript compiler typechecks
 your queries and then compiles away these abstractions into vanilla ANSI SQL that runs
