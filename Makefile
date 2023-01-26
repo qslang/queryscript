@@ -13,15 +13,18 @@ submodules: sqlparser-rs/Cargo.toml
 sqlparser-rs/Cargo.toml:
 	git submodule update --init --recursive
 
-.PHONY: lsp lsp-rust yarn-deps
+.PHONY: lsp lsp-rust yarn-deps ts-bindings
 lsp: lsp-rust yarn-deps
 	cd lsp && yarn compile
 
 lsp-rust: submodules
 	cd lsp && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build
 
-yarn-deps:
+yarn-deps: ts-bindings
 	cd lsp && yarn install
+
+ts-bindings:
+	cd queryscript/src && cargo test --features ts export_bindings
 
 
 .PHONY: test lfs refresh-test-data
