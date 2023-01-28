@@ -59,7 +59,6 @@ pub enum MType {
     Fn(Located<MFnType>),
     Name(Located<Ident>),
     Generic(Located<Arc<dyn Generic>>),
-    Connection(Located<()>),
 }
 
 impl MType {
@@ -101,9 +100,6 @@ impl MType {
             })),
             MType::Name { .. } => {
                 runtime::error::fail!("Unresolved type name cannot exist at runtime: {:?}", self)
-            }
-            MType::Connection(..) => {
-                runtime::error::fail!("Unresolved connection cannot exist at runtime: {:?}", self)
             }
             MType::Generic(generic) => generic.to_runtime_type(),
         }
@@ -202,7 +198,6 @@ impl MType {
                     location.clone(),
                 )))
             }
-            MType::Connection(loc) => mkcref(MType::Connection(loc.clone())),
         };
 
         Ok(type_)
@@ -216,7 +211,6 @@ impl MType {
             MType::Fn(t) => t.location().clone(),
             MType::Name(t) => t.location().clone(),
             MType::Generic(t) => t.location().clone(),
-            MType::Connection(loc) => loc.location().clone(),
         }
     }
 }
@@ -328,7 +322,6 @@ impl fmt::Debug for MType {
             MType::Generic(t) => {
                 t.get().fmt(f)?;
             }
-            MType::Connection(_) => f.write_str("connection")?,
         }
         Ok(())
     }
@@ -382,12 +375,6 @@ impl Constrainable for MType {
                 return Err(CompileError::internal(
                     name.location().clone(),
                     format!("Encountered free type variable: {}", name.get()).as_str(),
-                ))
-            }
-            MType::Connection(loc) => {
-                return Err(CompileError::internal(
-                    loc.location().clone(),
-                    "Encountered connection",
                 ))
             }
             MType::Generic(generic) => {
