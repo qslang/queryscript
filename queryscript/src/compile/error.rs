@@ -122,6 +122,13 @@ pub enum CompileError {
         loc: ErrorLocation,
     },
 
+    #[snafu(display("Invalid connection: {}", what))]
+    InvalidConnectionError {
+        what: String,
+        backtrace: Option<Backtrace>,
+        loc: ErrorLocation,
+    },
+
     #[snafu(display("{}", sources.first().unwrap()))]
     Multiple {
         // This is assumed to be non-empty
@@ -183,6 +190,14 @@ impl CompileError {
 
     pub fn scalar_subselect(loc: ErrorLocation, what: &str) -> CompileError {
         return ScalarSubselectSnafu {
+            loc,
+            what: what.to_string(),
+        }
+        .build();
+    }
+
+    pub fn invalid_conn(loc: ErrorLocation, what: &str) -> CompileError {
+        return InvalidConnectionSnafu {
             loc,
             what: what.to_string(),
         }
@@ -259,6 +274,7 @@ impl PrettyError for CompileError {
             CompileError::CoercionError { loc, .. } => loc.clone(),
             CompileError::ImportError { path, .. } => path_location(path),
             CompileError::ScalarSubselectError { loc, .. } => loc.clone(),
+            CompileError::InvalidConnectionError { loc, .. } => loc.clone(),
             CompileError::Multiple { sources } => sources.first().unwrap().location(),
         }
     }

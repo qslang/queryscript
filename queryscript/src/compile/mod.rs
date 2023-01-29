@@ -2,6 +2,7 @@ pub mod autocomplete;
 mod builtin_types;
 mod coerce;
 pub mod compile;
+mod connection;
 pub mod error;
 mod generics;
 pub mod inference;

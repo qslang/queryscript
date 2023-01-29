@@ -96,6 +96,7 @@ pub fn eval<'a>(
                     _ => return rt_unimplemented!("native function: {}", name),
                 }
             }
+            schema::Expr::ConnectionObject(..) => return rt_unimplemented!("Connection object"),
             schema::Expr::FnCall(schema::FnCallExpr {
                 func,
                 args,

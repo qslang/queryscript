@@ -1800,6 +1800,7 @@ dependencies = [
  "tokio",
  "ts-rs",
  "unicase",
+ "url",
  "walkdir",
 ]
 

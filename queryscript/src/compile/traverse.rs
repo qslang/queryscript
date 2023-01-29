@@ -853,6 +853,7 @@ impl<V: Visitor<schema::CRef<schema::MType>> + Sync> Visit<V, schema::CRef<schem
             }
             Expr::NativeFn(f) => Expr::NativeFn(f.clone()),
             Expr::ContextRef(r) => Expr::ContextRef(r.clone()),
+            Expr::ConnectionObject(u, o) => Expr::ConnectionObject(u.clone(), o.clone()),
             Expr::Unknown => Expr::Unknown,
         })
     }

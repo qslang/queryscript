@@ -13,6 +13,7 @@ use crate::ast::SourceLocation;
 use crate::compile::{
     coerce::{coerce_types, CoerceOp},
     compile::SymbolKind,
+    connection::ConnectionString,
     error::*,
     generics::Generic,
     inference::{mkcref, Constrainable, Constrained},
@@ -814,6 +815,10 @@ where
     FnCall(FnCallExpr<TypeRef>),
     NativeFn(Ident),
     ContextRef(Ident),
+
+    /// A name (e.g. a table or view) in a database connection.
+    ConnectionObject(Arc<ConnectionString>, Ident),
+
     Unknown,
 }
 
@@ -853,6 +858,9 @@ impl Expr<CRef<MType>> {
             Expr::SchemaEntry(e) => Ok(Expr::SchemaEntry(e.clone())),
             Expr::NativeFn(f) => Ok(Expr::NativeFn(f.clone())),
             Expr::ContextRef(r) => Ok(Expr::ContextRef(r.clone())),
+            Expr::ConnectionObject(url, name) => {
+                Ok(Expr::ConnectionObject(url.clone(), name.clone()))
+            }
             Expr::Unknown => Ok(Expr::Unknown),
         }
     }
