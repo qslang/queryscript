@@ -2,20 +2,24 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use url::Url;
 
-use crate::ast::{Ident, Located};
+use crate::ast::{self, Ident, Located, SourceLocation};
 
+use super::inference::mkcref;
+use super::schema::{CRef, Decl, Entry, Expr, SType, STypedExpr};
 use super::{
-    error::{ErrorLocation, Result},
+    error::Result,
+    schema::{DeclMap, ExprEntry},
     CompileError,
 };
 
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ConnectionString(Located<Url>);
 
 impl ConnectionString {
     pub fn maybe_parse(
         folder: Option<String>,
         p: &str,
-        loc: &ErrorLocation,
+        loc: &SourceLocation,
     ) -> Result<Option<Arc<ConnectionString>>> {
         let mut url = match Url::parse(p) {
             Ok(url) => url,
@@ -79,6 +83,14 @@ impl ConnectionString {
             self.0.location().clone(),
         )
     }
+
+    pub fn get_url(&self) -> &Url {
+        self.0.get()
+    }
+
+    pub fn location(&self) -> &SourceLocation {
+        self.0.location()
+    }
 }
 
 impl std::fmt::Debug for ConnectionString {
@@ -94,10 +106,71 @@ impl std::fmt::Debug for ConnectionString {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ConnectionSchema {
+    pub url: Arc<ConnectionString>,
+    expr_decls: DeclMap<ExprEntry>,
+}
+
+impl ConnectionSchema {
+    pub fn new(url: Arc<ConnectionString>) -> Self {
+        Self {
+            url,
+            expr_decls: DeclMap::new(),
+        }
+    }
+
+    pub fn get_decl(
+        &mut self,
+        ident: &Located<Ident>,
+        check_visibility: bool,
+        full_path: &ast::Path,
+    ) -> Result<Option<Located<Decl<ExprEntry>>>> {
+        match self.expr_decls.entry(ident.get().clone()) {
+            std::collections::btree_map::Entry::Occupied(e) => {
+                let decl = e.get();
+                if check_visibility && !decl.public {
+                    Err(CompileError::wrong_kind(
+                        full_path.clone(),
+                        "public",
+                        ExprEntry::kind(),
+                    ))
+                } else {
+                    Ok(Some(decl.clone()))
+                }
+            }
+            std::collections::btree_map::Entry::Vacant(e) => {
+                let expr_type =
+                    CRef::new_unknown(&format!("connection {:?} -> {}", &self.url, &ident));
+
+                let ret = Located::new(
+                    Decl {
+                        public: true,
+                        extern_: false,
+                        fn_arg: false,
+                        name: ident.clone(),
+                        value: STypedExpr {
+                            type_: SType::new_mono(expr_type),
+                            expr: mkcref(Expr::ConnectionObject(
+                                self.url.clone(),
+                                ident.get().clone(),
+                            )),
+                        },
+                    },
+                    self.url.as_ref().location().clone(),
+                );
+
+                // Ideally we use the entry interface for this, but it's a little dicey with ownership
+                Ok(Some(e.insert(ret).clone()))
+            }
+        }
+    }
+}
+
 fn connection_infer_fn() -> impl std::future::Future<Output = Result<()>> + Send + 'static {
     async move {
         return Err(CompileError::unimplemented(
-            ErrorLocation::Unknown,
+            SourceLocation::Unknown,
             "connection inference",
         ));
     }

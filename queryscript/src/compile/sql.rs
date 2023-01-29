@@ -290,7 +290,7 @@ pub fn compile_reference(
 ) -> Result<TypedExpr<CRef<MType>>> {
     let (_, decl, remainder) = lookup_path::<ExprEntry>(
         compiler.clone(),
-        schema.clone(),
+        Importer::Schema(schema.clone()),
         &path,
         true, /* import_global */
         true, /* resolve_last */

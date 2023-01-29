@@ -123,12 +123,18 @@ fn get_imported_decls<E: schema::Entry>(
     schema: schema::Ref<schema::Schema>,
     path: &Vec<ast::Located<ast::Ident>>,
 ) -> Result<Vec<ast::Ident>> {
-    let (schema, _, remainder) =
-        compile::lookup_path::<E>(compiler, schema.clone(), path, true, true)?;
+    let (schema, _, remainder) = compile::lookup_path::<E>(
+        compiler,
+        schema::Importer::Schema(schema.clone()),
+        path,
+        true,
+        true,
+    )?;
     if remainder.len() > 0 {
         return Ok(Vec::new());
     }
     return Ok(schema
+        .as_schema()?
         .read()?
         .get_decls::<E>()
         .keys()
@@ -278,7 +284,7 @@ impl AutoCompleter {
             .map_or(Vec::new(), |path| {
                 let mut choices = Vec::new();
 
-                if let Ok(c) = get_imported_decls::<schema::SchemaEntry>(
+                if let Ok(c) = get_imported_decls::<schema::SchemaPath>(
                     self.compiler.clone(),
                     self.schema.clone(),
                     &path,

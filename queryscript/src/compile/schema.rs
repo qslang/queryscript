@@ -1,8 +1,9 @@
-use crate::ast::Pretty;
+use crate::ast::{Pretty, ToIdents};
 pub use arrow::datatypes::DataType as ArrowDataType;
 use colored::*;
 use snafu::prelude::*;
 use sqlparser::ast::{self as sqlast, WildcardAdditionalOptions};
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Debug};
 use std::sync::{Arc, RwLock};
@@ -13,7 +14,7 @@ use crate::ast::SourceLocation;
 use crate::compile::{
     coerce::{coerce_types, CoerceOp},
     compile::SymbolKind,
-    connection::ConnectionString,
+    connection::{ConnectionSchema, ConnectionString},
     error::*,
     generics::Generic,
     inference::{mkcref, Constrainable, Constrained},
@@ -953,21 +954,72 @@ pub fn mkref<T>(t: T) -> Ref<T> {
     Arc::new(RwLock::new(t))
 }
 
-pub trait Entry: Clone {
-    fn run_on_info(&self) -> Option<(SymbolKind, CRef<SType>)>;
-    fn get_map(schema: &Schema) -> &DeclMap<Self>;
-    fn kind() -> &'static str;
+#[derive(Clone, Debug)]
+pub enum SchemaPath {
+    Schema(ast::Path),
+    Connection(Arc<ConnectionString>),
 }
 
-pub type SchemaEntry = ast::Path;
+// Implement PartialEq, etc. so that we strip the locations away before doing comparisons
+impl PartialEq for SchemaPath {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (SchemaPath::Schema(p1), SchemaPath::Schema(p2)) => p1.to_idents() == p2.to_idents(),
+            (SchemaPath::Connection(c1), SchemaPath::Connection(c2)) => {
+                c1.get_url() == c2.get_url()
+            }
+            _ => false,
+        }
+    }
+}
+impl Eq for SchemaPath {}
+
+impl PartialOrd for SchemaPath {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (self, other) {
+            (SchemaPath::Schema(p1), SchemaPath::Schema(p2)) => {
+                p1.to_idents().partial_cmp(&p2.to_idents())
+            }
+            (SchemaPath::Connection(c1), SchemaPath::Connection(c2)) => {
+                c1.get_url().partial_cmp(c2.get_url())
+            }
+            (SchemaPath::Connection(..), SchemaPath::Schema(..)) => Some(Ordering::Less),
+            (SchemaPath::Schema(..), SchemaPath::Connection(..)) => Some(Ordering::Greater),
+        }
+    }
+}
+
+impl Ord for SchemaPath {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
+
+pub trait Entry: Clone {
+    fn kind() -> &'static str;
+    fn run_on_info(&self) -> Option<(SymbolKind, CRef<SType>)>;
+
+    // XXX if convert this to get_entry() or something like that, we won't need
+    // two separate implementations?
+    fn get_map(schema: &Schema) -> &DeclMap<Self>;
+    fn get_conn_decl(
+        url: &mut ConnectionSchema,
+        ident: &Located<Ident>,
+        check_visibility: bool,
+        full_path: &ast::Path,
+    ) -> Result<Option<Located<Decl<Self>>>> {
+        Ok(None)
+    }
+}
+
 pub type TypeEntry = CRef<MType>;
 pub type ExprEntry = STypedExpr;
 
-impl Entry for SchemaEntry {
+impl Entry for SchemaPath {
     fn run_on_info(&self) -> Option<(SymbolKind, CRef<SType>)> {
         None
     }
-    fn get_map(schema: &Schema) -> &DeclMap<SchemaEntry> {
+    fn get_map(schema: &Schema) -> &DeclMap<SchemaPath> {
         &schema.schema_decls
     }
     fn kind() -> &'static str {
@@ -994,6 +1046,14 @@ impl Entry for ExprEntry {
     }
     fn kind() -> &'static str {
         "type"
+    }
+    fn get_conn_decl(
+        schema: &mut ConnectionSchema,
+        ident: &Located<Ident>,
+        check_visibility: bool,
+        full_path: &ast::Path,
+    ) -> Result<Option<Located<Decl<Self>>>> {
+        schema.get_decl(ident, check_visibility, full_path)
     }
 }
 
@@ -1038,10 +1098,56 @@ pub struct TypedName<TypeRef> {
     pub type_: TypeRef,
 }
 
+// We could potentially make this a trait instead, and make lookup_path generic on it. However, that
+// makes it hard to dynamically return an Importer (we'd have to return an Arc<dyn Importer>), which
+// doesn't seem worth it.
+#[derive(Clone, Debug)]
+pub enum Importer {
+    Schema(SchemaRef),
+    Connection(Ref<ConnectionSchema>),
+}
+
+impl Importer {
+    // XXX We may want to have a different SourceLocation option here.
+    pub fn location(&self) -> Result<SourceLocation> {
+        Ok(match &self {
+            Importer::Schema(schema) => SourceLocation::File(schema.read()?.file.clone()),
+            Importer::Connection(url) => SourceLocation::File(format!("{:?}", url)),
+        })
+    }
+
+    pub fn get_and_check<E: Entry>(
+        &self,
+        ident: &Located<Ident>,
+        check_visibility: bool,
+        full_path: &ast::Path,
+    ) -> Result<Option<Located<Decl<E>>>> {
+        Ok(match &self {
+            Importer::Schema(schema) => schema
+                .read()?
+                .get_and_check(ident, check_visibility, full_path)?
+                .cloned(),
+            Importer::Connection(schema) => {
+                E::get_conn_decl(&mut *schema.write()?, ident, check_visibility, full_path)?
+            }
+        })
+    }
+
+    pub fn as_schema(&self) -> Result<SchemaRef> {
+        match &self {
+            Importer::Schema(schema) => Ok(schema.clone()),
+            Importer::Connection(..) => Err(CompileError::internal(
+                SourceLocation::Unknown,
+                "Connection, not a schema",
+            )),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ImportedSchema {
     pub args: Option<Vec<BTreeMap<String, TypedNameAndExpr<CRef<MType>>>>>,
-    pub schema: SchemaRef,
+    pub schema: Importer,
 }
 
 impl<T> Pretty for Located<T> {
@@ -1059,11 +1165,11 @@ pub struct Schema {
     pub parent_scope: Option<Ref<Schema>>,
     pub externs: BTreeMap<Ident, CRef<MType>>,
 
-    pub schema_decls: DeclMap<ast::Path>,
+    pub schema_decls: DeclMap<SchemaPath>,
     pub type_decls: DeclMap<CRef<MType>>,
     pub expr_decls: DeclMap<STypedExpr>,
 
-    pub imports: BTreeMap<Vec<Ident>, Ref<ImportedSchema>>,
+    pub imports: BTreeMap<SchemaPath, Ref<ImportedSchema>>,
     pub exprs: Vec<Located<CTypedExpr>>,
 }
 
