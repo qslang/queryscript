@@ -862,15 +862,11 @@ impl Expr<CRef<MType>> {
         }
     }
 
-    pub async fn unwrap_schema_entry(
-        self: &Arc<Expr<CRef<MType>>>,
-    ) -> Result<Arc<Expr<CRef<MType>>>> {
+    pub async fn unwrap_schema_entry(self: &Expr<CRef<MType>>) -> Result<Expr<CRef<MType>>> {
         let mut ret = self.clone();
         loop {
-            match ret.as_ref() {
-                Expr::SchemaEntry(STypedExpr { expr, .. }) => {
-                    ret = Arc::new(expr.await?.read()?.clone())
-                }
+            match ret {
+                Expr::SchemaEntry(STypedExpr { expr, .. }) => ret = expr.await?.read()?.clone(),
                 _ => return Ok(ret),
             }
         }

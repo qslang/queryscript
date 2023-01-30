@@ -117,9 +117,9 @@ impl Visitor<CRef<MType>> for ParamInliner {
                 }
 
                 for (_, param) in params.iter() {
-                    let expr = inline_params(param.expr.unwrap_schema_entry().await?).await?;
+                    let expr = inline_params(&param.expr.unwrap_schema_entry().await?).await?;
 
-                    match expr.as_ref() {
+                    match &expr {
                         Expr::SQL(sql, inner_url) => {
                             if let Some(inner_url) = inner_url {
                                 conn_strings.insert(inner_url.clone());
@@ -136,8 +136,8 @@ impl Visitor<CRef<MType>> for ParamInliner {
 
                 let can_inline_tables = remaining_params == 0 && conn_strings.len() <= 1;
 
-                for ((name, param), expr) in params.iter().zip(inlined_params) {
-                    match expr.as_ref() {
+                for ((name, param), expr) in params.into_iter().zip(inlined_params) {
+                    match &expr {
                         // Only inline SQL expressions that point to the same database.
                         Expr::SQL(sql, inner_url)
                             if matches!(inner_url, None) || can_inline_tables =>
@@ -150,7 +150,7 @@ impl Visitor<CRef<MType>> for ParamInliner {
                                 name.clone(),
                                 TypedExpr {
                                     type_: param.type_.clone(),
-                                    expr,
+                                    expr: Arc::new(expr),
                                 },
                             );
                         }
@@ -172,10 +172,9 @@ impl Visitor<CRef<MType>> for ParamInliner {
     }
 }
 
-// XXX Should this take Arcs in and out?
-pub async fn inline_params(expr: Arc<Expr<CRef<MType>>>) -> Result<Arc<Expr<CRef<MType>>>> {
+pub async fn inline_params(expr: &Expr<CRef<MType>>) -> Result<Expr<CRef<MType>>> {
     let visitor = ParamInliner {
         context: BTreeMap::new(),
     };
-    Ok(Arc::new(expr.visit(&visitor).await?))
+    Ok(expr.visit(&visitor).await?)
 }

@@ -2340,7 +2340,7 @@ pub fn compile_sqlexpr(
 
                     let func_expr = func.expr.unwrap_schema_entry().await?;
 
-                    let (fn_kind, fn_body) = match func_expr.as_ref() {
+                    let (fn_kind, fn_body) = match &func_expr {
                         Expr::NativeFn(_) => (FnKind::Native, None),
                         Expr::Fn(FnExpr { body, .. }) => match body {
                             FnBody::SQLBuiltin => (FnKind::SQLBuiltin, None),
@@ -2406,9 +2406,9 @@ pub fn compile_sqlexpr(
                                 // the SQL of the function body.  This should result in a version
                                 // of the body with all SQL arguments fully inlined.
                                 //
-                                let fn_body = inline_params(fn_body).await?;
+                                let fn_body = inline_params(fn_body.as_ref()).await?;
 
-                                Ok(mkcref(fn_body.as_ref().clone()))
+                                Ok(mkcref(fn_body))
                             }
                             // Otherwise, create a SQL function call.
                             //

@@ -863,12 +863,17 @@ fn compile_expr(compiler: Compiler, schema: Ref<Schema>, expr: &ast::Expr) -> Re
                     type_,
                     expr: compiler.async_cref(async move {
                         let query = cunwrap(query.await?)?;
-                        let sql = inline_params(Arc::new(Expr::native_sql(Arc::new(SQL {
+
+                        // This inline pass will compress together SQL that can be pushed down to an underlying
+                        // remote database by comparing the URLs of subtrees and pushing down the SQL for any
+                        // subtree whose URLs are all the same or empty and the parent's is empty.
+                        let sql = inline_params(&Expr::native_sql(Arc::new(SQL {
                             names: query.names,
                             body: SQLBody::Query(query.body),
-                        }))))
+                        })))
                         .await?;
-                        Ok(mkcref(sql.as_ref().clone()))
+
+                        Ok(mkcref(sql))
                     })?,
                 })
             }
