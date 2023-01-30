@@ -10,6 +10,7 @@ use crate::compile::coerce::CoerceOp;
 use crate::compile::connection::{ConnectionSchema, ConnectionString};
 use crate::compile::error::*;
 use crate::compile::inference::*;
+use crate::compile::inline::inline_params;
 use crate::compile::schema::*;
 use crate::compile::scope::SQLScope;
 use crate::compile::sql::*;
@@ -862,10 +863,12 @@ fn compile_expr(compiler: Compiler, schema: Ref<Schema>, expr: &ast::Expr) -> Re
                     type_,
                     expr: compiler.async_cref(async move {
                         let query = cunwrap(query.await?)?;
-                        Ok(mkcref(Expr::native_sql(Arc::new(SQL {
+                        let sql = inline_params(Arc::new(Expr::native_sql(Arc::new(SQL {
                             names: query.names,
                             body: SQLBody::Query(query.body),
                         }))))
+                        .await?;
+                        Ok(mkcref(sql.as_ref().clone()))
                     })?,
                 })
             }
