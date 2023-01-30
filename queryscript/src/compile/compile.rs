@@ -862,13 +862,10 @@ fn compile_expr(compiler: Compiler, schema: Ref<Schema>, expr: &ast::Expr) -> Re
                     type_,
                     expr: compiler.async_cref(async move {
                         let query = cunwrap(query.await?)?;
-                        Ok(mkcref(Expr::SQL(
-                            Arc::new(SQL {
-                                names: query.names,
-                                body: SQLBody::Query(query.body),
-                            }),
-                            None,
-                        )))
+                        Ok(mkcref(Expr::native_sql(Arc::new(SQL {
+                            names: query.names,
+                            body: SQLBody::Query(query.body),
+                        }))))
                     })?,
                 })
             }

@@ -102,7 +102,8 @@ impl Visitor<CRef<MType>> for ParamInliner {
                 for (name, param) in params {
                     let expr = inline_params(param.expr.unwrap_schema_entry().await?).await?;
                     match expr.as_ref() {
-                        Expr::SQL(sql, url) => {
+                        // Only inline SQL expressions that point to the same database.
+                        Expr::SQL(sql, inner_url) if url == inner_url => {
                             names.extend(sql.names.clone());
                             context.insert(name.clone(), sql.body.clone());
                         }
@@ -127,6 +128,7 @@ impl Visitor<CRef<MType>> for ParamInliner {
     }
 }
 
+// XXX Should this take Arcs in and out?
 pub async fn inline_params(expr: Arc<Expr<CRef<MType>>>) -> Result<Arc<Expr<CRef<MType>>>> {
     let visitor = ParamInliner {
         context: BTreeMap::new(),
