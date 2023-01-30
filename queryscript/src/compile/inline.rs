@@ -6,6 +6,7 @@ use crate::compile::schema::*;
 use crate::compile::traverse::{SQLVisitor, Visit, VisitSQL, Visitor};
 
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 pub struct ContextInliner {
@@ -106,11 +107,41 @@ impl Visitor<CRef<MType>> for ParamInliner {
                     names.params.clone(),
                 );
                 let mut context = BTreeMap::new();
-                for (name, param) in params {
+
+                let mut inlined_params = Vec::new(); // Each paramater, after inlining
+                let mut remaining_params = 0; // The aggregate number of remaining parameters
+                let mut conn_strings = BTreeSet::new(); // The connection string for any remote SQL expressions
+
+                if let Some(url) = url {
+                    conn_strings.insert(url.clone());
+                }
+
+                for (_, param) in params.iter() {
                     let expr = inline_params(param.expr.unwrap_schema_entry().await?).await?;
+
+                    match expr.as_ref() {
+                        Expr::SQL(sql, inner_url) => {
+                            if let Some(inner_url) = inner_url {
+                                conn_strings.insert(inner_url.clone());
+                            }
+                            remaining_params += sql.names.params.len();
+                        }
+                        _ => {
+                            remaining_params += 1;
+                        }
+                    }
+
+                    inlined_params.push(expr);
+                }
+
+                let can_inline_tables = remaining_params == 0 && conn_strings.len() <= 1;
+
+                for ((name, param), expr) in params.iter().zip(inlined_params) {
                     match expr.as_ref() {
                         // Only inline SQL expressions that point to the same database.
-                        Expr::SQL(sql, inner_url) if url == inner_url => {
+                        Expr::SQL(sql, inner_url)
+                            if matches!(inner_url, None) || can_inline_tables =>
+                        {
                             names.extend(sql.names.clone());
                             context.insert(name.clone(), sql.body.clone());
                         }
@@ -126,9 +157,15 @@ impl Visitor<CRef<MType>> for ParamInliner {
                     }
                 }
 
+                let url = if can_inline_tables {
+                    conn_strings.into_iter().next()
+                } else {
+                    url.clone()
+                };
+
                 let visitor = ParamInliner { context };
                 let body = body.visit_sql(&visitor);
-                Some(Expr::SQL(Arc::new(SQL { names, body }), url.clone()))
+                Some(Expr::SQL(Arc::new(SQL { names, body }), url))
             }
             _ => None,
         })
