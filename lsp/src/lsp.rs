@@ -651,7 +651,9 @@ fn get_runnable_expr_from_decl(
 fn find_expr_by_location(
     schema: &Schema,
     loc: &queryscript::ast::Location,
-) -> Result<Option<queryscript::compile::schema::TypedExpr<queryscript::compile::schema::Ref<QSType>>>> {
+) -> Result<
+    Option<queryscript::compile::schema::TypedExpr<queryscript::compile::schema::Ref<QSType>>>,
+> {
     if let Some(expr) = schema.exprs.iter().find(|expr| {
         let expr_loc = expr.location();
         expr_loc.contains(loc)
@@ -1014,7 +1016,14 @@ impl Backend {
             }
         };
 
-        let ctx = runtime::Context::new(&schema_ref, runtime::SQLEngineType::DuckDB);
+        let ctx = runtime::Context::new(
+            schema_ref
+                .read()
+                .map_err(log_internal_error)?
+                .folder
+                .clone(),
+            runtime::SQLEngineType::DuckDB,
+        );
 
         // XXX We should change this log_internal_error to return an error to the webview
         let value = runtime::eval(&ctx, &expr)

@@ -4,6 +4,7 @@ mod coerce;
 pub mod compile;
 mod connection;
 pub mod error;
+mod external;
 mod generics;
 pub mod inference;
 pub mod inline;

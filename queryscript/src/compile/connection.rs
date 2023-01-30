@@ -5,8 +5,14 @@ use url::Url;
 
 use crate::ast::{self, Ident, Located, SourceLocation, ToSqlIdent};
 
+use super::compile::ExternalTypeRank;
+use super::external::schema_infer_expr_fn;
+use super::generics::{ExternalType, GenericConstructor};
 use super::inference::mkcref;
-use super::schema::{CRef, Decl, Entry, Expr, SQLBody, SQLNames, SQLSnippet, SType, STypedExpr};
+use super::schema::{
+    CRef, Decl, Entry, Expr, MType, SQLBody, SQLNames, SQLSnippet, SType, STypedExpr,
+};
+use super::sql::select_limit_0;
 use super::{
     error::Result,
     schema::{DeclMap, ExprEntry},
@@ -128,6 +134,7 @@ impl ConnectionSchema {
 
     pub fn get_decl(
         &mut self,
+        compiler: &super::Compiler,
         ident: &Located<Ident>,
         check_visibility: bool,
         full_path: &ast::Path,
@@ -149,6 +156,39 @@ impl ConnectionSchema {
                 let expr_type =
                     CRef::new_unknown(&format!("connection {:?} -> {}", &self.url, &ident));
 
+                let body = SQLBody::Table(sqlast::TableFactor::Table {
+                    name: sqlast::ObjectName(vec![ident.to_sqlident()]),
+                    alias: None,
+                    args: None,
+                    with_hints: Vec::new(),
+                });
+
+                let resolve = schema_infer_expr_fn(
+                    None,
+                    mkcref(Expr::SQL(
+                        Arc::new(SQLSnippet {
+                            names: SQLNames::new(),
+                            body: SQLBody::Query(select_limit_0(body.as_query())),
+                        }),
+                        Some(self.url.clone()),
+                    )),
+                    expr_type.clone(),
+                );
+                compiler.add_external_type(resolve, expr_type.clone(), ExternalTypeRank::Load)?;
+
+                let expr = mkcref(Expr::SQL(
+                    Arc::new(SQLSnippet {
+                        names: SQLNames::new(),
+                        body,
+                    }),
+                    Some(self.url.clone()),
+                ));
+
+                let external_type = mkcref(MType::Generic(Located::new(
+                    ExternalType::new(ident.location(), vec![expr_type])?,
+                    ident.location().clone(),
+                )));
+
                 let ret = Located::new(
                     Decl {
                         public: true,
@@ -156,19 +196,8 @@ impl ConnectionSchema {
                         fn_arg: false,
                         name: ident.clone(),
                         value: STypedExpr {
-                            type_: SType::new_mono(expr_type),
-                            expr: mkcref(Expr::SQL(
-                                Arc::new(SQLSnippet {
-                                    names: SQLNames::new(),
-                                    body: SQLBody::Table(sqlast::TableFactor::Table {
-                                        name: sqlast::ObjectName(vec![ident.to_sqlident()]),
-                                        alias: None,
-                                        args: None,
-                                        with_hints: Vec::new(),
-                                    }),
-                                }),
-                                Some(self.url.clone()),
-                            )),
+                            type_: SType::new_mono(external_type),
+                            expr,
                         },
                     },
                     self.url.as_ref().location().clone(),
@@ -178,14 +207,5 @@ impl ConnectionSchema {
                 Ok(Some(e.insert(ret).clone()))
             }
         }
-    }
-}
-
-fn connection_infer_fn() -> impl std::future::Future<Output = Result<()>> + Send + 'static {
-    async move {
-        return Err(CompileError::unimplemented(
-            SourceLocation::Unknown,
-            "connection inference",
-        ));
     }
 }

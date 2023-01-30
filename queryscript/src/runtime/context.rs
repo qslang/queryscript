@@ -28,10 +28,9 @@ impl Context {
         }
     }
 
-    pub fn new(schema: &schema::SchemaRef, engine_type: SQLEngineType) -> Context {
-        let schema = schema.read().unwrap();
+    pub fn new(folder: Option<String>, engine_type: SQLEngineType) -> Context {
         Context {
-            folder: schema.folder.clone(),
+            folder,
             values: BTreeMap::new(),
             sql_engine: new_engine(engine_type),
             disable_typechecks: false,

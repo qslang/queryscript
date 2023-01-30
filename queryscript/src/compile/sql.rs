@@ -144,6 +144,14 @@ pub fn select_star_from(relation: sqlast::TableFactor) -> sqlast::Query {
     )
 }
 
+pub fn select_limit_0(mut query: sqlast::Query) -> sqlast::Query {
+    query.limit = Some(sqlast::Expr::Value(sqlast::Value::Number(
+        "0".to_string(),
+        false,
+    )));
+    query
+}
+
 pub fn with_table_alias(
     table: &sqlast::TableFactor,
     alias: Option<sqlast::TableAlias>,
@@ -1601,8 +1609,11 @@ pub fn schema_infer_load_fn(
     inner_type: CRef<MType>,
 ) -> impl std::future::Future<Output = Result<()>> + Send + 'static {
     async move {
-        let ctx = crate::runtime::Context::new(&schema, crate::runtime::SQLEngineType::DuckDB)
-            .disable_typechecks();
+        let ctx = crate::runtime::Context::new(
+            schema.read()?.folder.clone(),
+            crate::runtime::SQLEngineType::DuckDB,
+        )
+        .disable_typechecks();
         let mut runtime_args = Vec::new();
         for e in args {
             let runtime_expr = e.to_typed_expr().to_runtime_type().context(RuntimeSnafu {

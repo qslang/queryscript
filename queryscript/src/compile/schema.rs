@@ -999,10 +999,11 @@ pub trait Entry: Clone {
     // two separate implementations?
     fn get_map(schema: &Schema) -> &DeclMap<Self>;
     fn get_conn_decl(
-        url: &mut ConnectionSchema,
-        ident: &Located<Ident>,
-        check_visibility: bool,
-        full_path: &ast::Path,
+        _compiler: &super::Compiler,
+        _schema: &mut ConnectionSchema,
+        _ident: &Located<Ident>,
+        _check_visibility: bool,
+        _full_path: &ast::Path,
     ) -> Result<Option<Located<Decl<Self>>>> {
         Ok(None)
     }
@@ -1044,12 +1045,13 @@ impl Entry for ExprEntry {
         "type"
     }
     fn get_conn_decl(
+        compiler: &super::Compiler,
         schema: &mut ConnectionSchema,
         ident: &Located<Ident>,
         check_visibility: bool,
         full_path: &ast::Path,
     ) -> Result<Option<Located<Decl<Self>>>> {
-        schema.get_decl(ident, check_visibility, full_path)
+        schema.get_decl(compiler, ident, check_visibility, full_path)
     }
 }
 
@@ -1114,6 +1116,7 @@ impl Importer {
 
     pub fn get_and_check<E: Entry>(
         &self,
+        compiler: &super::Compiler,
         ident: &Located<Ident>,
         check_visibility: bool,
         full_path: &ast::Path,
@@ -1123,9 +1126,13 @@ impl Importer {
                 .read()?
                 .get_and_check(ident, check_visibility, full_path)?
                 .cloned(),
-            Importer::Connection(schema) => {
-                E::get_conn_decl(&mut *schema.write()?, ident, check_visibility, full_path)?
-            }
+            Importer::Connection(schema) => E::get_conn_decl(
+                compiler,
+                &mut *schema.write()?,
+                ident,
+                check_visibility,
+                full_path,
+            )?,
         })
     }
 

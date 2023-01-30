@@ -160,17 +160,20 @@ fn run_command(
                 .compile_schema_ast(repl_schema.clone(), &ast)
                 .as_result()?;
 
-            let compiled = {
+            let (compiled, folder) = {
                 let locked_schema = repl_schema.read()?;
-                if locked_schema.exprs.len() > num_exprs {
-                    Some(locked_schema.exprs.last().unwrap().clone())
-                } else {
-                    None
-                }
+                (
+                    if locked_schema.exprs.len() > num_exprs {
+                        Some(locked_schema.exprs.last().unwrap().clone())
+                    } else {
+                        None
+                    },
+                    locked_schema.folder.clone(),
+                )
             };
 
             if let Some(compiled) = compiled {
-                let ctx = queryscript::runtime::Context::new(&repl_schema, engine_type);
+                let ctx = queryscript::runtime::Context::new(folder, engine_type);
                 let expr = compiled.to_runtime_type().context(RuntimeSnafu {
                     file: file.to_string(),
                 })?;
