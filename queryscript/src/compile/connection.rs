@@ -46,14 +46,19 @@ impl ConnectionString {
 
         if matches!(url.scheme(), "duckdb") && matches!(url.host_str(), Some(_)) {
             // Allow relative paths for schemes that are on the filesystem
-
             let host_str = url.host_str().unwrap();
             let mut new_path = PathBuf::new();
             if let Some(folder) = folder {
-                new_path.push(folder);
+                new_path.push(std::fs::canonicalize(if folder == "" {
+                    "."
+                } else {
+                    &folder
+                })?);
             }
             new_path.push(host_str);
-            new_path = new_path.join(url.path().trim_start_matches('/'));
+            if url.path() != "" {
+                new_path = new_path.join(url.path().trim_start_matches('/'));
+            }
 
             url.set_host(None).unwrap();
             url.set_path(new_path.to_str().unwrap());
@@ -96,12 +101,12 @@ impl ConnectionString {
 impl std::fmt::Debug for ConnectionString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ConnectionString(")?;
-        write!(f, "{:?}://", self.0.scheme())?;
+        write!(f, "{}://", self.0.scheme())?;
         match self.0.host() {
             Some(h) => write!(f, "{}", h)?,
             None => {}
         };
-        write!(f, "{:?}", self.0.path())?;
+        write!(f, "{}", self.0.path())?;
         write!(f, ")")
     }
 }

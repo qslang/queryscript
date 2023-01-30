@@ -17,6 +17,7 @@ mod util;
 pub use compile::{
     lookup_path, lookup_schema, Compiler, CompilerConfig, OnSchema, OnSymbol, SymbolKind,
 };
+pub use connection::ConnectionString;
 pub use error::{CompileError, Result};
 pub use schema::{mkref, Schema, SchemaRef};
 pub use sql::compile_reference;

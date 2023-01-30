@@ -84,6 +84,7 @@ impl DuckDBEngine {
 
     fn eval_in_place(
         &self,
+        url: Option<Arc<crate::compile::ConnectionString>>,
         query: &sqlast::Query,
         params: HashMap<Ident, SQLParam>,
     ) -> Result<Arc<dyn Relation>> {
@@ -91,7 +92,10 @@ impl DuckDBEngine {
         // scan that accesses the relations referenced in the query parameters. I did some light
         // benchmarking and the cost to create a connection seemed relatively low, but we could
         // potentially pool or concurrently use these connections if necessary.
-        let conn = Connection::open_in_memory()?;
+        let conn = match url {
+            Some(url) => Connection::open(url.get_url().path())?,
+            None => Connection::open_in_memory()?,
+        };
 
         unsafe {
             // This follows suggestion [B] outlined in
@@ -183,6 +187,7 @@ impl SQLEngine for DuckDBEngine {
     async fn eval(
         &self,
         ctx: &Context,
+        url: Option<Arc<crate::compile::ConnectionString>>,
         query: &sqlast::Query,
         params: HashMap<Ident, SQLParam>,
     ) -> Result<Arc<dyn Relation>> {
@@ -190,7 +195,7 @@ impl SQLEngine for DuckDBEngine {
         // and it's not hooked into the async coroutines that the runtime uses (and therefore cannot
         // yield work). block_in_place() tells Tokio to expect this thread to spend a while working on
         // this stuff and use other threads for other work.
-        ctx.expensive(|| self.eval_in_place(query, params))
+        ctx.expensive(|| self.eval_in_place(url, query, params))
     }
 }
 
