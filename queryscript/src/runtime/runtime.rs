@@ -1,5 +1,4 @@
 use futures::future::{BoxFuture, FutureExt};
-use sqlparser::ast as sqlast;
 use std::collections::HashMap;
 
 use crate::compile::schema;

@@ -1,4 +1,3 @@
-use snafu::prelude::*;
 use std::cell::RefCell;
 use std::sync::Arc;
 
@@ -11,7 +10,6 @@ use crate::compile::schema::*;
 use crate::compile::sql::{compile_reference, select_limit_0};
 use crate::compile::traverse::{SQLVisitor, VisitSQL};
 use crate::compile::Compiler;
-use crate::types::{AtomicType, Type};
 use crate::{
     ast,
     ast::{sqlast, SourceLocation, ToPath},
@@ -100,7 +98,6 @@ pub fn compile_unsafe_expr(
         }
     };
 
-    // XXX We should be able to inline the parameters here too?
     let names = name_collector.names.into_inner();
     let expr = mkcref(Expr::native_sql(Arc::new(SQL {
         names: names.clone(),

@@ -8,7 +8,7 @@ use super::{
     error::{Result, RuntimeSnafu},
     inference::mkcref,
     schema::{CRef, CTypedExpr, Expr, MType},
-    CompileError, SchemaRef,
+    CompileError,
 };
 
 // XXX If a record has two fields with the same name, we should throw an error. Eventually,

@@ -539,7 +539,7 @@ pub fn lookup_schema(
     } else {
         let imported = match &path {
             SchemaPath::Schema(path) => {
-                let (k, v) = if let Some(root) = &schema.read()?.folder {
+                let v = if let Some(root) = &schema.read()?.folder {
                     let mut file_path_buf = FilePath::new(root).to_path_buf();
                     for p in path {
                         file_path_buf.push(FilePath::new(p.get()));
@@ -556,7 +556,7 @@ pub fn lookup_schema(
                         .0
                         .as_result()?
                         .unwrap();
-                    (path.clone(), s.clone())
+                    s.clone()
                 } else {
                     return Err(CompileError::no_such_entry(path.clone()));
                 };
