@@ -75,7 +75,14 @@ impl SQLVisitor for ParamInliner {
                 }
 
                 if let Some(e) = self.context.get(&name.0[0].get().into()) {
-                    Some(e.as_table(alias.clone()))
+                    let new_alias = match alias {
+                        Some(alias) => alias.clone(),
+                        None => sqlast::TableAlias {
+                            name: name.0[0].clone(),
+                            columns: vec![],
+                        },
+                    };
+                    Some(e.as_table(Some(new_alias)))
                 } else {
                     None
                 }
