@@ -89,7 +89,7 @@ impl SQLVisitor for ParamInliner {
 impl Visitor<CRef<MType>> for ParamInliner {
     async fn visit_expr(&self, expr: &Expr<CRef<MType>>) -> Result<Option<Expr<CRef<MType>>>> {
         Ok(match expr {
-            Expr::SQL(sql) => {
+            Expr::SQL(sql, url) => {
                 let SQL { names, body } = sql.as_ref();
                 let (mut names, params) = (
                     SQLNames {
@@ -102,7 +102,7 @@ impl Visitor<CRef<MType>> for ParamInliner {
                 for (name, param) in params {
                     let expr = inline_params(param.expr.unwrap_schema_entry().await?).await?;
                     match expr.as_ref() {
-                        Expr::SQL(sql) => {
+                        Expr::SQL(sql, url) => {
                             names.extend(sql.names.clone());
                             context.insert(name.clone(), sql.body.clone());
                         }
@@ -120,7 +120,7 @@ impl Visitor<CRef<MType>> for ParamInliner {
 
                 let visitor = ParamInliner { context };
                 let body = body.visit_sql(&visitor);
-                Some(Expr::SQL(Arc::new(SQL { names, body })))
+                Some(Expr::SQL(Arc::new(SQL { names, body }), url.clone()))
             }
             _ => None,
         })

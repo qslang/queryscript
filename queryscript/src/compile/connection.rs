@@ -1,11 +1,12 @@
+use sqlparser::ast as sqlast;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use url::Url;
 
-use crate::ast::{self, Ident, Located, SourceLocation};
+use crate::ast::{self, Ident, Located, SourceLocation, ToSqlIdent};
 
 use super::inference::mkcref;
-use super::schema::{CRef, Decl, Entry, Expr, SType, STypedExpr};
+use super::schema::{CRef, Decl, Entry, Expr, SQLBody, SQLNames, SQLSnippet, SType, STypedExpr};
 use super::{
     error::Result,
     schema::{DeclMap, ExprEntry},
@@ -156,9 +157,17 @@ impl ConnectionSchema {
                         name: ident.clone(),
                         value: STypedExpr {
                             type_: SType::new_mono(expr_type),
-                            expr: mkcref(Expr::ConnectionObject(
-                                self.url.clone(),
-                                ident.get().clone(),
+                            expr: mkcref(Expr::SQL(
+                                Arc::new(SQLSnippet {
+                                    names: SQLNames::new(),
+                                    body: SQLBody::Table(sqlast::TableFactor::Table {
+                                        name: sqlast::ObjectName(vec![ident.to_sqlident()]),
+                                        alias: None,
+                                        args: None,
+                                        with_hints: Vec::new(),
+                                    }),
+                                }),
+                                Some(self.url.clone()),
                             )),
                         },
                     },

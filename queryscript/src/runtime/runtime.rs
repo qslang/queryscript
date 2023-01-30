@@ -97,38 +97,6 @@ pub fn eval<'a>(
                     _ => return rt_unimplemented!("native function: {}", name),
                 }
             }
-            schema::Expr::ConnectionObject(conn_str, table_name) => {
-                let query = crate::compile::sql::select_star_from(sqlast::TableFactor::Table {
-                    name: sqlast::ObjectName(vec![sqlast::Located::new(table_name.into(), None)]),
-                    alias: None,
-                    args: None,
-                    with_hints: Vec::new(),
-                });
-
-                // XXX Refactor with schema::Expr::SQL
-                let rows = ctx
-                    .sql_engine
-                    .eval(ctx, Some(conn_str.clone()), &query, HashMap::new())
-                    .await?;
-
-                let expected_type = typed_expr.type_.read()?;
-
-                // Validate that the schema matches the expected type. If not, we have a serious problem
-                // since we may interpret the record batch as a different type than expected.
-                if !ctx.disable_typechecks && rows.num_batches() > 0 {
-                    let rows_type = crate::types::Type::List(Box::new(crate::types::Type::Record(
-                        rows.schema(),
-                    )));
-                    if *expected_type != rows_type {
-                        return Err(RuntimeError::type_mismatch(
-                            expected_type.clone(),
-                            rows_type,
-                        ));
-                    }
-                }
-
-                Ok(Value::Relation(rows))
-            }
             schema::Expr::FnCall(schema::FnCallExpr {
                 func,
                 args,
@@ -149,13 +117,16 @@ pub fn eval<'a>(
 
                 fn_val.execute(&new_ctx, arg_values).await
             }
-            schema::Expr::SQL(e) => {
+            schema::Expr::SQL(e, url) => {
                 let schema::SQL { body, names } = e.as_ref();
                 let sql_params = eval_params(ctx, &names.params).await?;
                 let query = body.as_query();
 
                 // TODO: This ownership model implies some necessary copying (below).
-                let rows = ctx.sql_engine.eval(ctx, None, &query, sql_params).await?;
+                let rows = ctx
+                    .sql_engine
+                    .eval(ctx, url.clone(), &query, sql_params)
+                    .await?;
 
                 // Before returning, we perform some runtime checks that might only be necessary in debug mode:
                 // - For expressions, validate that the result is a single row and column

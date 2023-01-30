@@ -183,7 +183,7 @@ pub fn compile_sqlreference(
 
             if let Some((relation_type, relation_loc)) = scope.read()?.get_relation(&name_ident)? {
                 let type_ = get_rowtype(compiler.clone(), relation_type)?;
-                let expr = mkcref(Expr::SQL(Arc::new(SQL {
+                let expr = mkcref(Expr::native_sql(Arc::new(SQL {
                     names: CSQLNames::from_unbound(&sqlpath),
                     body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
                 })));
@@ -215,7 +215,7 @@ pub fn compile_sqlreference(
                                 )?;
                                 Ok(mkcref(TypedExpr {
                                     type_: type_.clone(),
-                                    expr: Arc::new(Expr::SQL(Arc::new(SQL {
+                                    expr: Arc::new(Expr::native_sql(Arc::new(SQL {
                                         names: CSQLNames::from_unbound(&sqlpath),
                                         body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(
                                             sqlpath,
@@ -256,7 +256,7 @@ pub fn compile_sqlreference(
             {
                 let rowtype = get_rowtype(compiler.clone(), relation_type)?;
                 let type_ = typecheck_path(rowtype, vec![path[1].clone()].as_slice())?;
-                let expr = mkcref(Expr::SQL(Arc::new(SQL {
+                let expr = mkcref(Expr::native_sql(Arc::new(SQL {
                     names: CSQLNames::from_unbound(&sqlpath),
                     body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
                 })));
@@ -320,7 +320,7 @@ pub fn compile_reference(
             let mut full_name = vec![placeholder_name.clone()];
             full_name.extend(remainder.clone().into_iter().map(|n| n.to_sqlident()));
 
-            let expr = Arc::new(Expr::SQL(Arc::new(SQL {
+            let expr = Arc::new(Expr::native_sql(Arc::new(SQL {
                 names: placeholder.names.clone(),
                 body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(full_name)),
             })));
@@ -353,7 +353,15 @@ pub fn intern_placeholder(
     expr: &TypedExpr<CRef<MType>>,
 ) -> Result<Arc<SQL<CRef<MType>>>> {
     match &*expr.expr {
-        Expr::SQL(sql) => Ok(sql.clone()),
+        Expr::SQL(sql, url) => {
+            if url.is_some() {
+                return Err(CompileError::internal(
+                    SourceLocation::Unknown,
+                    "Cannot intern a placeholder for a remote SQL expression",
+                ));
+            }
+            Ok(sql.clone())
+        }
         _ => {
             let (_, e) = intern_nonsql_placeholder(compiler.clone(), kind, expr)?;
             Ok(e)
@@ -367,7 +375,7 @@ pub fn intern_nonsql_placeholder(
     expr: &TypedExpr<CRef<MType>>,
 ) -> Result<(sqlast::Located<sqlast::Ident>, Arc<SQL<CRef<MType>>>)> {
     match &*expr.expr {
-        Expr::SQL(_) => Err(CompileError::internal(
+        Expr::SQL(..) => Err(CompileError::internal(
             SourceLocation::Unknown,
             "Cannot call intern_nonsql_placeholder on a SQL expression",
         )),
@@ -1234,7 +1242,13 @@ pub async fn finish_sqlexpr(
 ) -> Result<sqlast::Expr> {
     let expr = expr.clone_inner().await?;
     Ok(match expr {
-        Expr::SQL(s) => {
+        Expr::SQL(s, url) => {
+            if url.is_some() {
+                return Err(CompileError::internal(
+                    SourceLocation::Unknown,
+                    "Cannot intern a placeholder for a remote SQL expression",
+                ));
+            }
             names.extend(s.names.clone());
             s.body.as_expr()
         }
@@ -1456,7 +1470,7 @@ lazy_static! {
     });
     static ref NULL: CTypedExpr = CTypedExpr {
         type_: resolve_global_atom(GLOBAL_COMPILER.clone(), "null").unwrap(),
-        expr: mkcref(Expr::SQL(NULL_SQLEXPR.clone())),
+        expr: mkcref(Expr::SQL(NULL_SQLEXPR.clone(), None)),
     };
 }
 
@@ -1570,7 +1584,7 @@ where
 
 pub fn has_unbound_names(expr: Arc<Expr<CRef<MType>>>) -> bool {
     match expr.as_ref() {
-        Expr::SQL(e) => {
+        Expr::SQL(e, _url) => {
             !e.names.unbound.is_empty()
                 || e.names
                     .params
@@ -1820,7 +1834,7 @@ pub fn compile_sqlexpr(
 
                 CTypedExpr {
                     type_: mkcref(MType::Atom(Located::new(numeric_type, loc.clone()))),
-                    expr: mkcref(Expr::SQL(Arc::new(SQL {
+                    expr: mkcref(Expr::native_sql(Arc::new(SQL {
                         names: CSQLNames::new(),
                         body: SQLBody::Expr(sqlast::Expr::Cast {
                             expr: Box::new(expr.clone()),
@@ -1837,14 +1851,14 @@ pub fn compile_sqlexpr(
             | sqlast::Value::DollarQuotedString(_)
             | sqlast::Value::DoubleQuotedString(_) => CTypedExpr {
                 type_: resolve_global_atom(compiler.clone(), "string")?,
-                expr: mkcref(Expr::SQL(Arc::new(SQL {
+                expr: mkcref(Expr::native_sql(Arc::new(SQL {
                     names: CSQLNames::new(),
                     body: SQLBody::Expr(expr.clone()),
                 }))),
             },
             sqlast::Value::Boolean(_) => CTypedExpr {
                 type_: resolve_global_atom(compiler.clone(), "bool")?,
-                expr: mkcref(Expr::SQL(Arc::new(SQL {
+                expr: mkcref(Expr::native_sql(Arc::new(SQL {
                     names: CSQLNames::new(),
                     body: SQLBody::Expr(expr.clone()),
                 }))),
@@ -1878,7 +1892,7 @@ pub fn compile_sqlexpr(
                     let expr = expr.clone();
                     move |args: Ref<Vec<Ref<SQL<CRef<MType>>>>>| {
                         let names = combine_sqlnames(&*args.read()?)?;
-                        Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                        Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                             names,
                             body: SQLBody::Expr(expr.clone()),
                         }))))
@@ -1898,7 +1912,7 @@ pub fn compile_sqlexpr(
                 type_: resolve_global_atom(compiler.clone(), "bool")?,
                 expr: compiled.sql.then({
                     move |sqlexpr: Ref<SQL<CRef<MType>>>| {
-                        Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                        Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                             names: sqlexpr.read()?.names.clone(),
                             body: SQLBody::Expr(constructor(Box::new(
                                 sqlexpr.read()?.body.as_expr(),
@@ -1977,7 +1991,7 @@ pub fn compile_sqlexpr(
                 expr: combine_crefs(vec![cleft.sql, cright.sql])?.then({
                     move |args: Ref<Vec<Ref<SQL<CRef<MType>>>>>| {
                         let names = combine_sqlnames(&*args.read()?)?;
-                        Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                        Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                             names,
                             body: SQLBody::Expr(sqlast::Expr::BinaryOp {
                                 left: Box::new(args.read()?[0].read()?.body.as_expr()),
@@ -2020,7 +2034,7 @@ pub fn compile_sqlexpr(
                     let expr = cexpr.sql.await?;
                     let expr = expr.read()?;
 
-                    Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                    Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                         names: expr.names.clone(),
                         body: SQLBody::Expr(sqlast::Expr::UnaryOp {
                             op,
@@ -2124,7 +2138,7 @@ pub fn compile_sqlexpr(
                             else_result,
                         };
 
-                        Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                        Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                             names,
                             body: SQLBody::Expr(body),
                         }))))
@@ -2434,7 +2448,7 @@ pub fn compile_sqlexpr(
                                         sqlast::ObjectName(vec![func_name])
                                     }
                                 };
-                                Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                                Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                                     names,
                                     body: SQLBody::Expr(sqlast::Expr::Function(sqlast::Function {
                                         name,
@@ -2491,7 +2505,7 @@ pub fn compile_sqlexpr(
                         ret.push(expr.body.as_expr());
                     }
 
-                    Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                    Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                         names,
                         body: SQLBody::Expr(sqlast::Expr::Tuple(ret)),
                     }))))
@@ -2559,7 +2573,7 @@ pub fn compile_sqlexpr(
                         None => None,
                     };
 
-                    Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                    Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                         names,
                         body: SQLBody::Expr(sqlast::Expr::ArrayAgg(sqlast::ArrayAgg {
                             distinct,
@@ -2592,7 +2606,7 @@ pub fn compile_sqlexpr(
 
             let expr = compiler.async_cref(async {
                 let inner_query = cunwrap(subquery.await?)?;
-                Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                     names: inner_query.names.clone(),
                     body: SQLBody::Expr(sqlast::Expr::Subquery(Box::new(inner_query.body))),
                 }))))
@@ -2646,7 +2660,7 @@ pub fn compile_sqlexpr(
                     names.extend(expr.names.clone());
                     names.extend(subquery.names);
 
-                    Ok(mkcref(Expr::SQL(Arc::new(SQL {
+                    Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                         names: names,
                         body: SQLBody::Expr(sqlast::Expr::InSubquery {
                             expr: Box::new(expr.body.as_expr()),

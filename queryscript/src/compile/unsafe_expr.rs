@@ -165,11 +165,11 @@ pub fn compile_unsafe_expr(
     };
 
     let names = name_collector.names.into_inner();
-    let expr = mkcref(Expr::SQL(Arc::new(SQL {
+    let expr = mkcref(Expr::native_sql(Arc::new(SQL {
         names: names.clone(),
         body: runnable_body,
     })));
-    let inference_expr = mkcref(Expr::SQL(Arc::new(SQL {
+    let inference_expr = mkcref(Expr::native_sql(Arc::new(SQL {
         names: names,
         body: inference_body,
     })));

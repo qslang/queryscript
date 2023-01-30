@@ -810,35 +810,34 @@ pub enum Expr<TypeRef>
 where
     TypeRef: Clone + fmt::Debug + Send + Sync,
 {
-    SQL(Arc<SQL<TypeRef>>),
+    SQL(Arc<SQL<TypeRef>>, Option<Arc<ConnectionString>>),
     SchemaEntry(STypedExpr),
     Fn(FnExpr<TypeRef>),
     FnCall(FnCallExpr<TypeRef>),
     NativeFn(Ident),
     ContextRef(Ident),
-
-    /// A name (e.g. a table or view) in a database connection.
-    ConnectionObject(Arc<ConnectionString>, Ident),
-
     Unknown,
 }
 
 impl Expr<CRef<MType>> {
     pub fn to_runtime_type(&self) -> runtime::error::Result<Expr<Ref<Type>>> {
         match self {
-            Expr::SQL(e) => {
+            Expr::SQL(e, url) => {
                 let SQL { names, body } = e.as_ref();
-                Ok(Expr::SQL(Arc::new(SQL {
-                    names: SQLNames {
-                        params: names
-                            .params
-                            .iter()
-                            .map(|(name, param)| Ok((name.clone(), param.to_runtime_type()?)))
-                            .collect::<runtime::error::Result<_>>()?,
-                        unbound: names.unbound.clone(),
-                    },
-                    body: body.clone(),
-                })))
+                Ok(Expr::SQL(
+                    Arc::new(SQL {
+                        names: SQLNames {
+                            params: names
+                                .params
+                                .iter()
+                                .map(|(name, param)| Ok((name.clone(), param.to_runtime_type()?)))
+                                .collect::<runtime::error::Result<_>>()?,
+                            unbound: names.unbound.clone(),
+                        },
+                        body: body.clone(),
+                    }),
+                    url.clone(),
+                ))
             }
             Expr::Fn(FnExpr { inner_schema, body }) => Ok(Expr::Fn(FnExpr {
                 inner_schema: inner_schema.clone(),
@@ -859,9 +858,6 @@ impl Expr<CRef<MType>> {
             Expr::SchemaEntry(e) => Ok(Expr::SchemaEntry(e.clone())),
             Expr::NativeFn(f) => Ok(Expr::NativeFn(f.clone())),
             Expr::ContextRef(r) => Ok(Expr::ContextRef(r.clone())),
-            Expr::ConnectionObject(url, name) => {
-                Ok(Expr::ConnectionObject(url.clone(), name.clone()))
-            }
             Expr::Unknown => Ok(Expr::Unknown),
         }
     }
@@ -878,6 +874,10 @@ impl Expr<CRef<MType>> {
                 _ => return Ok(ret),
             }
         }
+    }
+
+    pub fn native_sql(sql: Arc<SQL<CRef<MType>>>) -> Expr<CRef<MType>> {
+        Expr::SQL(sql, None)
     }
 }
 
