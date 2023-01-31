@@ -595,6 +595,10 @@ impl SQLBody {
         }
     }
 
+    pub fn as_statement(&self) -> sqlast::Statement {
+        sqlast::Statement::Query(Box::new(self.as_query()))
+    }
+
     // Returns a query that can be run as-is, but violates the array vs. result set invariants.
     //
     pub fn as_query(&self) -> sqlast::Query {

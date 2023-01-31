@@ -1814,6 +1814,7 @@ dependencies = [
  "queryscript",
  "rustyline",
  "snafu",
+ "tokio",
 ]
 
 [[package]]

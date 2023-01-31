@@ -152,6 +152,19 @@ pub fn select_limit_0(mut query: sqlast::Query) -> sqlast::Query {
     query
 }
 
+pub fn create_view_as(name: sqlast::Ident, query: sqlast::Query) -> sqlast::Statement {
+    sqlast::Statement::CreateView {
+        name: sqlast::ObjectName(vec![sqlast::Located::new(name, None)]),
+        query: Box::new(query),
+        or_replace: true,
+
+        columns: Vec::new(),
+        materialized: false,
+        with_options: Vec::new(),
+        cluster_by: Vec::new(),
+    }
+}
+
 pub fn with_table_alias(
     table: &sqlast::TableFactor,
     alias: Option<sqlast::TableAlias>,

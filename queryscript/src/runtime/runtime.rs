@@ -8,7 +8,11 @@ use crate::{
     types::{Arc, Value},
 };
 
-use super::{context::Context, error::*, sql::SQLParam};
+use super::{
+    context::Context,
+    error::*,
+    sql::{new_engine, SQLEngineType, SQLParam},
+};
 
 type TypeRef = schema::Ref<types::Type>;
 
@@ -106,13 +110,15 @@ pub fn eval<'a>(
             schema::Expr::SQL(e, url) => {
                 let schema::SQL { body, names } = e.as_ref();
                 let sql_params = eval_params(ctx, &names.params).await?;
-                let query = body.as_query();
+                let query = body.as_statement();
+
+                let engine = match &url {
+                    Some(url) => new_engine(SQLEngineType::from_name(url.engine_name())?),
+                    None => ctx.sql_engine.clone(),
+                };
 
                 // TODO: This ownership model implies some necessary copying (below).
-                let rows = ctx
-                    .sql_engine
-                    .eval(ctx, url.clone(), &query, sql_params)
-                    .await?;
+                let rows = engine.eval(ctx, url.clone(), &query, sql_params).await?;
 
                 // Before returning, we perform some runtime checks that might only be necessary in debug mode:
                 // - For expressions, validate that the result is a single row and column

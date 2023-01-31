@@ -70,6 +70,32 @@ where
     async fn visit(&self, visitor: &V) -> Result<Self>;
 }
 
+impl<V: SQLVisitor> VisitSQL<V> for Statement {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        match self {
+            Statement::Query(query) => Statement::Query(query.visit_sql(visitor)),
+            Statement::CreateView {
+                name,
+                columns,
+                query,
+                materialized,
+                or_replace,
+                with_options,
+                cluster_by,
+            } => Statement::CreateView {
+                name: name.visit_sql(visitor),
+                columns: columns.visit_sql(visitor),
+                query: query.visit_sql(visitor),
+                materialized: *materialized,
+                or_replace: *or_replace,
+                with_options: with_options.visit_sql(visitor),
+                cluster_by: cluster_by.visit_sql(visitor),
+            },
+            _ => self.clone(),
+        }
+    }
+}
+
 impl<V: SQLVisitor> VisitSQL<V> for Query {
     fn visit_sql(&self, visitor: &V) -> Self {
         if let Some(q) = visitor.visit_sqlquery(self) {
@@ -756,6 +782,15 @@ impl<V: SQLVisitor> VisitSQL<V> for OrderByExpr {
             expr: self.expr.visit_sql(visitor),
             asc: self.asc.clone(),
             nulls_first: self.nulls_first.clone(),
+        }
+    }
+}
+
+impl<V: SQLVisitor> VisitSQL<V> for SqlOption {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        SqlOption {
+            name: self.name.visit_sql(visitor),
+            value: self.value.clone(),
         }
     }
 }

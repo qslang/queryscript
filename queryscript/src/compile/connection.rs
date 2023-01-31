@@ -1,3 +1,4 @@
+use snafu::prelude::*;
 use sqlparser::ast as sqlast;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use super::schema::{
 };
 use super::sql::select_limit_0;
 use super::{
-    error::Result,
+    error::{Result, RuntimeSnafu},
     schema::{DeclMap, ExprEntry},
     CompileError,
 };
@@ -42,12 +43,9 @@ impl ConnectionString {
                     "file:// URLs are not supported. Use a relative path instead.",
                 ));
             }
-            "duckdb" => {}
-            other => {
-                return Err(CompileError::unimplemented(
-                    loc.clone(),
-                    &format!("{} URLs", other),
-                ));
+            scheme => {
+                let _ = crate::runtime::SQLEngineType::from_name(scheme)
+                    .context(RuntimeSnafu { loc: loc.clone() })?;
             }
         };
 
@@ -94,6 +92,9 @@ impl ConnectionString {
             path.file_stem().unwrap().to_str().unwrap().into(),
             self.0.location().clone(),
         )
+    }
+    pub fn engine_name(&self) -> &str {
+        self.0.scheme()
     }
 
     pub fn get_url(&self) -> &Url {

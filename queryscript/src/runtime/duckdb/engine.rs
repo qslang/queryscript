@@ -85,7 +85,7 @@ impl DuckDBEngine {
     fn eval_in_place(
         &self,
         url: Option<Arc<crate::compile::ConnectionString>>,
-        query: &sqlast::Query,
+        query: &sqlast::Statement,
         params: HashMap<Ident, SQLParam>,
     ) -> Result<Arc<dyn Relation>> {
         // The code below works by (globally within the connection) installing a replacement
@@ -188,7 +188,7 @@ impl SQLEngine for DuckDBEngine {
         &self,
         ctx: &Context,
         url: Option<Arc<crate::compile::ConnectionString>>,
-        query: &sqlast::Query,
+        query: &sqlast::Statement,
         params: HashMap<Ident, SQLParam>,
     ) -> Result<Arc<dyn Relation>> {
         // We call block_in_place here because DuckDB may perform computationally expensive work,

@@ -6,9 +6,9 @@ pub trait Normalizer {
     fn quote_style(&self) -> Option<char>;
     fn params(&self) -> &HashMap<String, String>;
 
-    fn normalize<'s>(&'s self, query: &sqlast::Query) -> sqlast::Query {
+    fn normalize<'s>(&'s self, stmt: &sqlast::Statement) -> sqlast::Statement {
         let visitor = NormalizerVisitor::<'s, Self> { normalizer: &self };
-        query.visit_sql(&visitor)
+        stmt.visit_sql(&visitor)
     }
 }
 
