@@ -116,13 +116,16 @@ pub fn eval<'a>(
 
                 fn_val.execute(&new_ctx, arg_values).await
             }
-            schema::Expr::SQL(e) => {
+            schema::Expr::SQL(e, url) => {
                 let schema::SQL { body, names } = e.as_ref();
                 let sql_params = eval_params(ctx, &names.params).await?;
                 let query = body.as_query();
 
                 // TODO: This ownership model implies some necessary copying (below).
-                let rows = { ctx.sql_engine.eval(ctx, &query, sql_params).await? };
+                let rows = ctx
+                    .sql_engine
+                    .eval(ctx, url.clone(), &query, sql_params)
+                    .await?;
 
                 // Before returning, we perform some runtime checks that might only be necessary in debug mode:
                 // - For expressions, validate that the result is a single row and column

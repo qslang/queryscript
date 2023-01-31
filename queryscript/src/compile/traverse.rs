@@ -807,23 +807,26 @@ impl<V: Visitor<schema::CRef<schema::MType>> + Sync> Visit<V, schema::CRef<schem
         }
 
         Ok(match self {
-            Expr::SQL(e) => {
+            Expr::SQL(e, url) => {
                 let SQL { names, body } = e.as_ref();
                 let mut params = BTreeMap::new();
                 for (name, param) in &names.params {
                     params.insert(name.clone(), param.visit(visitor).await?);
                 }
-                Expr::SQL(Arc::new(SQL {
-                    names: SQLNames {
-                        params,
-                        unbound: names.unbound.clone(),
-                    },
-                    body: match body {
-                        SQLBody::Expr(expr) => SQLBody::Expr(expr.visit_sql(visitor)),
-                        SQLBody::Query(query) => SQLBody::Query(query.visit_sql(visitor)),
-                        SQLBody::Table(table) => SQLBody::Table(table.visit_sql(visitor)),
-                    },
-                }))
+                Expr::SQL(
+                    Arc::new(SQL {
+                        names: SQLNames {
+                            params,
+                            unbound: names.unbound.clone(),
+                        },
+                        body: match body {
+                            SQLBody::Expr(expr) => SQLBody::Expr(expr.visit_sql(visitor)),
+                            SQLBody::Query(query) => SQLBody::Query(query.visit_sql(visitor)),
+                            SQLBody::Table(table) => SQLBody::Table(table.visit_sql(visitor)),
+                        },
+                    }),
+                    url.clone(),
+                )
             }
             Expr::Fn(FnExpr { inner_schema, body }) => Expr::Fn(FnExpr {
                 inner_schema: inner_schema.clone(),

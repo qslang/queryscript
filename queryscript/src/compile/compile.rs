@@ -7,8 +7,10 @@ use std::sync::Arc;
 
 use crate::compile::builtin_types::{BUILTIN_LOC, GLOBAL_GENERICS, GLOBAL_SCHEMA};
 use crate::compile::coerce::CoerceOp;
+use crate::compile::connection::{ConnectionSchema, ConnectionString};
 use crate::compile::error::*;
 use crate::compile::inference::*;
+use crate::compile::inline::inline_params;
 use crate::compile::schema::*;
 use crate::compile::scope::SQLScope;
 use crate::compile::sql::*;
@@ -223,7 +225,7 @@ impl Compiler {
         kind: SymbolKind,
         type_: CRef<SType>,
         def: SourceLocation,
-        decl: Option<Decl<E>>,
+        decl: Option<Decl<E>>, // XXX We could just take is_public here as input?
     ) -> Result<()> {
         let mut data = self.data.write()?;
         let on_symbol = &mut data.config.on_symbol;
@@ -529,64 +531,74 @@ impl Compiler {
 pub fn lookup_schema(
     compiler: Compiler,
     schema: Ref<Schema>,
-    path: &ast::Path,
+    path: &SchemaPath,
 ) -> Result<Ref<ImportedSchema>> {
-    let imported = schema
-        .read()?
-        .imports
-        .get(&path.to_idents())
-        .map(Clone::clone);
+    let imported = schema.read()?.imports.get(&path).map(Clone::clone);
     let imported = if let Some(imported) = imported {
         imported
     } else {
-        let (k, v) = if let Some(root) = &schema.read()?.folder {
-            let mut file_path_buf = FilePath::new(root).to_path_buf();
-            for p in path {
-                file_path_buf.push(FilePath::new(p.get()));
-            }
-            for extension in SCHEMA_EXTENSIONS.iter() {
-                file_path_buf.set_extension(extension);
-                if file_path_buf.as_path().exists() {
-                    break;
-                }
-            }
-            let file_path = file_path_buf.as_path();
+        let imported = match &path {
+            SchemaPath::Schema(path) => {
+                let v = if let Some(root) = &schema.read()?.folder {
+                    let mut file_path_buf = FilePath::new(root).to_path_buf();
+                    for p in path {
+                        file_path_buf.push(FilePath::new(p.get()));
+                    }
+                    for extension in SCHEMA_EXTENSIONS.iter() {
+                        file_path_buf.set_extension(extension);
+                        if file_path_buf.as_path().exists() {
+                            break;
+                        }
+                    }
+                    let file_path = file_path_buf.as_path();
 
-            let s = compile_schema_from_file(compiler.clone(), file_path)
-                .0
-                .as_result()?
-                .unwrap();
-            (path.clone(), s.clone())
-        } else {
-            return Err(CompileError::no_such_entry(path.clone()));
+                    let s = compile_schema_from_file(compiler.clone(), file_path)
+                        .0
+                        .as_result()?
+                        .unwrap();
+                    s.clone()
+                } else {
+                    return Err(CompileError::no_such_entry(path.clone()));
+                };
+
+                mkref(ImportedSchema {
+                    args: if v.read()?.externs.len() == 0 {
+                        None
+                    } else {
+                        Some(Vec::new())
+                    },
+                    schema: Importer::Schema(v.clone()),
+                })
+            }
+            SchemaPath::Connection(url) => {
+                // TODO: We could support arguments to the connection string as $ variables
+                // (eg. postgres://localhost/$db_name) and parse/apply them here
+                mkref(ImportedSchema {
+                    args: None,
+                    schema: Importer::Connection(mkref(ConnectionSchema::new(url.clone()))),
+                })
+            }
         };
-
-        let imported = mkref(ImportedSchema {
-            args: if v.read()?.externs.len() == 0 {
-                None
-            } else {
-                Some(Vec::new())
-            },
-            schema: v.clone(),
-        });
 
         schema
             .write()?
             .imports
-            .insert(k.to_idents(), imported.clone());
+            .insert(path.clone(), imported.clone());
 
         imported
     };
 
-    if let Some(ident) = path.last() {
-        let file = imported.read()?.schema.read()?.file.clone();
-        compiler.run_on_symbol::<SchemaEntry>(
-            ident.clone(),
-            SymbolKind::File,
-            CRef::new_unknown("schema"),
-            SourceLocation::File(file),
-            None,
-        )?;
+    if let SchemaPath::Schema(path) = &path {
+        if let Some(ident) = path.last() {
+            let file = imported.read()?.schema.location()?;
+            compiler.run_on_symbol::<SchemaPath>(
+                ident.clone(),
+                SymbolKind::File,
+                CRef::new_unknown("schema"),
+                file,
+                None,
+            )?;
+        }
     }
 
     return Ok(imported);
@@ -594,34 +606,43 @@ pub fn lookup_schema(
 
 pub fn lookup_path<E: Entry>(
     compiler: Compiler,
-    schema: Ref<Schema>,
+    imported_object: Importer,
     path: &ast::Path,
     import_global: bool,
     resolve_last: bool,
-) -> Result<(Ref<Schema>, Option<Decl<E>>, ast::Path)> {
+) -> Result<(Importer, Option<Decl<E>>, ast::Path)> {
     if path.len() == 0 {
-        return Ok((schema, None, path.clone()));
+        return Ok((imported_object, None, path.clone()));
     }
 
-    let mut schema = schema;
+    let mut imported_object = imported_object;
     for (i, ident) in path.iter().enumerate() {
         let check_visibility = i > 0;
-        if let Some(decl) = schema
-            .read()?
-            .get_and_check::<E>(&ident, check_visibility, path)?
+
+        if let Some(decl) =
+            imported_object.get_and_check::<E>(&compiler, &ident, check_visibility, path)?
         {
             return Ok((
-                schema.clone(),
+                imported_object,
                 Some(decl.get().clone()),
                 path[i + 1..].to_vec(),
             ));
         }
 
-        let new = if let Some(imported) =
-            schema
-                .read()?
-                .get_and_check::<SchemaEntry>(&ident, check_visibility, path)?
-        {
+        let schema = match &imported_object {
+            Importer::Schema(schema) => schema.clone(),
+            Importer::Connection(_) => {
+                // Cannot proceed any further
+                break;
+            }
+        };
+
+        let new = if let Some(imported) = imported_object.get_and_check::<SchemaPath>(
+            &compiler,
+            &ident,
+            check_visibility,
+            path,
+        )? {
             lookup_schema(compiler.clone(), schema.clone(), &imported.value)?
                 .read()?
                 .schema
@@ -631,7 +652,7 @@ pub fn lookup_path<E: Entry>(
                 Some(parent) => {
                     return lookup_path::<E>(
                         compiler.clone(),
-                        parent.clone(),
+                        Importer::Schema(parent.clone()),
                         &path[i..].to_vec(),
                         import_global,
                         resolve_last,
@@ -641,22 +662,22 @@ pub fn lookup_path<E: Entry>(
                     if import_global {
                         return lookup_path::<E>(
                             compiler.clone(),
-                            compiler.builtins(),
+                            Importer::Schema(compiler.builtins()),
                             &path[i..].to_vec(),
                             false, /* import_global */
                             resolve_last,
                         );
                     } else {
-                        return Ok((schema.clone(), None, path[i..].to_vec()));
+                        return Ok((imported_object.clone(), None, path[i..].to_vec()));
                     }
                 }
             }
         };
 
-        schema = new;
+        imported_object = new;
     }
 
-    return Ok((schema.clone(), None, Vec::new()));
+    return Ok((imported_object.clone(), None, Vec::new()));
 }
 
 pub fn resolve_type(
@@ -675,7 +696,7 @@ pub fn resolve_type(
         ast::TypeBody::Reference(path) => {
             let (_, decl, r) = lookup_path::<CRef<MType>>(
                 compiler.clone(),
-                schema.clone(),
+                Importer::Schema(schema.clone()),
                 &path,
                 true, /* import_global */
                 true, /* resolve_last */
@@ -847,10 +868,17 @@ fn compile_expr(compiler: Compiler, schema: Ref<Schema>, expr: &ast::Expr) -> Re
                     type_,
                     expr: compiler.async_cref(async move {
                         let query = cunwrap(query.await?)?;
-                        Ok(mkcref(Expr::SQL(Arc::new(SQL {
+
+                        // This inline pass will compress together SQL that can be pushed down to an underlying
+                        // remote database by comparing the URLs of subtrees and pushing down the SQL for any
+                        // subtree whose URLs are all the same or empty and the parent's is empty.
+                        let sql = inline_params(&Expr::native_sql(Arc::new(SQL {
                             names: query.names,
                             body: SQLBody::Query(query.body),
-                        }))))
+                        })))
+                        .await?;
+
+                        Ok(mkcref(sql))
                     })?,
                 })
             }
@@ -1041,7 +1069,21 @@ fn declare_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
         ast::StmtBody::Noop | ast::StmtBody::Unparsed => {}
         ast::StmtBody::Expr(_) => {}
         ast::StmtBody::Import { path, list, .. } => {
+            if path.len() == 0 {
+                return Err(CompileError::internal(loc.clone(), "Empty import"));
+            }
+
+            let path = match ConnectionString::maybe_parse(
+                schema.read()?.folder.clone(),
+                path[0].as_str(),
+                &loc,
+            )? {
+                None => SchemaPath::Schema(path.clone()),
+                Some(cs) => SchemaPath::Connection(cs),
+            };
+
             let imported = lookup_schema(compiler.clone(), schema.clone(), &path)?;
+
             if imported.read()?.args.is_some() {
                 return Err(CompileError::unimplemented(
                     loc.clone(),
@@ -1120,27 +1162,33 @@ fn declare_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
 
             match list {
                 ast::ImportList::None => {
-                    schema_decls.push((
-                        path.last().unwrap().clone(),
-                        false, /* extern_ */
-                        path.clone(),
-                    ));
+                    let name = match &path {
+                        SchemaPath::Schema(path) => path.last().unwrap().clone(),
+                        SchemaPath::Connection(cs) => cs.db_name().clone(),
+                    };
+                    schema_decls.push((name, false /* extern_ */, path));
                 }
                 ast::ImportList::Star => {
-                    let imported_schema = SchemaInstance {
-                        schema: imported.read()?.schema.clone(),
-                        id: None,
+                    let schema = match &imported.read()?.schema {
+                        Importer::Schema(s) => s.clone(),
+                        Importer::Connection(_) => {
+                            return Err(CompileError::unimplemented(
+                                loc.clone(),
+                                "Importing all from a connection",
+                            ));
+                        }
                     };
+                    let imported_schema = SchemaInstance { schema, id: None };
                     schema_decls.extend(import_all_decls(
-                        &imported.read()?.schema.read()?.schema_decls,
+                        &imported_schema.schema.read()?.schema_decls,
                         imported_schema.clone(),
                     )?);
                     type_decls.extend(import_all_decls(
-                        &imported.read()?.schema.read()?.type_decls,
+                        &imported_schema.schema.read()?.type_decls,
                         imported_schema.clone(),
                     )?);
                     expr_decls.extend(import_all_decls(
-                        &imported.read()?.schema.read()?.expr_decls,
+                        &imported_schema.schema.read()?.expr_decls,
                         imported_schema.clone(),
                     )?);
                 }
@@ -1154,7 +1202,7 @@ fn declare_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
                     let mut err = None;
 
                     for item in items {
-                        match import_named_decl::<SchemaEntry>(
+                        match import_named_decl::<SchemaPath>(
                             compiler.clone(),
                             imported.clone(),
                             imported_schema.clone(),

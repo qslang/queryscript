@@ -2,7 +2,6 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use super::sql::{new_engine, SQLEngine, SQLEngineType};
 use crate::ast::Ident;
-use crate::compile::schema;
 use crate::types::Value;
 
 // A basic context with runtime state we can pass into functions. We may want
@@ -28,10 +27,9 @@ impl Context {
         }
     }
 
-    pub fn new(schema: &schema::SchemaRef, engine_type: SQLEngineType) -> Context {
-        let schema = schema.read().unwrap();
+    pub fn new(folder: Option<String>, engine_type: SQLEngineType) -> Context {
         Context {
-            folder: schema.folder.clone(),
+            folder,
             values: BTreeMap::new(),
             sql_engine: new_engine(engine_type),
             disable_typechecks: false,

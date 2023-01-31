@@ -2,6 +2,14 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Run QueryScript",
+			"program": "${workspaceFolder}/target/debug/qs",
+			"args": ["${input:qsfile}"],
+			"cwd": "${workspaceFolder}",
+		},
+		{
 			"type": "extensionHost",
 			"request": "launch",
 			"name": "Launch VSCode Extension",
@@ -39,5 +47,18 @@
 				"SERVER_PATH": "${workspaceRoot}/target/debug/queryscript-lsp"
 			},
 		}
-	]
+	],
+	"inputs": [
+		{
+            "id": "qsfile",
+            "type": "command",
+            "command": "memento.promptString",
+            "args": {
+                "id": "qsfile",
+                "description": "Path to the QS file to run (relative to queryscript root)",
+                "placeholder": "File path"
+            }
+        }
+	  ]
+
 }

@@ -16,6 +16,7 @@ pub trait SQLEngine: std::fmt::Debug + Send + Sync {
     async fn eval(
         &self,
         ctx: &Context,
+        url: Option<Arc<crate::compile::ConnectionString>>,
         query: &sqlast::Query,
         params: HashMap<Ident, SQLParam>,
     ) -> Result<Arc<dyn Relation>>;

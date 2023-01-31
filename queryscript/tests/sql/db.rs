@@ -95,7 +95,10 @@ impl sqllogictest::AsyncDB for QueryScript {
                     loc: SourceLocation::Unknown,
                 })?;
 
-            let ctx = runtime::Context::new(&self.schema, runtime::SQLEngineType::DuckDB);
+            let ctx = runtime::Context::new(
+                self.schema.read()?.folder.clone(),
+                runtime::SQLEngineType::DuckDB,
+            );
 
             let value = runtime::eval(&ctx, &expr).await.context(RuntimeSnafu {
                 loc: SourceLocation::Unknown,

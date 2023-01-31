@@ -6,6 +6,7 @@ use crate::compile::schema::*;
 use crate::compile::traverse::{SQLVisitor, Visit, VisitSQL, Visitor};
 
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 pub struct ContextInliner {
@@ -75,7 +76,14 @@ impl SQLVisitor for ParamInliner {
                 }
 
                 if let Some(e) = self.context.get(&name.0[0].get().into()) {
-                    Some(e.as_table(alias.clone()))
+                    let new_alias = match alias {
+                        Some(alias) => alias.clone(),
+                        None => sqlast::TableAlias {
+                            name: name.0[0].clone(),
+                            columns: vec![],
+                        },
+                    };
+                    Some(e.as_table(Some(new_alias)))
                 } else {
                     None
                 }
@@ -89,7 +97,7 @@ impl SQLVisitor for ParamInliner {
 impl Visitor<CRef<MType>> for ParamInliner {
     async fn visit_expr(&self, expr: &Expr<CRef<MType>>) -> Result<Option<Expr<CRef<MType>>>> {
         Ok(match expr {
-            Expr::SQL(sql) => {
+            Expr::SQL(sql, url) => {
                 let SQL { names, body } = sql.as_ref();
                 let (mut names, params) = (
                     SQLNames {
@@ -99,10 +107,41 @@ impl Visitor<CRef<MType>> for ParamInliner {
                     names.params.clone(),
                 );
                 let mut context = BTreeMap::new();
-                for (name, param) in params {
-                    let expr = inline_params(param.expr.unwrap_schema_entry().await?).await?;
-                    match expr.as_ref() {
-                        Expr::SQL(sql) => {
+
+                let mut inlined_params = Vec::new(); // Each paramater, after inlining
+                let mut remaining_params = 0; // The aggregate number of remaining parameters
+                let mut conn_strings = BTreeSet::new(); // The connection string for any remote SQL expressions
+
+                if let Some(url) = url {
+                    conn_strings.insert(url.clone());
+                }
+
+                for (_, param) in params.iter() {
+                    let expr = inline_params(&param.expr.unwrap_schema_entry().await?).await?;
+
+                    match &expr {
+                        Expr::SQL(sql, inner_url) => {
+                            if let Some(inner_url) = inner_url {
+                                conn_strings.insert(inner_url.clone());
+                            }
+                            remaining_params += sql.names.params.len();
+                        }
+                        _ => {
+                            remaining_params += 1;
+                        }
+                    }
+
+                    inlined_params.push(expr);
+                }
+
+                let can_inline_tables = remaining_params == 0 && conn_strings.len() <= 1;
+
+                for ((name, param), expr) in params.into_iter().zip(inlined_params) {
+                    match &expr {
+                        // Only inline SQL expressions that point to the same database.
+                        Expr::SQL(sql, inner_url)
+                            if matches!(inner_url, None) || can_inline_tables =>
+                        {
                             names.extend(sql.names.clone());
                             context.insert(name.clone(), sql.body.clone());
                         }
@@ -111,25 +150,31 @@ impl Visitor<CRef<MType>> for ParamInliner {
                                 name.clone(),
                                 TypedExpr {
                                     type_: param.type_.clone(),
-                                    expr,
+                                    expr: Arc::new(expr),
                                 },
                             );
                         }
                     }
                 }
 
+                let url = if can_inline_tables {
+                    conn_strings.into_iter().next()
+                } else {
+                    url.clone()
+                };
+
                 let visitor = ParamInliner { context };
                 let body = body.visit_sql(&visitor);
-                Some(Expr::SQL(Arc::new(SQL { names, body })))
+                Some(Expr::SQL(Arc::new(SQL { names, body }), url))
             }
             _ => None,
         })
     }
 }
 
-pub async fn inline_params(expr: Arc<Expr<CRef<MType>>>) -> Result<Arc<Expr<CRef<MType>>>> {
+pub async fn inline_params(expr: &Expr<CRef<MType>>) -> Result<Expr<CRef<MType>>> {
     let visitor = ParamInliner {
         context: BTreeMap::new(),
     };
-    Ok(Arc::new(expr.visit(&visitor).await?))
+    Ok(expr.visit(&visitor).await?)
 }
