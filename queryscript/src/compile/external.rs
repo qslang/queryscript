@@ -11,8 +11,8 @@ use super::{
     CompileError,
 };
 
-// XXX If a record has two fields with the same name, we should throw an error. Eventually,
-// we should support this, because SQL engines do.
+// TODO If a record has two fields with the same name, we throw an error. Eventually,
+// we should support this for top-level queries (e.g. unsafe expressions).
 fn validate_inferred_type(type_: &Type) -> Result<()> {
     match type_ {
         Type::Atom(..) => {}
