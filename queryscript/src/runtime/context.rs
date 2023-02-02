@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, RwLock},
+};
 
 use super::sql::{new_engine, SQLEngine, SQLEngineType};
 use crate::ast::Ident;
@@ -12,6 +15,7 @@ pub struct Context {
     pub values: BTreeMap<Ident, Value>,
     pub sql_engine: Arc<dyn SQLEngine>,
     pub disable_typechecks: bool,
+    materializations: Arc<RwLock<BTreeMap<String, Value>>>,
 }
 
 impl Context {
@@ -33,6 +37,7 @@ impl Context {
             values: BTreeMap::new(),
             sql_engine: new_engine(engine_type),
             disable_typechecks: false,
+            materializations: Arc::new(RwLock::new(BTreeMap::new())),
         }
     }
 
@@ -41,5 +46,9 @@ impl Context {
             disable_typechecks: true,
             ..self.clone()
         }
+    }
+
+    pub fn materializations(&self) -> std::sync::Arc<std::sync::RwLock<BTreeMap<String, Value>>> {
+        self.materializations.clone()
     }
 }
