@@ -12,7 +12,7 @@ use crate::compile::compile::{
     coerce, lookup_path, resolve_global_atom, typecheck_path, Compiler, SymbolKind,
 };
 use crate::compile::error::*;
-use crate::compile::generics::{as_generic, ExternalType};
+use crate::compile::generics::{as_generic, ConnectionType, ExternalType, GenericConstructor};
 use crate::compile::inference::*;
 use crate::compile::inline::*;
 use crate::compile::schema::*;
@@ -309,7 +309,7 @@ pub fn compile_reference(
     schema: Ref<Schema>,
     path: &ast::Path,
 ) -> Result<TypedExpr<CRef<MType>>> {
-    let (_, decl, remainder) = lookup_path::<ExprEntry>(
+    let (importer, decl, remainder) = lookup_path::<ExprEntry>(
         compiler.clone(),
         Importer::Schema(schema.clone()),
         &path,
@@ -317,7 +317,28 @@ pub fn compile_reference(
         true, /* resolve_last */
     )?;
 
-    let decl = decl.ok_or_else(|| CompileError::no_such_entry(path.clone()))?;
+    let decl = match decl {
+        Some(decl) => decl,
+        None => match importer {
+            Importer::Schema(..) => return Err(CompileError::no_such_entry(path.clone())),
+            Importer::Connection(schema) => {
+                let url = schema.read()?.url.clone();
+                Decl {
+                    public: true,
+                    extern_: false,
+                    fn_arg: false,
+                    name: url.db_name(),
+                    value: STypedExpr {
+                        type_: SType::new_mono(mkcref(MType::Generic(Located::new(
+                            ConnectionType::new(&SourceLocation::Unknown, Vec::new())?,
+                            SourceLocation::Unknown,
+                        )))),
+                        expr: mkcref(Expr::Connection(url.clone())),
+                    },
+                }
+            }
+        },
+    };
     let remainder_cpy = remainder.clone();
 
     let expr = &decl.value;
@@ -2368,15 +2389,52 @@ pub fn compile_sqlexpr(
                         Expr::NativeFn(name)
                             if name == &Into::<Ident>::into("materialize".to_string()) =>
                         {
-                            let arg = args
-                                .into_iter()
+                            let mut args_iter = args.into_iter();
+                            let expr = args_iter
                                 .next()
-                                .expect("materialize() should have one arg");
+                                .expect("materialize() should have expr arg")
+                                .to_typed_expr();
 
-                            return Ok(mkcref(Expr::Materialize(
-                                compiler.next_placeholder("materialize")?,
-                                arg.to_typed_expr(),
-                            )));
+                            let url = args_iter
+                                .next()
+                                .expect("materialize() should have url arg")
+                                .to_typed_expr();
+
+                            let url = if url
+                                .type_
+                                .clone()
+                                .await?
+                                .read()?
+                                .to_runtime_type()
+                                .context(RuntimeSnafu { loc: loc.clone() })?
+                                == Type::Atom(AtomicType::Null)
+                            {
+                                None
+                            } else {
+                                let url_arg = match url.expr.as_ref() {
+                                    Expr::SchemaEntry(STypedExpr {
+                                        expr,
+                                        ..
+                                     }) => {
+                                        match &*expr.must().unwrap().read()? {
+                                            Expr::Connection(url) => Some(url.clone()),
+                                            _ => None,
+                                        }
+                                     }
+                                    _ => None
+                                };
+
+                                if url_arg.is_none() {
+                                    return Err(CompileError::internal(loc.clone(),&format!( "Expected a connection as the second argument of materialize()")));
+                                }
+                                url_arg
+                            };
+
+                            return Ok(mkcref(Expr::Materialize(MaterializeExpr {
+                                key: compiler.next_placeholder("materialize")?,
+                                expr,
+                                url,
+                            })));
                         }
                         Expr::NativeFn(_) => (FnKind::Native, None),
                         Expr::Fn(FnExpr { body, .. }) => match body {

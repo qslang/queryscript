@@ -57,6 +57,9 @@ pub fn eval<'a>(
             schema::Expr::SchemaEntry(schema::STypedExpr { .. }) => {
                 return Err(RuntimeError::new("unresolved schema entry"));
             }
+            schema::Expr::Connection(..) => {
+                return Err(RuntimeError::new("unresolved connection"));
+            }
             schema::Expr::ContextRef(r) => match ctx.values.get(r) {
                 Some(v) => Ok(v.clone()), // Can we avoid this clone??
                 None => Err(RuntimeError::new(
@@ -87,7 +90,8 @@ pub fn eval<'a>(
                     _ => return rt_unimplemented!("native function: {}", name),
                 }
             }
-            schema::Expr::Materialize(key, expr) => {
+            schema::Expr::Materialize(schema::MaterializeExpr { key, expr, url }) => {
+                eprintln!("URL? {:?}", url);
                 let mut materializations = ctx.materializations.lock().await;
                 match materializations.entry(key.clone()) {
                     std::collections::btree_map::Entry::Occupied(e) => {

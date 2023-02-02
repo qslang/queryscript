@@ -891,8 +891,13 @@ impl<V: Visitor<schema::CRef<schema::MType>> + Sync> Visit<V, schema::CRef<schem
             }
             Expr::NativeFn(f) => Expr::NativeFn(f.clone()),
             Expr::ContextRef(r) => Expr::ContextRef(r.clone()),
-            Expr::Materialize(key, expr) => {
-                Expr::Materialize(key.clone(), expr.visit(visitor).await?)
+            Expr::Connection(u) => Expr::Connection(u.clone()),
+            Expr::Materialize(MaterializeExpr { key, expr, url }) => {
+                Expr::Materialize(MaterializeExpr {
+                    key: key.clone(),
+                    expr: expr.visit(visitor).await?,
+                    url: url.clone(),
+                })
             }
             Expr::Unknown => Expr::Unknown,
         })

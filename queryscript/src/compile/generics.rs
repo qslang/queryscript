@@ -93,11 +93,11 @@ impl<T: GenericConstructor> GenericFactory for BuiltinGeneric<T> {
 lazy_static! {
     pub static ref SUM_GENERIC_NAME: Ident = "SumAgg".into();
     pub static ref EXTERNAL_GENERIC_NAME: Ident = "External".into();
-    pub static ref MATERIALIZED_GENERIC_NAME: Ident = "Materialized".into();
+    pub static ref CONNECTION_GENERIC_NAME: Ident = "Connection".into();
     pub static ref GLOBAL_GENERICS: BTreeMap<Ident, Box<dyn GenericFactory>> = [
         BuiltinGeneric::<SumGeneric>::constructor(),
         BuiltinGeneric::<ExternalType>::constructor(),
-        BuiltinGeneric::<MaterializedType>::constructor(),
+        BuiltinGeneric::<ConnectionType>::constructor(),
     ]
     .into_iter()
     .map(|builder| (builder.name().clone(), builder))
@@ -258,27 +258,26 @@ impl Generic for ExternalType {
     }
 }
 
-// XXX Probably unecessary
-pub struct MaterializedType(CRef<MType>);
+pub struct ConnectionType();
 
-impl GenericConstructor for MaterializedType {
+impl GenericConstructor for ConnectionType {
     fn new(loc: &SourceLocation, mut args: Vec<CRef<MType>>) -> Result<Arc<dyn Generic>> {
-        validate_args(loc, &args, 1, Self::static_name())?;
-        Ok(Arc::new(MaterializedType(args.swap_remove(0))))
+        validate_args(loc, &args, 0, Self::static_name())?;
+        Ok(Arc::new(ConnectionType()))
     }
 
     fn static_name() -> &'static Ident {
-        &MATERIALIZED_GENERIC_NAME
+        &CONNECTION_GENERIC_NAME
     }
 }
 
-impl std::fmt::Debug for MaterializedType {
+impl std::fmt::Debug for ConnectionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        debug_fmt_generic(f, Self::static_name(), &self.0)
+        write!(f, "{}<>", Self::static_name())
     }
 }
 
-impl Generic for MaterializedType {
+impl Generic for ConnectionType {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -288,32 +287,33 @@ impl Generic for MaterializedType {
     }
 
     fn to_runtime_type(&self) -> crate::runtime::error::Result<crate::types::Type> {
-        self.0.must()?.read()?.to_runtime_type()
+        // This is a bit of a hack -- we only really care whether this type is null or not
+        Ok(crate::types::Type::Atom(crate::types::AtomicType::Utf8))
     }
 
     fn substitute(&self, variables: &BTreeMap<Ident, CRef<MType>>) -> Result<Arc<dyn Generic>> {
-        Ok(Arc::new(Self(self.0.substitute(variables)?)))
+        Ok(Arc::new(Self()))
     }
 
     fn unify(&self, other: &MType) -> Result<()> {
-        let inner_type = &self.0;
-
         match other {
             MType::Generic(other_inner) => {
                 if let Some(other) = as_generic::<Self>(other_inner.get().as_ref()) {
-                    inner_type.unify(&other.0)?;
-                } else {
-                    inner_type.unify(&mkcref(other.clone()))?;
+                    return Ok(());
                 }
             }
-            other => {
-                inner_type.unify(&mkcref(other.clone()))?;
-            }
+            _ => {}
         };
-        Ok(())
+        return Err(CompileError::invalid_conn(
+            SourceLocation::Unknown,
+            "cannot unify a connection type with another kind of type",
+        ));
     }
 
     fn get_rowtype(&self, compiler: Compiler) -> Result<Option<CRef<MType>>> {
-        Ok(Some(get_rowtype(compiler, self.0.clone())?))
+        Err(CompileError::internal(
+            SourceLocation::Unknown,
+            "connection type should have been optimized away",
+        ))
     }
 }

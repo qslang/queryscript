@@ -437,13 +437,14 @@ impl<'a> Parser<'a> {
                 args.push(FnArg { name, type_ });
 
                 self.autocomplete_tokens(&[Token::Comma, Token::RParen]);
-                match self.next_token().token {
+                let next_token = self.next_token();
+                match &next_token.token {
                     Token::Comma => {}
                     Token::RParen => break args,
                     _ => {
                         return unexpected_token!(
                             self.file.clone(),
-                            self.peek_token(),
+                            &next_token,
                             "Expected: ',' | ')'"
                         );
                     }
@@ -552,6 +553,7 @@ impl<'a> Parser<'a> {
                 loop {
                     args.push(self.parse_type()?);
                     self.autocomplete_tokens(&[Token::Comma, Token::Gt]);
+
                     match self.next_token().token {
                         Token::Comma => {}
                         Token::Gt => break,
@@ -565,6 +567,8 @@ impl<'a> Parser<'a> {
                     }
                 }
                 TypeBody::Generic(type_name, args)
+            } else if self.consume_token(&Token::Neq) {
+                TypeBody::Generic(type_name, Vec::new())
             } else {
                 TypeBody::Reference(type_name)
             }

@@ -1,0 +1,32 @@
+{
+    "compile_errors": [
+        (
+            None,
+            NoSuchEntry {
+                path: [
+                    "R",
+                ],
+                backtrace: None,
+            },
+        ),
+    ],
+    "decls": {
+        "let identity": ∀ "R" λ {
+        	u "R",
+        } -> "R",
+        "let users": [{
+        	id Int32,
+        	org_id Int32,
+        	name Utf8,
+        	active Boolean,
+        }],
+    },
+    "queries": [
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?async_slot?)",
+                backtrace: None,
+            },
+        ),
+    ],
+}

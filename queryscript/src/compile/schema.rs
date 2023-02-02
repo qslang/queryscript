@@ -810,6 +810,16 @@ where
 }
 
 #[derive(Clone, Debug)]
+pub struct MaterializeExpr<TypeRef>
+where
+    TypeRef: Clone + fmt::Debug + Send + Sync,
+{
+    pub key: String,
+    pub expr: TypedExpr<TypeRef>,
+    pub url: Option<Arc<ConnectionString>>,
+}
+
+#[derive(Clone, Debug)]
 pub enum Expr<TypeRef>
 where
     TypeRef: Clone + fmt::Debug + Send + Sync,
@@ -820,7 +830,8 @@ where
     FnCall(FnCallExpr<TypeRef>),
     NativeFn(Ident),
     ContextRef(Ident),
-    Materialize(String, TypedExpr<TypeRef>),
+    Connection(Arc<ConnectionString>),
+    Materialize(MaterializeExpr<TypeRef>),
     Unknown,
 }
 
@@ -863,9 +874,16 @@ impl Expr<CRef<MType>> {
             Expr::SchemaEntry(e) => e.expr.must()?.read()?.to_runtime_type(),
             Expr::NativeFn(f) => Ok(Expr::NativeFn(f.clone())),
             Expr::ContextRef(r) => Ok(Expr::ContextRef(r.clone())),
-            Expr::Materialize(key, expr) => {
-                Ok(Expr::Materialize(key.clone(), expr.to_runtime_type()?))
-            }
+            Expr::Connection(c) => Ok(Expr::Connection(c.clone())),
+            Expr::Materialize(MaterializeExpr {
+                key,
+                expr,
+                url: target_url,
+            }) => Ok(Expr::Materialize(MaterializeExpr {
+                key: key.clone(),
+                expr: expr.to_runtime_type()?,
+                url: target_url.clone(),
+            })),
             Expr::Unknown => Ok(Expr::Unknown),
         }
     }
