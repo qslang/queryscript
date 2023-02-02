@@ -2365,6 +2365,19 @@ pub fn compile_sqlexpr(
                     let func_expr = func.expr.unwrap_schema_entry().await?;
 
                     let (fn_kind, fn_body) = match &func_expr {
+                        Expr::NativeFn(name)
+                            if name == &Into::<Ident>::into("materialize".to_string()) =>
+                        {
+                            let arg = args
+                                .into_iter()
+                                .next()
+                                .expect("materialize() should have one arg");
+
+                            return Ok(mkcref(Expr::Materialize(
+                                compiler.next_placeholder("materialize")?,
+                                arg.to_typed_expr(),
+                            )));
+                        }
                         Expr::NativeFn(_) => (FnKind::Native, None),
                         Expr::Fn(FnExpr { body, .. }) => match body {
                             FnBody::SQLBuiltin => (FnKind::SQLBuiltin, None),

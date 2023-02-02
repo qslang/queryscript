@@ -891,6 +891,9 @@ impl<V: Visitor<schema::CRef<schema::MType>> + Sync> Visit<V, schema::CRef<schem
             }
             Expr::NativeFn(f) => Expr::NativeFn(f.clone()),
             Expr::ContextRef(r) => Expr::ContextRef(r.clone()),
+            Expr::Materialize(key, expr) => {
+                Expr::Materialize(key.clone(), expr.visit(visitor).await?)
+            }
             Expr::Unknown => Expr::Unknown,
         })
     }

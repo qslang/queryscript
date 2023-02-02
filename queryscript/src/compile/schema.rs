@@ -820,6 +820,7 @@ where
     FnCall(FnCallExpr<TypeRef>),
     NativeFn(Ident),
     ContextRef(Ident),
+    Materialize(String, TypedExpr<TypeRef>),
     Unknown,
 }
 
@@ -862,6 +863,9 @@ impl Expr<CRef<MType>> {
             Expr::SchemaEntry(e) => e.expr.must()?.read()?.to_runtime_type(),
             Expr::NativeFn(f) => Ok(Expr::NativeFn(f.clone())),
             Expr::ContextRef(r) => Ok(Expr::ContextRef(r.clone())),
+            Expr::Materialize(key, expr) => {
+                Ok(Expr::Materialize(key.clone(), expr.to_runtime_type()?))
+            }
             Expr::Unknown => Ok(Expr::Unknown),
         }
     }

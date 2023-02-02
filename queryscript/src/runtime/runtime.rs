@@ -81,13 +81,29 @@ pub fn eval<'a>(
                     "load" => Ok(Value::Fn(Arc::new(LoadFileFn::new(
                         &*typed_expr.type_.read()?,
                     )?))),
-                    "materialize" => Ok(Value::Fn(Arc::new(MaterializeFn::new(
-                        &*typed_expr.type_.read()?,
-                    )?))),
                     "__native_identity" => Ok(Value::Fn(Arc::new(IdentityFn::new(
                         &*typed_expr.type_.read()?,
                     )?))),
                     _ => return rt_unimplemented!("native function: {}", name),
+                }
+            }
+            schema::Expr::Materialize(key, expr) => {
+                let mut materializations = ctx.materializations.lock().await;
+                match materializations.entry(key.clone()) {
+                    std::collections::btree_map::Entry::Occupied(e) => {
+                        return Ok(e.get().lock().await.clone());
+                    }
+                    std::collections::btree_map::Entry::Vacant(e) => {
+                        let entry = e
+                            .insert(Arc::new(tokio::sync::Mutex::new(Value::Null)))
+                            .clone();
+                        let mut locked = entry.lock().await;
+                        drop(materializations);
+
+                        let result = eval(ctx, expr).await?;
+                        *locked = result;
+                        Ok(locked.clone())
+                    }
                 }
             }
             schema::Expr::FnCall(schema::FnCallExpr {

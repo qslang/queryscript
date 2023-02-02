@@ -1,7 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, RwLock},
-};
+use std::{collections::BTreeMap, sync::Arc};
 
 use super::sql::{new_engine, SQLEngine, SQLEngineType};
 use crate::ast::Ident;
@@ -15,7 +12,11 @@ pub struct Context {
     pub values: BTreeMap<Ident, Value>,
     pub sql_engine: Arc<dyn SQLEngine>,
     pub disable_typechecks: bool,
-    materializations: Arc<RwLock<BTreeMap<String, Value>>>,
+
+    /// Materializations that we've saved up and can re-use. Each materialization is itself
+    /// protected by a lock, so that if multiple tasks running in parallel are trying to compute
+    /// the same materialization, we can ensure only one does.
+    pub materializations: Arc<tokio::sync::Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<Value>>>>>,
 }
 
 impl Context {
@@ -37,7 +38,7 @@ impl Context {
             values: BTreeMap::new(),
             sql_engine: new_engine(engine_type),
             disable_typechecks: false,
-            materializations: Arc::new(RwLock::new(BTreeMap::new())),
+            materializations: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
         }
     }
 
@@ -46,9 +47,5 @@ impl Context {
             disable_typechecks: true,
             ..self.clone()
         }
-    }
-
-    pub fn materializations(&self) -> std::sync::Arc<std::sync::RwLock<BTreeMap<String, Value>>> {
-        self.materializations.clone()
     }
 }

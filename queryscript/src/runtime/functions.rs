@@ -283,38 +283,6 @@ impl FnValue for LoadFileFn {
         self
     }
 }
-
-#[derive(Clone, Debug)]
-pub struct MaterializeFn {
-    type_: types::FnType,
-}
-
-impl MaterializeFn {
-    pub fn new(type_: &types::Type) -> Result<MaterializeFn> {
-        let type_ = match type_ {
-            types::Type::Fn(fn_type) => fn_type.clone(),
-            _ => return fail!("Type of materialize is not a function"),
-        };
-
-        Ok(MaterializeFn { type_ })
-    }
-}
-
-#[async_trait]
-impl FnValue for MaterializeFn {
-    fn execute<'a>(&'a self, ctx: &'a Context, args: Vec<Value>) -> BoxFuture<'a, Result<Value>> {
-        async move { Ok(args.into_iter().next().unwrap()) }.boxed()
-    }
-
-    fn fn_type(&self) -> types::FnType {
-        self.type_.clone()
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct IdentityFn {
     type_: types::FnType,
