@@ -855,7 +855,7 @@ impl Expr<CRef<MType>> {
                     .collect::<runtime::error::Result<_>>()?,
                 ctx_folder: ctx_folder.clone(),
             })),
-            Expr::SchemaEntry(e) => Ok(Expr::SchemaEntry(e.clone())),
+            Expr::SchemaEntry(e) => e.expr.must()?.read()?.to_runtime_type(),
             Expr::NativeFn(f) => Ok(Expr::NativeFn(f.clone())),
             Expr::ContextRef(r) => Ok(Expr::ContextRef(r.clone())),
             Expr::Unknown => Ok(Expr::Unknown),

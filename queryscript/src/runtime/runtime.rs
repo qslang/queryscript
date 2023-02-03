@@ -50,21 +50,8 @@ pub fn eval<'a>(
             schema::Expr::Unknown => {
                 return Err(RuntimeError::new("unresolved extern"));
             }
-            schema::Expr::SchemaEntry(schema::STypedExpr { expr, .. }) => {
-                let rt_expr = {
-                    let expr = expr.must()?;
-                    let expr = expr.read()?;
-                    Arc::new(expr.to_runtime_type()?)
-                };
-
-                eval(
-                    ctx,
-                    &schema::TypedExpr {
-                        type_: typed_expr.type_.clone(),
-                        expr: rt_expr,
-                    },
-                )
-                .await
+            schema::Expr::SchemaEntry(schema::STypedExpr { .. }) => {
+                return Err(RuntimeError::new("unresolved schema entry"));
             }
             schema::Expr::ContextRef(r) => match ctx.values.get(r) {
                 Some(v) => Ok(v.clone()), // Can we avoid this clone??
