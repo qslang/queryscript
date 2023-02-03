@@ -809,6 +809,13 @@ where
     pub ctx_folder: Option<String>,
 }
 
+// XXX TODO:
+//  1) Implement CREATE TABLE AS in save()
+//  2) Implement writing materialized data into a table
+//  ----- ^^ At this point, we should be able to rework our tests to include materialization
+//  ----- ^^ Maybe also implement some targeted tests for these cases?
+//  3) Implement using a materialized table in a query
+//  4) Implement CREATE TEMPORARY TABLE AS during regular execution
 #[derive(Clone, Debug)]
 pub struct MaterializeExpr<TypeRef>
 where

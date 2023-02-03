@@ -261,7 +261,7 @@ impl Generic for ExternalType {
 pub struct ConnectionType();
 
 impl GenericConstructor for ConnectionType {
-    fn new(loc: &SourceLocation, mut args: Vec<CRef<MType>>) -> Result<Arc<dyn Generic>> {
+    fn new(loc: &SourceLocation, args: Vec<CRef<MType>>) -> Result<Arc<dyn Generic>> {
         validate_args(loc, &args, 0, Self::static_name())?;
         Ok(Arc::new(ConnectionType()))
     }
@@ -291,14 +291,14 @@ impl Generic for ConnectionType {
         Ok(crate::types::Type::Atom(crate::types::AtomicType::Utf8))
     }
 
-    fn substitute(&self, variables: &BTreeMap<Ident, CRef<MType>>) -> Result<Arc<dyn Generic>> {
+    fn substitute(&self, _variables: &BTreeMap<Ident, CRef<MType>>) -> Result<Arc<dyn Generic>> {
         Ok(Arc::new(Self()))
     }
 
     fn unify(&self, other: &MType) -> Result<()> {
         match other {
             MType::Generic(other_inner) => {
-                if let Some(other) = as_generic::<Self>(other_inner.get().as_ref()) {
+                if let Some(_) = as_generic::<Self>(other_inner.get().as_ref()) {
                     return Ok(());
                 }
             }
@@ -310,7 +310,7 @@ impl Generic for ConnectionType {
         ));
     }
 
-    fn get_rowtype(&self, compiler: Compiler) -> Result<Option<CRef<MType>>> {
+    fn get_rowtype(&self, _compiler: Compiler) -> Result<Option<CRef<MType>>> {
         Err(CompileError::internal(
             SourceLocation::Unknown,
             "connection type should have been optimized away",

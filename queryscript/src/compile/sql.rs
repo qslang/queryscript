@@ -165,6 +165,39 @@ pub fn create_view_as(name: sqlast::Ident, query: sqlast::Query) -> sqlast::Stat
     }
 }
 
+pub fn create_table_as(
+    name: sqlast::Ident,
+    query: sqlast::Query,
+    temporary: bool,
+) -> sqlast::Statement {
+    sqlast::Statement::CreateTable {
+        name: sqlast::ObjectName(vec![sqlast::Located::new(name, None)]),
+        query: Some(Box::new(query)),
+        or_replace: true,
+
+        temporary,
+        external: false,
+        global: None,
+        if_not_exists: false,
+        columns: Vec::new(),
+        constraints: Vec::new(),
+        hive_distribution: sqlast::HiveDistributionStyle::NONE,
+        hive_formats: None,
+        table_properties: Vec::new(),
+        with_options: Vec::new(),
+        file_format: None,
+        location: None,
+        without_rowid: false,
+        like: None,
+        clone: None,
+        engine: None,
+        default_charset: None,
+        collation: None,
+        on_commit: None,
+        on_cluster: None,
+    }
+}
+
 pub fn with_table_alias(
     table: &sqlast::TableFactor,
     alias: Option<sqlast::TableAlias>,

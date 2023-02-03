@@ -156,6 +156,8 @@ impl DuckDBEngine {
         let query = normalizer.normalize(&query);
         let query_string = format!("{}", query);
 
+        eprintln!("RUNNING QUERY {}", query);
+
         let duckdb_params: Vec<&dyn duckdb::ToSql> = scalar_params
             .iter()
             .map(|k| &params.get(k).unwrap().value as &dyn duckdb::ToSql)
