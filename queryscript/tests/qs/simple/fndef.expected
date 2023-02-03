@@ -130,6 +130,24 @@
                 ),
             },
         ),
+        (
+            None,
+            NoSuchEntry {
+                path: [
+                    "R",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            None,
+            NoSuchEntry {
+                path: [
+                    "users",
+                ],
+                backtrace: None,
+            },
+        ),
     ],
     "decls": {
         "let bar": ∀ "R" λ {
@@ -138,6 +156,9 @@
         "let foo": ∀ "R" λ {
         	a "R",
         } -> ?slot?,
+        "let identity": ∀ "R" λ {
+        	u "R",
+        } -> "R",
         "let rel_foo": ?rel_foo type?,
         "let rel_id": ?rel_id type?,
     },
@@ -175,6 +196,12 @@
         Err(
             StringError {
                 what: "Unknown type cannot exist at runtime (?async_slot?)",
+                backtrace: None,
+            },
+        ),
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?R?)",
                 backtrace: None,
             },
         ),

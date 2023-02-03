@@ -27,3 +27,10 @@ select * from inference.users u where rel_id(u) = 1;
 
 select * from schema.users u where rel_foo(u) = 1;
 select * from inference.users u where rel_foo(u) = 1;
+
+
+fn identity<R>(u R) -> R {
+    u
+}
+
+identity(users);
