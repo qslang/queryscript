@@ -860,11 +860,11 @@ fn compile_expr(compiler: Compiler, schema: Ref<Schema>, expr: &ast::Expr) -> Re
     if expr.is_unsafe {
         compile_unsafe_expr(compiler, schema, &expr.body, &loc)
     } else {
-        match &expr.body {
+        let expr = match &expr.body {
             ast::ExprBody::SQLQuery(q) => {
                 let (_scope, type_, query) =
                     compile_sqlquery(compiler.clone(), schema.clone(), None, &loc, q)?;
-                Ok(CTypedExpr {
+                CTypedExpr {
                     type_,
                     expr: compiler.async_cref(async move {
                         let query = cunwrap(query.await?)?;
@@ -872,27 +872,33 @@ fn compile_expr(compiler: Compiler, schema: Ref<Schema>, expr: &ast::Expr) -> Re
                         // This inline pass will compress together SQL that can be pushed down to an underlying
                         // remote database by comparing the URLs of subtrees and pushing down the SQL for any
                         // subtree whose URLs are all the same or empty and the parent's is empty.
-                        let sql = inline_params(&Expr::native_sql(Arc::new(SQL {
+                        Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                             names: query.names,
                             body: SQLBody::Query(query.body),
-                        })))
-                        .await?;
-
-                        Ok(mkcref(sql))
+                        }))))
                     })?,
-                })
+                }
             }
             ast::ExprBody::SQLExpr(e) => {
                 let scope = SQLScope::new(None);
-                Ok(compile_sqlexpr(
-                    compiler.clone(),
-                    schema.clone(),
-                    scope,
-                    &loc,
-                    e,
-                )?)
+                compile_sqlexpr(compiler.clone(), schema.clone(), scope, &loc, e)?
             }
-        }
+        };
+
+        Ok(CTypedExpr {
+            type_: expr.type_.clone(),
+            expr: compiler.async_cref(async move {
+                // This inline pass will compress together SQL that can be pushed down to an underlying
+                // remote database by comparing the URLs of subtrees and pushing down the SQL for any
+                // subtree whose URLs are all the same or empty and the parent's is empty.
+                let expr = expr.expr.await?;
+
+                // TODO The only reason this needs to be async is because of unwrap_schema_entry().
+                // If we remove that, then we should not need to
+                let expr = expr.read()?.clone();
+                Ok(mkcref(inline_params(&expr).await?))
+            })?,
+        })
     }
 }
 

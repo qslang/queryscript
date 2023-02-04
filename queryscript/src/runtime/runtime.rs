@@ -91,7 +91,6 @@ pub fn eval<'a>(
                 }
             }
             schema::Expr::Materialize(schema::MaterializeExpr { key, expr, url }) => {
-                eprintln!("URL? {:?}", url);
                 let mut materializations = ctx.materializations.lock().await;
                 match materializations.entry(key.clone()) {
                     std::collections::btree_map::Entry::Occupied(e) => {

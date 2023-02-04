@@ -1,6 +1,8 @@
 use async_trait::async_trait;
+use snafu::prelude::*;
 use sqlparser::ast as sqlast;
 
+use crate::ast::SourceLocation;
 use crate::compile::error::*;
 use crate::compile::schema::*;
 use crate::compile::traverse::{SQLVisitor, Visit, VisitSQL, Visitor};
@@ -166,6 +168,17 @@ impl Visitor<CRef<MType>> for ParamInliner {
                 let visitor = ParamInliner { context };
                 let body = body.visit_sql(&visitor);
                 Some(Expr::SQL(Arc::new(SQL { names, body }), url))
+            }
+            Expr::Materialize(MaterializeExpr { expr, key, url }) => {
+                let expr = TypedExpr {
+                    type_: expr.type_.clone(),
+                    expr: Arc::new(inline_params(&expr.expr).await?),
+                };
+                Some(Expr::Materialize(MaterializeExpr {
+                    expr,
+                    key: key.clone(),
+                    url: url.clone(),
+                }))
             }
             _ => None,
         })

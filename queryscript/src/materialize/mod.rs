@@ -14,7 +14,6 @@ use crate::{
         ConnectionString, SchemaRef,
     },
     runtime::{self, new_engine, Context, Result, SQLEngineType},
-    types::Relation,
 };
 use tokio::task::JoinHandle;
 
@@ -75,22 +74,18 @@ pub async fn save_views(ctx: &Context, schema: SchemaRef) -> Result<()> {
                 execute_create_view(&ctx, engine, url.clone(), &name, &sql, query, &mut handles)?;
             }
             Expr::Materialize(MaterializeExpr { key: _, expr, url }) => {
-                let (url, engine) = match &url {
-                    Some(url) => (
-                        url,
-                        new_engine(SQLEngineType::from_name(url.engine_name())?),
-                    ),
-                    None => {
-                        eprintln!(
-                            "Skipping \"{}\" because it does not belong to a database",
-                            name
-                        );
-                        continue;
-                    }
-                };
+                match (url, expr.expr.as_ref()) {
+                    (url, Expr::SQL(sql, Some(sql_url)))
+                        if url
+                            .as_ref()
+                            .map_or(true, |u| u.as_ref() == sql_url.as_ref()) =>
+                    {
+                        // If the URL is unspecified, use the SQL query's URL
+                        let url = url.unwrap_or(sql_url.clone());
+                        let engine = new_engine(SQLEngineType::from_name(url.engine_name())?);
 
-                match expr.expr.as_ref() {
-                    Expr::SQL(sql, Some(sql_url)) if url.as_ref() == sql_url.as_ref() => {
+                        // let query = create_table_as(object_name.into(), sql.body.as_query(), false);
+                        // XXX BUG!!!
                         let query = create_view_as(object_name.into(), sql.body.as_query());
                         execute_create_view(
                             &ctx,
@@ -102,7 +97,8 @@ pub async fn save_views(ctx: &Context, schema: SchemaRef) -> Result<()> {
                             &mut handles,
                         )?;
                     }
-                    _ => {
+                    (Some(url), _) => {
+                        let engine = new_engine(SQLEngineType::from_name(url.engine_name())?);
                         handles.push(tokio::spawn({
                             let ctx = ctx.clone();
                             let url = url.clone();
@@ -122,6 +118,12 @@ pub async fn save_views(ctx: &Context, schema: SchemaRef) -> Result<()> {
                                 Ok(())
                             }
                         }));
+                    }
+                    _ => {
+                        eprintln!(
+                            "Skipping \"{}\" because it does not belong to a database",
+                            name
+                        );
                     }
                 };
             }

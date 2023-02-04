@@ -1,19 +1,24 @@
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
-
     use lazy_static::lazy_static;
-    use queryscript::{
-        ast::{Ident, SourceLocation},
-        compile::{self, Compiler, ConnectionString},
-        materialize,
-        runtime::{self, sql::SQLEngineType, Context},
-    };
+    use sqlparser::ast as sqlast;
     use std::{
         collections::BTreeMap,
         path::{Path, PathBuf},
     };
+    use std::{
+        collections::{HashMap, HashSet},
+        io::Write,
+    };
+    use strum::IntoEnumIterator;
     use walkdir;
+
+    use queryscript::{
+        ast::{self, Ident, SourceLocation},
+        compile::{self, Compiler, ConnectionString},
+        materialize,
+        runtime::{self, sql::SQLEngineType, Context},
+    };
 
     lazy_static! {
         static ref TEST_ROOT: PathBuf =
@@ -28,6 +33,17 @@ mod tests {
         }
     }
 
+    fn show_views_query(engine_type: SQLEngineType) -> sqlparser::ast::Statement {
+        sqlparser::parser::Parser::parse_sql(
+            &sqlparser::dialect::GenericDialect {},
+            match engine_type {
+                SQLEngineType::DuckDB => "SELECT name FROM sqlite_master WHERE type = 'view'",
+            },
+        )
+        .unwrap()
+        .swap_remove(0)
+    }
+
     trait MustString {
         fn must_string(&self) -> String;
     }
@@ -38,9 +54,10 @@ mod tests {
         }
     }
 
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, Copy, strum::EnumIter)]
     enum TestMode {
         Unmaterialized,
+        MaterializedNoUrl,
     }
 
     fn build_schema(
@@ -48,11 +65,41 @@ mod tests {
         mode: TestMode,
         path: &PathBuf,
     ) -> compile::Result<compile::SchemaRef> {
-        let (file, folder, schema_ast) = compiler.open_file(path).unwrap();
+        let (file, folder, mut schema_ast) = compiler.open_file(path).unwrap();
 
-        match mode {
-            TestMode::Unmaterialized => {} // The file should already be free of materializations
-        };
+        for stmt in schema_ast.stmts.iter_mut() {
+            match (stmt.export, &mut stmt.body) {
+                (true, ast::StmtBody::Let { body, .. }) => {
+                    match mode {
+                        TestMode::Unmaterialized => {} // The file should already be free of materializations
+                        TestMode::MaterializedNoUrl => {
+                            let expr = match &body.body {
+                                ast::ExprBody::SQLExpr(expr) => expr.clone(),
+                                ast::ExprBody::SQLQuery(query) => {
+                                    sqlast::Expr::Subquery(Box::new(query.clone()))
+                                }
+                            };
+                            let fn_call = sqlast::Expr::Function(sqlast::Function {
+                                name: sqlast::ObjectName(vec![sqlast::Located::new(
+                                    "materialize".into(),
+                                    None,
+                                )]),
+                                args: vec![sqlast::FunctionArg::Unnamed(
+                                    sqlast::FunctionArgExpr::Expr(expr),
+                                )],
+                                over: None,
+                                distinct: false,
+                                special: false,
+                            });
+                            body.body = ast::ExprBody::SQLExpr(fn_call);
+                        }
+                    };
+                }
+                _ => {
+                    continue;
+                }
+            };
+        }
 
         let schema = compile::Schema::new(file, folder);
         compiler
@@ -111,7 +158,7 @@ mod tests {
                 .unwrap();
 
         // Re-initialize the database
-        rt.block_on(async { ctx.sql_engine.create(&ctx, conn_str).await })
+        rt.block_on(async { ctx.sql_engine.create(&ctx, conn_str.clone()).await })
             .unwrap();
 
         let compiler = Compiler::new().unwrap();
@@ -144,7 +191,7 @@ mod tests {
             writeln!(test_fd, "import '{conn_url}';").unwrap();
             for name in expected_snapshot.keys() {
                 let name = name.to_string();
-                writeln!(test_fd, "export let \"{name}\" = db.\"{name}\";").unwrap();
+                writeln!(test_fd, "export let \"{name}\" = (db.\"{name}\");").unwrap();
             }
         }
         let test_schema = compiler
@@ -156,8 +203,37 @@ mod tests {
             .block_on(async { snapshot(&ctx, &test_schema).await })
             .unwrap();
 
-        // Finally, compare the two snapshots
+        // Compare the two snapshots
         assert_eq!(expected_snapshot, actual_snapshot);
+
+        let expected_view_names: HashSet<Ident> = actual_snapshot.keys().cloned().collect();
+
+        // Get the set of views from the database
+        let actual_view_names = rt
+            .block_on({
+                let conn_str = conn_str.clone();
+                async {
+                    ctx.sql_engine
+                        .eval(
+                            &ctx,
+                            Some(conn_str),
+                            &show_views_query(engine_type),
+                            HashMap::new(),
+                        )
+                        .await
+                }
+            })
+            .unwrap()
+            .records()
+            .into_iter()
+            .map(|r| r.column(0).to_string().into())
+            .collect::<HashSet<Ident>>();
+
+        // Compare the two sets of views
+        match mode {
+            TestMode::Unmaterialized => assert_eq!(expected_view_names, actual_view_names),
+            TestMode::MaterializedNoUrl => assert_eq!(0, actual_view_names.len()),
+        }
     }
 
     fn test_materialize(engine_type: SQLEngineType) {
@@ -179,8 +255,10 @@ mod tests {
 
         let rt = queryscript::runtime::build().unwrap();
         for test_dir in test_dirs {
-            // NOTE: This could probably be parallelized
-            run_test_dir(&rt, engine_type, &test_dir, TestMode::Unmaterialized)
+            for mode in TestMode::iter() {
+                // NOTE: This could probably be parallelized
+                run_test_dir(&rt, engine_type, &test_dir, mode);
+            }
         }
     }
 

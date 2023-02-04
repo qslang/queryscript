@@ -1796,6 +1796,7 @@ dependencies = [
  "snafu",
  "sqllogictest",
  "sqlparser",
+ "strum",
  "tabled",
  "tokio",
  "ts-rs",
