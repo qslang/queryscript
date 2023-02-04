@@ -6,13 +6,13 @@ use std::path::Path;
 
 use queryscript::compile;
 use queryscript::error::*;
+use queryscript::materialize;
 use queryscript::parser;
 use queryscript::parser::error::PrettyError;
 use queryscript::runtime;
 
 mod repl;
 mod rustyline;
-mod save;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
@@ -228,7 +228,7 @@ fn run_file(
         }
         return Ok(());
     } else if matches!(mode, Mode::Save) {
-        rt.block_on(async { save::save_views(schema, engine_type).await })
+        rt.block_on(async { materialize::save_views(schema, engine_type).await })
             .context(RuntimeSnafu {
                 file: file.to_string(),
             })?;

@@ -20,6 +20,16 @@ pub trait SQLEngine: std::fmt::Debug + Send + Sync {
         query: &sqlast::Statement,
         params: HashMap<Ident, SQLParam>,
     ) -> Result<Arc<dyn Relation>>;
+
+    async fn load(
+        &self,
+        ctx: &Context,
+        url: Arc<crate::compile::ConnectionString>,
+        table: &sqlast::ObjectName,
+        value: Value,
+        type_: Type,
+        temporary: bool,
+    ) -> Result<()>;
 }
 
 #[derive(Debug, Clone)]

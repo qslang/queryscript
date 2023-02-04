@@ -11,12 +11,14 @@ use duckdb::{ffi as cffi, Connection};
 use sqlparser::ast as sqlast;
 
 use crate::ast::Ident;
+use crate::compile::sql::{create_table_as, select_star_from};
 use crate::runtime::{
     error::{rt_unimplemented, Result},
     normalize::Normalizer,
     sql::{SQLEngine, SQLParam},
     Context,
 };
+use crate::types::Type;
 use crate::types::{arrow::ArrowRecordBatchRelation, Relation, Value};
 
 #[cxx::bridge]
@@ -156,8 +158,6 @@ impl DuckDBEngine {
         let query = normalizer.normalize(&query);
         let query_string = format!("{}", query);
 
-        eprintln!("RUNNING QUERY {}", query);
-
         let duckdb_params: Vec<&dyn duckdb::ToSql> = scalar_params
             .iter()
             .map(|k| &params.get(k).unwrap().value as &dyn duckdb::ToSql)
@@ -198,6 +198,41 @@ impl SQLEngine for DuckDBEngine {
         // yield work). block_in_place() tells Tokio to expect this thread to spend a while working on
         // this stuff and use other threads for other work.
         ctx.expensive(|| self.eval_in_place(url, query, params))
+    }
+
+    async fn load(
+        &self,
+        ctx: &Context,
+        url: Arc<crate::compile::ConnectionString>,
+        table: &sqlast::ObjectName,
+        value: Value,
+        type_: Type,
+        temporary: bool,
+    ) -> Result<()> {
+        let param_name = "__qs_load";
+
+        let query = create_table_as(
+            table.clone(),
+            select_star_from(sqlast::TableFactor::Table {
+                name: sqlast::ObjectName(vec![sqlast::Located::new(param_name.into(), None)]),
+                alias: None,
+                args: None,
+                with_hints: vec![],
+            }),
+            temporary,
+        );
+        let params = vec![(
+            param_name.into(),
+            SQLParam {
+                name: param_name.into(),
+                value,
+                type_,
+            },
+        )]
+        .into_iter()
+        .collect();
+        self.eval(ctx, Some(url), &query, params).await?;
+        Ok(())
     }
 }
 

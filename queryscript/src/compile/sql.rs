@@ -152,9 +152,9 @@ pub fn select_limit_0(mut query: sqlast::Query) -> sqlast::Query {
     query
 }
 
-pub fn create_view_as(name: sqlast::Ident, query: sqlast::Query) -> sqlast::Statement {
+pub fn create_view_as(name: sqlast::ObjectName, query: sqlast::Query) -> sqlast::Statement {
     sqlast::Statement::CreateView {
-        name: sqlast::ObjectName(vec![sqlast::Located::new(name, None)]),
+        name,
         query: Box::new(query),
         or_replace: true,
 
@@ -166,12 +166,12 @@ pub fn create_view_as(name: sqlast::Ident, query: sqlast::Query) -> sqlast::Stat
 }
 
 pub fn create_table_as(
-    name: sqlast::Ident,
+    name: sqlast::ObjectName,
     query: sqlast::Query,
     temporary: bool,
 ) -> sqlast::Statement {
     sqlast::Statement::CreateTable {
-        name: sqlast::ObjectName(vec![sqlast::Located::new(name, None)]),
+        name,
         query: Some(Box::new(query)),
         or_replace: true,
 
@@ -2392,24 +2392,19 @@ pub fn compile_sqlexpr(
                                     // TODO We should place some metadata on the function, or have a whitelist
                                     // of functions that work this way, but for now, we simply special case the
                                     // load function
-                                    if func_name.as_slice()[0].get() != &Into::<Ident>::into("load")
+                                    if func_name.as_slice()[0].get() == &Into::<Ident>::into("load")
                                     {
-                                        return Err(CompileError::unimplemented(
-                                            loc.clone(),
-                                            "external types for non-load functions",
-                                        ));
+                                        let resolve = schema_infer_load_fn(
+                                            schema.clone(),
+                                            args.clone(),
+                                            inner_type.clone(),
+                                        );
+                                        compiler.add_external_type(
+                                            resolve,
+                                            inner_type.clone(),
+                                            ExternalTypeRank::Load,
+                                        )?;
                                     }
-
-                                    let resolve = schema_infer_load_fn(
-                                        schema.clone(),
-                                        args.clone(),
-                                        inner_type.clone(),
-                                    );
-                                    compiler.add_external_type(
-                                        resolve,
-                                        inner_type.clone(),
-                                        ExternalTypeRank::Load,
-                                    )?;
                                 }
                             }
                             _ => {}
