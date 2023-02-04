@@ -40,18 +40,14 @@ fn execute_create_view(
         let ctx = ctx.clone();
         let url = url.clone();
         async move {
-            engine.eval(&ctx, url, &query, HashMap::new()).await;
+            engine.eval(&ctx, url, &query, HashMap::new()).await?;
             Ok(())
         }
     }));
     Ok(())
 }
 
-pub async fn save_views(
-    schema: SchemaRef,
-    engine_type: crate::runtime::SQLEngineType,
-) -> Result<()> {
-    let ctx = Arc::new(Context::new(schema.read()?.folder.clone(), engine_type));
+pub async fn save_views(ctx: &Context, schema: SchemaRef) -> Result<()> {
     let mut handles = Vec::new();
     for (name, decl) in schema.read()?.expr_decls.iter() {
         if !decl.public {

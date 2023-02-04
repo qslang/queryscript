@@ -234,6 +234,16 @@ impl SQLEngine for DuckDBEngine {
         self.eval(ctx, Some(url), &query, params).await?;
         Ok(())
     }
+
+    async fn create(
+        &self,
+        _ctx: &Context,
+        url: Arc<crate::compile::ConnectionString>,
+    ) -> Result<()> {
+        // DuckDB will create the database if it doesn't exist.
+        Connection::open(url.get_url().path())?;
+        Ok(())
+    }
 }
 
 unsafe fn cast_relation_data(data: *mut u32) -> &'static ArrowRelation {

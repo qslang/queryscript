@@ -30,6 +30,9 @@ pub trait SQLEngine: std::fmt::Debug + Send + Sync {
         type_: Type,
         temporary: bool,
     ) -> Result<()>;
+
+    async fn create(&self, ctx: &Context, url: Arc<crate::compile::ConnectionString>)
+        -> Result<()>;
 }
 
 #[derive(Debug, Clone)]
