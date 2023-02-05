@@ -67,6 +67,12 @@ pub enum RuntimeError {
         source: object_store::path::Error,
         backtrace: Option<Backtrace>,
     },
+
+    #[snafu(display("Compile error: {}", source))]
+    CompileError {
+        #[snafu(backtrace)]
+        source: Box<crate::compile::CompileError>,
+    },
 }
 
 impl RuntimeError {
@@ -102,6 +108,14 @@ impl Into<arrow::error::ArrowError> for RuntimeError {
 impl<Guard> From<std::sync::PoisonError<Guard>> for RuntimeError {
     fn from(e: std::sync::PoisonError<Guard>) -> RuntimeError {
         RuntimeError::new(format!("{}", e).as_str())
+    }
+}
+
+impl From<crate::compile::CompileError> for RuntimeError {
+    fn from(e: crate::compile::CompileError) -> RuntimeError {
+        RuntimeError::CompileError {
+            source: Box::new(e),
+        }
     }
 }
 

@@ -7,7 +7,7 @@ use crate::parser::error::{ParserError, PrettyError};
 use crate::runtime::error::RuntimeError;
 use crate::types::error::TypesystemError;
 use colored::*;
-use snafu::{Backtrace, Snafu};
+use snafu::{AsBacktrace, Backtrace, ErrorCompat, Snafu};
 use std::io;
 
 pub type Result<T, E = CompileError> = std::result::Result<T, E>;

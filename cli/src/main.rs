@@ -229,10 +229,7 @@ fn run_file(
         }
         return Ok(());
     } else if matches!(mode, Mode::Save) {
-        rt.block_on(async { materialize::save_views(&ctx, schema).await })
-            .context(RuntimeSnafu {
-                file: file.to_string(),
-            })?;
+        rt.block_on(async { materialize::save_views(&ctx, schema).await })?;
         return Ok(());
     }
 
