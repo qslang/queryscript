@@ -30,7 +30,7 @@ pub fn build() -> Result<Runtime> {
 }
 
 pub async fn eval_params<'a>(
-    ctx: &'a Context,
+    ctx: &'a mut Context,
     params: &'a schema::Params<TypeRef>,
 ) -> Result<HashMap<Ident, SQLParam>> {
     let mut param_values = HashMap::new();
@@ -46,7 +46,7 @@ pub async fn eval_params<'a>(
 }
 
 pub fn eval<'a>(
-    ctx: &'a Context,
+    ctx: &'a mut Context,
     typed_expr: &'a schema::TypedExpr<TypeRef>,
 ) -> BoxFuture<'a, crate::runtime::Result<crate::types::Value>> {
     async move {
@@ -122,12 +122,12 @@ pub fn eval<'a>(
                     //
                     arg_values.push(eval(ctx, arg).await?);
                 }
-                let fn_val = match eval(&new_ctx, func.as_ref()).await? {
+                let fn_val = match eval(&mut new_ctx, func.as_ref()).await? {
                     Value::Fn(f) => f,
                     _ => return fail!("Cannot call non-function"),
                 };
 
-                fn_val.execute(&new_ctx, arg_values).await
+                fn_val.execute(&mut new_ctx, arg_values).await
             }
             schema::Expr::SQL(e, url) => {
                 let schema::SQL { body, names } = e.as_ref();

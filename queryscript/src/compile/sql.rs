@@ -1676,7 +1676,7 @@ pub fn schema_infer_load_fn(
     inner_type: CRef<MType>,
 ) -> impl std::future::Future<Output = Result<()>> + Send + 'static {
     async move {
-        let ctx = crate::runtime::Context::new(
+        let mut ctx = crate::runtime::Context::new(
             schema.read()?.folder.clone(),
             crate::runtime::SQLEngineType::DuckDB,
         )
@@ -1686,11 +1686,13 @@ pub fn schema_infer_load_fn(
             let runtime_expr = e.to_typed_expr().to_runtime_type().context(RuntimeSnafu {
                 loc: SourceLocation::Unknown,
             })?;
-            let eval_expr = crate::runtime::eval(&ctx, &runtime_expr).await.context({
-                RuntimeSnafu {
-                    loc: SourceLocation::Unknown,
-                }
-            })?;
+            let eval_expr = crate::runtime::eval(&mut ctx, &runtime_expr)
+                .await
+                .context({
+                    RuntimeSnafu {
+                        loc: SourceLocation::Unknown,
+                    }
+                })?;
             runtime_args.push(eval_expr);
         }
         let inferred_type = crate::runtime::functions::LoadFileFn::infer(&ctx, runtime_args)

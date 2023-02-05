@@ -220,7 +220,8 @@ fn run_file(
             .as_result()?;
     }
 
-    let ctx = queryscript::runtime::Context::new(schema.read()?.folder.clone(), engine_type);
+    let ctx_pool =
+        queryscript::runtime::ContextPool::new(schema.read()?.folder.clone(), engine_type);
     if matches!(mode, Mode::Compile) {
         if execute.is_none() {
             println!("{:#?}", schema);
@@ -229,17 +230,18 @@ fn run_file(
         }
         return Ok(());
     } else if matches!(mode, Mode::Save) {
-        rt.block_on(async { materialize::save_views(&ctx, schema).await })?;
+        rt.block_on(async { materialize::save_views(&ctx_pool, schema).await })?;
         return Ok(());
     }
 
     let locked_schema = schema.read()?;
+    let mut ctx = ctx_pool.get();
     for expr in locked_schema.exprs.iter() {
         let expr = expr.to_runtime_type().context(RuntimeSnafu {
             file: file.to_string(),
         })?;
         let value = rt
-            .block_on(async { runtime::eval(&ctx, &expr).await })
+            .block_on(async { runtime::eval(&mut ctx, &expr).await })
             .context(RuntimeSnafu {
                 file: file.to_string(),
             })?;

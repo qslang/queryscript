@@ -1016,7 +1016,7 @@ impl Backend {
             }
         };
 
-        let ctx = runtime::Context::new(
+        let mut ctx = runtime::Context::new(
             schema_ref
                 .read()
                 .map_err(log_internal_error)?
@@ -1026,7 +1026,7 @@ impl Backend {
         );
 
         // XXX We should change this log_internal_error to return an error to the webview
-        let value = runtime::eval(&ctx, &expr)
+        let value = runtime::eval(&mut ctx, &expr)
             .await
             .map_err(log_internal_error)?;
 

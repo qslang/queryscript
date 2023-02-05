@@ -104,11 +104,11 @@ mod tests {
         let expr = expr.to_runtime_type()?;
 
         let engine_type = runtime::SQLEngineType::DuckDB;
-        let async_ctx =
+        let mut async_ctx =
             queryscript::runtime::Context::new(schema.read()?.folder.clone(), engine_type);
         let async_expr = expr.clone();
 
-        let value = rt.block_on(async move { runtime::eval(&async_ctx, &async_expr).await })?;
+        let value = rt.block_on(async move { runtime::eval(&mut async_ctx, &async_expr).await })?;
 
         let type_ = expr.type_.read().unwrap();
         Ok(TypedValue {

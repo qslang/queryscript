@@ -15,7 +15,7 @@ use async_trait::async_trait;
 pub trait SQLEngine: std::fmt::Debug + Send + Sync {
     async fn eval(
         &self,
-        ctx: &Context,
+        ctx: &mut Context,
         url: Option<Arc<crate::compile::ConnectionString>>,
         query: &sqlast::Statement,
         params: HashMap<Ident, SQLParam>,
@@ -23,7 +23,7 @@ pub trait SQLEngine: std::fmt::Debug + Send + Sync {
 
     async fn load(
         &self,
-        ctx: &Context,
+        ctx: &mut Context,
         url: Arc<crate::compile::ConnectionString>,
         table: &sqlast::ObjectName,
         value: Value,
@@ -31,8 +31,11 @@ pub trait SQLEngine: std::fmt::Debug + Send + Sync {
         temporary: bool,
     ) -> Result<()>;
 
-    async fn create(&self, ctx: &Context, url: Arc<crate::compile::ConnectionString>)
-        -> Result<()>;
+    async fn create(
+        &self,
+        ctx: &mut Context,
+        url: Arc<crate::compile::ConnectionString>,
+    ) -> Result<()>;
 }
 
 #[derive(Debug, Clone)]

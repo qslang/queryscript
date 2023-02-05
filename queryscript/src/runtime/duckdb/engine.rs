@@ -188,7 +188,7 @@ impl ArrowRecordBatchRelation {
 impl SQLEngine for DuckDBEngine {
     async fn eval(
         &self,
-        ctx: &Context,
+        ctx: &mut Context,
         url: Option<Arc<crate::compile::ConnectionString>>,
         query: &sqlast::Statement,
         params: HashMap<Ident, SQLParam>,
@@ -202,7 +202,7 @@ impl SQLEngine for DuckDBEngine {
 
     async fn load(
         &self,
-        ctx: &Context,
+        ctx: &mut Context,
         url: Arc<crate::compile::ConnectionString>,
         table: &sqlast::ObjectName,
         value: Value,
@@ -237,7 +237,7 @@ impl SQLEngine for DuckDBEngine {
 
     async fn create(
         &self,
-        _ctx: &Context,
+        _ctx: &mut Context,
         url: Arc<crate::compile::ConnectionString>,
     ) -> Result<()> {
         // DuckDB will create the database if it doesn't exist.

@@ -46,12 +46,11 @@ impl QSFn {
 
 #[async_trait]
 impl FnValue for QSFn {
-    fn execute(&self, ctx: &Context, args: Vec<Value>) -> BoxFuture<Result<Value>> {
-        let new_ctx = ctx.clone();
+    fn execute(&self, ctx: &mut Context, args: Vec<Value>) -> BoxFuture<Result<Value>> {
+        let mut new_ctx = ctx.clone();
         let type_ = self.type_.clone();
         let body = self.body.clone();
         async move {
-            let mut new_ctx = new_ctx.clone();
             if args.len() != type_.args.len() {
                 return fail!("Wrong number of arguments to function");
             }
@@ -64,7 +63,7 @@ impl FnValue for QSFn {
                     .insert(type_.args[i].name.clone(), args[i].clone());
             }
 
-            runtime::eval(&new_ctx, &body).await
+            runtime::eval(&mut new_ctx, &body).await
         }
         .boxed()
     }
@@ -255,7 +254,11 @@ impl LoadFileFn {
 
 #[async_trait]
 impl FnValue for LoadFileFn {
-    fn execute<'a>(&'a self, ctx: &'a Context, args: Vec<Value>) -> BoxFuture<'a, Result<Value>> {
+    fn execute<'a>(
+        &'a self,
+        ctx: &'a mut Context,
+        args: Vec<Value>,
+    ) -> BoxFuture<'a, Result<Value>> {
         let us = self.clone();
         async move {
             let (path_buf, format) = Self::parse_args(ctx, args)?;
@@ -301,7 +304,11 @@ impl IdentityFn {
 
 #[async_trait]
 impl FnValue for IdentityFn {
-    fn execute<'a>(&'a self, _ctx: &'a Context, args: Vec<Value>) -> BoxFuture<'a, Result<Value>> {
+    fn execute<'a>(
+        &'a self,
+        _ctx: &'a mut Context,
+        args: Vec<Value>,
+    ) -> BoxFuture<'a, Result<Value>> {
         async move { Ok(args.into_iter().next().unwrap()) }.boxed()
     }
 

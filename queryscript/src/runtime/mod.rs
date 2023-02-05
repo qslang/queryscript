@@ -11,6 +11,6 @@ pub mod duckdb;
 // pub mod datafusion;
 
 pub use crate::runtime::runtime::*;
-pub use context::Context;
+pub use context::{Context, ContextPool};
 pub use error::{Result, RuntimeError};
 pub use sql::*;

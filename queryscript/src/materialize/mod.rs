@@ -9,6 +9,7 @@ use std::{collections::HashMap, sync::RwLock};
 
 use crate::compile::inference::mkcref;
 use crate::compile::schema::{CRef, SQLBody};
+use crate::runtime::context::ContextPool;
 use crate::runtime::SQLEngine;
 use crate::types::Type;
 use crate::{
@@ -24,7 +25,7 @@ use crate::{
 use tokio::task::JoinHandle;
 
 fn execute_create_view(
-    ctx: &Context,
+    ctx_pool: &ContextPool,
     schema: SchemaRef,
     engine: Arc<dyn SQLEngine>,
     url: Option<Arc<ConnectionString>>,
@@ -62,39 +63,37 @@ fn execute_create_view(
         .or_insert_with(|| CRef::new_unknown(&name.to_string()))
         .clone();
 
-    handles.push(tokio::spawn({
-        let ctx = ctx.clone();
-        let url = url.clone();
-        let name = name.clone();
-        async move {
-            for dep in dependencies {
-                dep.await?;
-            }
-
-            eprintln!(
-                "Creating view \"{}\"{}",
-                name,
-                if dependency_names.len() > 0 {
-                    format!(" (depends on: {})", dependency_names.join(", "))
-                } else {
-                    "".into()
-                }
-            );
-
-            let result = engine.eval(&ctx, url, &query, HashMap::new()).await;
-
-            completed_ref.unify(&mkcref(()))?;
-            result.context(RuntimeSnafu {
-                loc: SourceLocation::Unknown,
-            })?;
-            Ok(())
+    let mut ctx = ctx_pool.get();
+    let url = url.clone();
+    let name = name.clone();
+    handles.push(tokio::spawn(async move {
+        for dep in dependencies {
+            dep.await?;
         }
+
+        eprintln!(
+            "Creating view \"{}\"{}",
+            name,
+            if dependency_names.len() > 0 {
+                format!(" (depends on: {})", dependency_names.join(", "))
+            } else {
+                "".into()
+            }
+        );
+
+        let result = engine.eval(&mut ctx, url, &query, HashMap::new()).await;
+
+        completed_ref.unify(&mkcref(()))?;
+        result.context(RuntimeSnafu {
+            loc: SourceLocation::Unknown,
+        })?;
+        Ok(())
     }));
     Ok(())
 }
 
 async fn process_view<'a>(
-    ctx: &'a Context,
+    ctx_pool: &'a ContextPool,
     schema: SchemaRef,
     name: &'a Ident,
     signals: &'a mut HashMap<Ident, CRef<()>>,
@@ -130,7 +129,7 @@ async fn process_view<'a>(
 
             let query = create_view_as(object_name, sql.body.as_query());
             execute_create_view(
-                &ctx,
+                ctx_pool,
                 schema.clone(),
                 engine,
                 url.clone(),
@@ -149,7 +148,7 @@ async fn process_view<'a>(
 
                     let query = create_table_as(object_name.into(), sql.body.as_query(), false);
                     execute_create_view(
-                        &ctx,
+                        ctx_pool,
                         schema.clone(),
                         engine,
                         Some(url.clone()),
@@ -163,16 +162,17 @@ async fn process_view<'a>(
                 (Some(url), _) => {
                     let engine = new_engine(SQLEngineType::from_name(url.engine_name())?);
                     handles.push(tokio::spawn({
-                        let ctx = ctx.clone();
+                        let mut ctx = ctx_pool.get();
                         let url = url.clone();
                         let type_ = expr.type_.read()?.clone();
                         async move {
-                            let data = runtime::eval(&ctx, &expr).await.context(RuntimeSnafu {
-                                loc: SourceLocation::Unknown,
-                            })?;
+                            let data =
+                                runtime::eval(&mut ctx, &expr).await.context(RuntimeSnafu {
+                                    loc: SourceLocation::Unknown,
+                                })?;
                             engine
                                 .load(
-                                    &ctx,
+                                    &mut ctx,
                                     url.clone(),
                                     &object_name,
                                     data,
@@ -206,12 +206,12 @@ async fn process_view<'a>(
     Ok(())
 }
 
-pub async fn save_views(ctx: &Context, schema: SchemaRef) -> Result<()> {
+pub async fn save_views(ctx_pool: &ContextPool, schema: SchemaRef) -> Result<()> {
     let mut handles = Vec::new();
     let mut signals = HashMap::new();
     eprintln!("Processing views...");
     for (name, decl) in schema.read()?.expr_decls.iter() {
-        process_view(ctx, schema.clone(), name, &mut signals, &mut handles)
+        process_view(ctx_pool, schema.clone(), name, &mut signals, &mut handles)
             .await
             .context(RuntimeSnafu {
                 loc: decl.location().clone(),

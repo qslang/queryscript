@@ -95,12 +95,12 @@ impl sqllogictest::AsyncDB for QueryScript {
                     loc: SourceLocation::Unknown,
                 })?;
 
-            let ctx = runtime::Context::new(
+            let mut ctx = runtime::Context::new(
                 self.schema.read()?.folder.clone(),
                 runtime::SQLEngineType::DuckDB,
             );
 
-            let value = runtime::eval(&ctx, &expr).await.context(RuntimeSnafu {
+            let value = runtime::eval(&mut ctx, &expr).await.context(RuntimeSnafu {
                 loc: SourceLocation::Unknown,
             })?;
 

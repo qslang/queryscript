@@ -49,3 +49,22 @@ impl Context {
         }
     }
 }
+
+// This should eventually be a real pool
+pub struct ContextPool {
+    pub folder: Option<String>,
+    pub engine_type: SQLEngineType,
+}
+
+impl ContextPool {
+    pub fn new(folder: Option<String>, engine_type: SQLEngineType) -> ContextPool {
+        ContextPool {
+            folder,
+            engine_type,
+        }
+    }
+
+    pub fn get(&self) -> Context {
+        Context::new(self.folder.clone(), self.engine_type)
+    }
+}
