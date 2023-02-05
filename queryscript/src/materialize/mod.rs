@@ -1,6 +1,8 @@
 // This file is responsible for the QueryScript equivalent of orchestration: saving "views"
 // back to the original database.
+use futures::future::{BoxFuture, FutureExt};
 use sqlparser::ast as sqlast;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::{collections::HashMap, sync::RwLock};
 
@@ -17,21 +19,34 @@ use crate::{
 };
 use tokio::task::JoinHandle;
 
-fn execute_create_view(
+async fn execute_create_view(
     ctx: &Context,
+    schema: SchemaRef,
     engine: Arc<dyn SQLEngine>,
     url: Option<Arc<ConnectionString>>,
     name: &Ident,
     sql: &Arc<SQLSnippet<Arc<RwLock<Type>>, SQLBody>>,
     query: sqlparser::ast::Statement,
+    seen: &mut HashSet<Ident>,
     handles: &mut Vec<JoinHandle<Result<()>>>,
 ) -> Result<()> {
-    if !sql.names.params.is_empty() {
-        eprintln!(
+    for (name, param) in &sql.names.params {
+        match param.expr.as_ref() {
+            Expr::Materialize(MaterializeExpr {
+                inlined: true,
+                decl_name,
+                ..
+            }) => {
+                process_view(ctx, schema.clone(), decl_name, seen, handles).await?;
+            }
+            _ => {
+                eprintln!(
             "Skipping \"{}\" because it has parameters that must be evaluated outside the database",
             name
         );
-        return Ok(());
+                return Ok(());
+            }
+        };
     }
 
     eprintln!("Creating view \"{}\"", name);
@@ -46,18 +61,35 @@ fn execute_create_view(
     Ok(())
 }
 
-pub async fn save_views(ctx: &Context, schema: SchemaRef) -> Result<()> {
-    let mut handles = Vec::new();
-    for (name, decl) in schema.read()?.expr_decls.iter() {
-        if !decl.public {
-            continue;
+fn process_view<'a>(
+    ctx: &'a Context,
+    schema: SchemaRef,
+    name: &'a Ident,
+    seen: &'a mut HashSet<Ident>,
+    handles: &'a mut Vec<tokio::task::JoinHandle<Result<()>>>,
+) -> BoxFuture<'a, Result<()>> {
+    async move {
+        if seen.contains(name) {
+            return Ok(());
         }
-
         let object_name = sqlast::ObjectName(vec![sqlast::Located::new(name.into(), None)]);
 
+        let decl = schema
+            .read()?
+            .expr_decls
+            .get(name)
+            .ok_or_else(|| {
+                runtime::error::RuntimeError::new(&format!("No such view \"{}\"", name))
+            })?
+            .clone();
+
+        if !decl.public {
+            return Ok(());
+        }
+
         let expr = decl.value.expr.must()?;
-        let expr = expr.read()?;
-        match expr.to_runtime_type()? {
+        let expr = expr.read()?.to_runtime_type()?;
+        match expr {
             Expr::SQL(ref sql, url) => {
                 let engine = match &url {
                     Some(url) => new_engine(SQLEngineType::from_name(url.engine_name())?),
@@ -71,29 +103,40 @@ pub async fn save_views(ctx: &Context, schema: SchemaRef) -> Result<()> {
                 };
 
                 let query = create_view_as(object_name, sql.body.as_query());
-                execute_create_view(&ctx, engine, url.clone(), &name, &sql, query, &mut handles)?;
+                execute_create_view(
+                    &ctx,
+                    schema.clone(),
+                    engine,
+                    url.clone(),
+                    &name,
+                    &sql,
+                    query,
+                    seen,
+                    handles,
+                )
+                .await?;
             }
-            Expr::Materialize(MaterializeExpr { key: _, expr, url }) => {
+            Expr::Materialize(MaterializeExpr { expr, url, .. }) => {
                 match (url, expr.expr.as_ref()) {
-                    (url, Expr::SQL(sql, Some(sql_url)))
-                        if url
-                            .as_ref()
-                            .map_or(true, |u| u.as_ref() == sql_url.as_ref()) =>
+                    (Some(url), Expr::SQL(sql, Some(sql_url)))
+                        if url.as_ref() == sql_url.as_ref() =>
                     {
                         // If the URL is unspecified, use the SQL query's URL
-                        let url = url.unwrap_or(sql_url.clone());
                         let engine = new_engine(SQLEngineType::from_name(url.engine_name())?);
 
                         let query = create_table_as(object_name.into(), sql.body.as_query(), false);
                         execute_create_view(
                             &ctx,
+                            schema.clone(),
                             engine,
                             Some(url.clone()),
                             &name,
                             &sql,
                             query,
-                            &mut handles,
-                        )?;
+                            seen,
+                            handles,
+                        )
+                        .await?;
                     }
                     (Some(url), _) => {
                         let engine = new_engine(SQLEngineType::from_name(url.engine_name())?);
@@ -131,13 +174,24 @@ pub async fn save_views(ctx: &Context, schema: SchemaRef) -> Result<()> {
                     name
                 );
             }
-        }
+        };
 
         // XXX Until we implement some kind of connection pooling, we need this stop-gap to prevent
         // concurrent writes to the same database from conflicting.
         for handle in handles.drain(..) {
             handle.await.expect("Failed to join task")?;
         }
+
+        Ok(())
+    }
+    .boxed()
+}
+
+pub async fn save_views(ctx: &Context, schema: SchemaRef) -> Result<()> {
+    let mut handles = Vec::new();
+    let mut seen = HashSet::new();
+    for name in schema.read()?.expr_decls.keys() {
+        process_view(ctx, schema.clone(), name, &mut seen, &mut handles).await?;
     }
     eprintln!("--\nWaiting for all views to complete...");
     for handle in handles {

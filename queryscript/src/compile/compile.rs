@@ -860,7 +860,7 @@ fn compile_expr(compiler: Compiler, schema: Ref<Schema>, expr: &ast::Expr) -> Re
     if expr.is_unsafe {
         compile_unsafe_expr(compiler, schema, &expr.body, &loc)
     } else {
-        let expr = match &expr.body {
+        Ok(match &expr.body {
             ast::ExprBody::SQLQuery(q) => {
                 let (_scope, type_, query) =
                     compile_sqlquery(compiler.clone(), schema.clone(), None, &loc, q)?;
@@ -869,9 +869,6 @@ fn compile_expr(compiler: Compiler, schema: Ref<Schema>, expr: &ast::Expr) -> Re
                     expr: compiler.async_cref(async move {
                         let query = cunwrap(query.await?)?;
 
-                        // This inline pass will compress together SQL that can be pushed down to an underlying
-                        // remote database by comparing the URLs of subtrees and pushing down the SQL for any
-                        // subtree whose URLs are all the same or empty and the parent's is empty.
                         Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                             names: query.names,
                             body: SQLBody::Query(query.body),
@@ -883,21 +880,6 @@ fn compile_expr(compiler: Compiler, schema: Ref<Schema>, expr: &ast::Expr) -> Re
                 let scope = SQLScope::new(None);
                 compile_sqlexpr(compiler.clone(), schema.clone(), scope, &loc, e)?
             }
-        };
-
-        Ok(CTypedExpr {
-            type_: expr.type_.clone(),
-            expr: compiler.async_cref(async move {
-                // This inline pass will compress together SQL that can be pushed down to an underlying
-                // remote database by comparing the URLs of subtrees and pushing down the SQL for any
-                // subtree whose URLs are all the same or empty and the parent's is empty.
-                let expr = expr.expr.await?;
-
-                // TODO The only reason this needs to be async is because of unwrap_schema_entry().
-                // If we remove that, then we should not need to
-                let expr = expr.read()?.clone();
-                Ok(mkcref(inline_params(&expr).await?))
-            })?,
         })
     }
 }
@@ -958,6 +940,7 @@ fn compile_schema_ast(
         schema.clone(),
         ast,
     ));
+    result.absorb(optimize_schema(compiler.clone(), schema.clone()));
     match gather_schema_externs(schema) {
         Ok(_) => {}
         Err(e) => result.add_error(None, e),
@@ -1349,6 +1332,7 @@ fn compile_materialized_expr(
     compiler: Compiler,
     schema: SchemaRef,
     loc: SourceLocation,
+    decl_name: Ident,
     expr: CTypedExpr,
     args: ast::MaterializeArgs,
 ) -> Result<CRef<Expr<CRef<MType>>>> {
@@ -1381,9 +1365,11 @@ fn compile_materialized_expr(
             let expr = Arc::new(expr.read()?.clone());
 
             Ok(mkcref(Expr::Materialize(MaterializeExpr {
+                decl_name,
                 key: compiler.next_placeholder("materialized")?,
                 expr: TypedExpr { expr, type_ },
                 url,
+                inlined: false,
             })))
         }
     })
@@ -1586,6 +1572,7 @@ fn compile_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
                     compiler.clone(),
                     schema.clone(),
                     loc.clone(),
+                    name.get().clone(),
                     compiled.clone(),
                     args.clone(),
                 )?,
@@ -1616,6 +1603,41 @@ fn compile_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
     };
 
     Ok(())
+}
+
+fn cref_inline_params(
+    compiler: Compiler,
+    expr: CRef<Expr<CRef<MType>>>,
+) -> Result<CRef<Expr<CRef<MType>>>> {
+    compiler.async_cref(async move {
+        // This inline pass will compress together SQL that can be pushed down to an underlying
+        // remote database by comparing the URLs of subtrees and pushing down the SQL for any
+        // subtree whose URLs are all the same or empty and the parent's is empty.
+        let expr = expr.await?;
+
+        // TODO The only reason this needs to be async is because of unwrap_schema_entry().
+        // If we remove that, then we should not need to
+        let expr = expr.read()?.clone();
+        Ok(mkcref(inline_params(&expr).await?))
+    })
+}
+
+fn optimize_schema(compiler: Compiler, schema: Ref<Schema>) -> CompileResult<()> {
+    let mut result = CompileResult::new(());
+
+    let mut s = c_try!(result, schema.write());
+    for expr in s.expr_decls.values_mut() {
+        let expr_value = expr.value.expr.clone();
+        expr.get_mut().value.expr =
+            c_try!(result, cref_inline_params(compiler.clone(), expr_value));
+    }
+
+    for expr in s.exprs.iter_mut() {
+        let expr_value = expr.expr.clone();
+        expr.get_mut().expr = c_try!(result, cref_inline_params(compiler.clone(), expr_value));
+    }
+
+    result
 }
 
 pub fn gather_schema_externs(schema: Ref<Schema>) -> Result<()> {

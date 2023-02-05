@@ -815,7 +815,9 @@ where
 //  ----- ^^ At this point, we should be able to rework our tests to include materialization [done]
 //  ----- ^^ Maybe also implement some targeted tests for these cases? [done]
 //  3) Implement using a materialized table in a query
-//  ----- At this point, we'll need to implement connection pooling of some sort
+//  ----- ^^ We'll need to inline the parameter but also keep track of the dependency (b/c in
+//  -----    save mode, we need to make sure that we materialize dependencies first)
+//  ----- ^^ At this point, we'll need to implement connection pooling of some sort to proceed
 //  4) Implement CREATE TEMPORARY TABLE AS during regular execution
 #[derive(Clone, Debug)]
 pub struct MaterializeExpr<TypeRef>
@@ -823,8 +825,10 @@ where
     TypeRef: Clone + fmt::Debug + Send + Sync,
 {
     pub key: String,
+    pub decl_name: Ident,
     pub expr: TypedExpr<TypeRef>,
     pub url: Option<Arc<ConnectionString>>,
+    pub inlined: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -887,10 +891,14 @@ impl Expr<CRef<MType>> {
                 key,
                 expr,
                 url: target_url,
+                decl_name,
+                inlined,
             }) => Ok(Expr::Materialize(MaterializeExpr {
                 key: key.clone(),
                 expr: expr.to_runtime_type()?,
                 url: target_url.clone(),
+                decl_name: decl_name.clone(),
+                inlined: inlined.clone(),
             })),
             Expr::Unknown => Ok(Expr::Unknown),
         }

@@ -119,7 +119,10 @@ impl Visitor<CRef<MType>> for ParamInliner {
                 }
 
                 for (_, param) in params.iter() {
-                    let expr = inline_params(&param.expr.unwrap_schema_entry().await?).await?;
+                    let expr = inline_params(&param.expr.unwrap_schema_entry().await?)
+                        .await?
+                        .unwrap_schema_entry()
+                        .await?;
 
                     match &expr {
                         Expr::SQL(sql, inner_url) => {
@@ -127,6 +130,11 @@ impl Visitor<CRef<MType>> for ParamInliner {
                                 conn_strings.insert(inner_url.clone());
                             }
                             remaining_params += sql.names.params.len();
+                        }
+                        Expr::Materialize(MaterializeExpr { url: inner_url, .. }) => {
+                            if let Some(inner_url) = inner_url {
+                                conn_strings.insert(inner_url.clone());
+                            }
                         }
                         _ => {
                             remaining_params += 1;
@@ -146,6 +154,48 @@ impl Visitor<CRef<MType>> for ParamInliner {
                         {
                             names.extend(sql.names.clone());
                             context.insert(name.clone(), sql.body.clone());
+                        }
+                        Expr::Materialize(MaterializeExpr {
+                            expr,
+                            key,
+                            url,
+                            decl_name,
+                            inlined,
+                        }) => {
+                            // If we can inline tables, then we can inline materialized expressions (we simply expect them
+                            // to have been saved to the database at some point).
+                            let mut inlined = false;
+                            if can_inline_tables {
+                                context.insert(
+                                    name.clone(),
+                                    SQLBody::Table(sqlast::TableFactor::Table {
+                                        alias: None,
+                                        name: sqlast::ObjectName(vec![sqlast::Located::new(
+                                            decl_name.into(),
+                                            None,
+                                        )]),
+                                        args: None,
+                                        with_hints: vec![],
+                                    }),
+                                );
+                                inlined = true;
+                            }
+
+                            // Either way, we still want to keep the materialized expression in the param list, to
+                            // force ourselves to either compute or resolve it prior to executing this one
+                            names.params.insert(
+                                name.clone(),
+                                TypedExpr {
+                                    type_: param.type_.clone(),
+                                    expr: Arc::new(Expr::Materialize(MaterializeExpr {
+                                        expr: expr.clone(),
+                                        key: key.clone(),
+                                        url: url.clone(),
+                                        decl_name: decl_name.clone(),
+                                        inlined,
+                                    })),
+                                },
+                            );
                         }
                         _ => {
                             names.params.insert(
@@ -169,15 +219,31 @@ impl Visitor<CRef<MType>> for ParamInliner {
                 let body = body.visit_sql(&visitor);
                 Some(Expr::SQL(Arc::new(SQL { names, body }), url))
             }
-            Expr::Materialize(MaterializeExpr { expr, key, url }) => {
+            Expr::Materialize(MaterializeExpr {
+                expr,
+                key,
+                url,
+                decl_name,
+                inlined,
+            }) => {
                 let expr = TypedExpr {
                     type_: expr.type_.clone(),
                     expr: Arc::new(inline_params(&expr.expr).await?),
+                };
+
+                let url = match url {
+                    Some(url) => Some(url.clone()),
+                    None => match expr.expr.as_ref() {
+                        Expr::SQL(_, url) => url.clone(),
+                        _ => None,
+                    },
                 };
                 Some(Expr::Materialize(MaterializeExpr {
                     expr,
                     key: key.clone(),
                     url: url.clone(),
+                    decl_name: decl_name.clone(),
+                    inlined: *inlined,
                 }))
             }
             _ => None,

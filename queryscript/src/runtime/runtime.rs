@@ -90,7 +90,7 @@ pub fn eval<'a>(
                     _ => return rt_unimplemented!("native function: {}", name),
                 }
             }
-            schema::Expr::Materialize(schema::MaterializeExpr { key, expr, url }) => {
+            schema::Expr::Materialize(schema::MaterializeExpr { key, expr, url, .. }) => {
                 let mut materializations = ctx.materializations.lock().await;
                 match materializations.entry(key.clone()) {
                     std::collections::btree_map::Entry::Occupied(e) => {

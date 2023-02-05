@@ -681,7 +681,7 @@ impl<V: SQLVisitor> VisitSQL<V> for SelectItem {
             UnnamedExpr(e) => UnnamedExpr(e.visit_sql(visitor)),
             ExprWithAlias { expr, alias } => ExprWithAlias {
                 expr: expr.visit_sql(visitor),
-                alias: alias.visit_sql(visitor),
+                alias: alias.clone(), // Do not visit the alias -- changing it can bork the type
             },
             QualifiedWildcard(name, options) => {
                 QualifiedWildcard(name.visit_sql(visitor), options.visit_sql(visitor))
@@ -892,13 +892,19 @@ impl<V: Visitor<schema::CRef<schema::MType>> + Sync> Visit<V, schema::CRef<schem
             Expr::NativeFn(f) => Expr::NativeFn(f.clone()),
             Expr::ContextRef(r) => Expr::ContextRef(r.clone()),
             Expr::Connection(u) => Expr::Connection(u.clone()),
-            Expr::Materialize(MaterializeExpr { key, expr, url }) => {
-                Expr::Materialize(MaterializeExpr {
-                    key: key.clone(),
-                    expr: expr.visit(visitor).await?,
-                    url: url.clone(),
-                })
-            }
+            Expr::Materialize(MaterializeExpr {
+                key,
+                expr,
+                url,
+                decl_name,
+                inlined,
+            }) => Expr::Materialize(MaterializeExpr {
+                key: key.clone(),
+                expr: expr.visit(visitor).await?,
+                url: url.clone(),
+                decl_name: decl_name.clone(),
+                inlined: inlined.clone(),
+            }),
             Expr::Unknown => Expr::Unknown,
         })
     }

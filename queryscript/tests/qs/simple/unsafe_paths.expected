@@ -18,24 +18,6 @@
                 loc: Unknown,
             },
         ),
-        (
-            None,
-            RuntimeError {
-                source: DuckDBError {
-                    source: DuckDBFailure(
-                        Error {
-                            code: Unknown,
-                            extended_code: 1,
-                        },
-                        Some(
-                            "Parser Error: syntax error at or near \"$1\"\nLINE 1: SELECT $1 AS $1 FROM \"bar\" LIMIT 0\n                     ^",
-                        ),
-                    ),
-                    backtrace: None,
-                },
-                loc: Unknown,
-            },
-        ),
     ],
     "decls": {
         "let bar": [{
@@ -98,7 +80,7 @@
                     Record(
                         [
                             Field {
-                                name: "$1",
+                                name: "baz",
                                 type_: Atom(
                                     Int64,
                                 ),
@@ -107,13 +89,25 @@
                         ],
                     ),
                 ),
-                value: "| $1 |\n|----|\n| 1  |\n| 1  |",
+                value: "| baz |\n|-----|\n| 1   |\n| 1   |",
             },
         ),
-        Err(
-            StringError {
-                what: "Unknown type cannot exist at runtime (?unsafe expr?)",
-                backtrace: None,
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "baz",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| baz |\n|-----|\n| 1   |\n| 1   |",
             },
         ),
     ],
