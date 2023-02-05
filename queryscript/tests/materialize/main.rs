@@ -69,29 +69,11 @@ mod tests {
 
         for stmt in schema_ast.stmts.iter_mut() {
             match (stmt.export, &mut stmt.body) {
-                (true, ast::StmtBody::Let { body, .. }) => {
+                (true, ast::StmtBody::Let { materialize, .. }) => {
                     match mode {
                         TestMode::Unmaterialized => {} // The file should already be free of materializations
                         TestMode::MaterializedNoUrl => {
-                            let expr = match &body.body {
-                                ast::ExprBody::SQLExpr(expr) => expr.clone(),
-                                ast::ExprBody::SQLQuery(query) => {
-                                    sqlast::Expr::Subquery(Box::new(query.clone()))
-                                }
-                            };
-                            let fn_call = sqlast::Expr::Function(sqlast::Function {
-                                name: sqlast::ObjectName(vec![sqlast::Located::new(
-                                    "materialize".into(),
-                                    None,
-                                )]),
-                                args: vec![sqlast::FunctionArg::Unnamed(
-                                    sqlast::FunctionArgExpr::Expr(expr),
-                                )],
-                                over: None,
-                                distinct: false,
-                                special: false,
-                            });
-                            body.body = ast::ExprBody::SQLExpr(fn_call);
+                            *materialize = Some(ast::MaterializeArgs { db: None });
                         }
                     };
                 }

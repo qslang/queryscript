@@ -84,9 +84,7 @@ pub async fn save_views(ctx: &Context, schema: SchemaRef) -> Result<()> {
                         let url = url.unwrap_or(sql_url.clone());
                         let engine = new_engine(SQLEngineType::from_name(url.engine_name())?);
 
-                        // let query = create_table_as(object_name.into(), sql.body.as_query(), false);
-                        // XXX BUG!!!
-                        let query = create_view_as(object_name.into(), sql.body.as_query());
+                        let query = create_table_as(object_name.into(), sql.body.as_query(), false);
                         execute_create_view(
                             &ctx,
                             engine,

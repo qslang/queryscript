@@ -4,4 +4,4 @@ type T {
     a int,
 };
 
-export let t [T] = materialize(load('t.csv'), db);
+export mat(db) t [T] = load('t.csv');

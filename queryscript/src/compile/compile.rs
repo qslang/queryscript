@@ -1345,6 +1345,50 @@ pub fn unify_expr_decl(
     Ok(())
 }
 
+fn compile_materialized_expr(
+    compiler: Compiler,
+    schema: SchemaRef,
+    loc: SourceLocation,
+    expr: CTypedExpr,
+    args: ast::MaterializeArgs,
+) -> Result<CRef<Expr<CRef<MType>>>> {
+    compiler.async_cref({
+        let compiler = compiler.clone();
+        async move {
+            let url = match args.db {
+                Some(expr) => {
+                    let expr = compile_expr(compiler.clone(), schema.clone(), &expr)?;
+                    let url = expr.expr.await?;
+                    let url = url.read()?.clone();
+
+                    match url.unwrap_schema_entry().await? {
+                        Expr::Connection(url) => Some(url.clone()),
+                        _ => {
+                            return Err(CompileError::internal(
+                                loc.clone(),
+                                &format!(
+                                    "Expected a connection as the second argument of materialize()"
+                                ),
+                            ))
+                        }
+                    }
+                }
+                None => None,
+            };
+
+            let type_ = expr.type_;
+            let expr = expr.expr.await?;
+            let expr = Arc::new(expr.read()?.clone());
+
+            Ok(mkcref(Expr::Materialize(MaterializeExpr {
+                key: compiler.next_placeholder("materialized")?,
+                expr: TypedExpr { expr, type_ },
+                url,
+            })))
+        }
+    })
+}
+
 pub fn compile_schema_entries(
     compiler: Compiler,
     schema: Ref<Schema>,
@@ -1523,13 +1567,30 @@ fn compile_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
                 },
             )?;
         }
-        ast::StmtBody::Let { name, type_, body } => {
+        ast::StmtBody::Let {
+            name,
+            type_,
+            body,
+            materialize,
+        } => {
             let lhs_type = if let Some(t) = type_ {
                 resolve_type(compiler.clone(), schema.clone(), &t)?
             } else {
                 MType::new_unknown(format!("typeof {}", name).as_str())
             };
-            let compiled = compile_expr(compiler.clone(), schema.clone(), &body)?;
+            let mut compiled = compile_expr(compiler.clone(), schema.clone(), &body)?;
+
+            compiled.expr = match materialize {
+                None => compiled.expr.clone(),
+                Some(args) => compile_materialized_expr(
+                    compiler.clone(),
+                    schema.clone(),
+                    loc.clone(),
+                    compiled.clone(),
+                    args.clone(),
+                )?,
+            };
+
             lhs_type.unify(&compiled.type_)?;
             unify_expr_decl(
                 compiler.clone(),

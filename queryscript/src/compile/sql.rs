@@ -2392,19 +2392,24 @@ pub fn compile_sqlexpr(
                                     // TODO We should place some metadata on the function, or have a whitelist
                                     // of functions that work this way, but for now, we simply special case the
                                     // load function
-                                    if func_name.as_slice()[0].get() == &Into::<Ident>::into("load")
+                                    if func_name.as_slice()[0].get() != &Into::<Ident>::into("load")
                                     {
-                                        let resolve = schema_infer_load_fn(
-                                            schema.clone(),
-                                            args.clone(),
-                                            inner_type.clone(),
-                                        );
-                                        compiler.add_external_type(
-                                            resolve,
-                                            inner_type.clone(),
-                                            ExternalTypeRank::Load,
-                                        )?;
+                                        return Err(CompileError::unimplemented(
+                                            loc.clone(),
+                                            "external types for non-load functions",
+                                        ));
                                     }
+
+                                    let resolve = schema_infer_load_fn(
+                                        schema.clone(),
+                                        args.clone(),
+                                        inner_type.clone(),
+                                    );
+                                    compiler.add_external_type(
+                                        resolve,
+                                        inner_type.clone(),
+                                        ExternalTypeRank::Load,
+                                    )?;
                                 }
                             }
                             _ => {}
@@ -2414,56 +2419,6 @@ pub fn compile_sqlexpr(
                     let func_expr = func.expr.unwrap_schema_entry().await?;
 
                     let (fn_kind, fn_body) = match &func_expr {
-                        Expr::NativeFn(name)
-                            if name == &Into::<Ident>::into("materialize".to_string()) =>
-                        {
-                            let mut args_iter = args.into_iter();
-                            let expr = args_iter
-                                .next()
-                                .expect("materialize() should have expr arg")
-                                .to_typed_expr();
-
-                            let url = args_iter
-                                .next()
-                                .expect("materialize() should have url arg")
-                                .to_typed_expr();
-
-                            let url = if url
-                                .type_
-                                .clone()
-                                .await?
-                                .read()?
-                                .to_runtime_type()
-                                .context(RuntimeSnafu { loc: loc.clone() })?
-                                == Type::Atom(AtomicType::Null)
-                            {
-                                None
-                            } else {
-                                let url_arg = match url.expr.as_ref() {
-                                    Expr::SchemaEntry(STypedExpr {
-                                        expr,
-                                        ..
-                                     }) => {
-                                        match &*expr.must().unwrap().read()? {
-                                            Expr::Connection(url) => Some(url.clone()),
-                                            _ => None,
-                                        }
-                                     }
-                                    _ => None
-                                };
-
-                                if url_arg.is_none() {
-                                    return Err(CompileError::internal(loc.clone(),&format!( "Expected a connection as the second argument of materialize()")));
-                                }
-                                url_arg
-                            };
-
-                            return Ok(mkcref(Expr::Materialize(MaterializeExpr {
-                                key: compiler.next_placeholder("materialize")?,
-                                expr,
-                                url,
-                            })));
-                        }
                         Expr::NativeFn(_) => (FnKind::Native, None),
                         Expr::Fn(FnExpr { body, .. }) => match body {
                             FnBody::SQLBuiltin => (FnKind::SQLBuiltin, None),

@@ -54,7 +54,6 @@ const BUILTIN_TYPES: &'static [BuiltinType] = &[
 
 const BUILTIN_FUNCTIONS: &'static str = "
 fn load<R>(file varchar, format varchar) -> External<[R]> = native;
-fn materialize<R>(source R, conn Connection<>) -> R = native;
 fn __native_identity<T>(value T) -> T = native;
 
 -- Functions

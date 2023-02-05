@@ -255,6 +255,11 @@ pub enum FnBody {
 }
 
 #[derive(Clone, Debug)]
+pub struct MaterializeArgs {
+    pub db: Option<Expr>,
+}
+
+#[derive(Clone, Debug)]
 pub enum StmtBody {
     Noop,
     Unparsed,
@@ -276,6 +281,7 @@ pub enum StmtBody {
         name: Located<Ident>,
         type_: Option<Type>,
         body: Expr,
+        materialize: Option<MaterializeArgs>,
     },
     Extern {
         name: Located<Ident>,
