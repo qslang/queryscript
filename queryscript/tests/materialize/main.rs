@@ -58,6 +58,7 @@ mod tests {
     enum TestMode {
         Unmaterialized,
         MaterializedNoUrl,
+        MaterializedUrl,
     }
 
     fn build_schema(
@@ -74,6 +75,16 @@ mod tests {
                         TestMode::Unmaterialized => {} // The file should already be free of materializations
                         TestMode::MaterializedNoUrl => {
                             *materialize = Some(ast::MaterializeArgs { db: None });
+                        }
+                        TestMode::MaterializedUrl => {
+                            *materialize = Some(ast::MaterializeArgs {
+                                db: Some(ast::Expr::unlocated(ast::ExprBody::SQLExpr(
+                                    sqlast::Expr::Identifier(sqlast::Located::new(
+                                        "db".into(),
+                                        None,
+                                    )),
+                                ))),
+                            });
                         }
                     };
                 }
@@ -214,7 +225,9 @@ mod tests {
         // Compare the two sets of views
         match mode {
             TestMode::Unmaterialized => assert_eq!(expected_view_names, actual_view_names),
-            TestMode::MaterializedNoUrl => assert_eq!(0, actual_view_names.len()),
+            TestMode::MaterializedNoUrl | TestMode::MaterializedUrl => {
+                assert_eq!(0, actual_view_names.len())
+            }
         }
     }
 

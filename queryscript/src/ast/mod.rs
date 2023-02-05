@@ -240,6 +240,18 @@ pub struct Expr {
     pub is_unsafe: bool,
 }
 
+impl Expr {
+    pub fn unlocated(body: ExprBody) -> Self {
+        let empty_loc = Location { line: 0, column: 0 };
+        Expr {
+            body,
+            start: empty_loc.clone(),
+            end: empty_loc,
+            is_unsafe: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum ImportList {
     None,
