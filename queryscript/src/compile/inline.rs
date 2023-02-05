@@ -235,6 +235,7 @@ impl Visitor<CRef<MType>> for ParamInliner {
                     Some(url) => Some(url.clone()),
                     None => match expr.expr.as_ref() {
                         Expr::SQL(_, url) => url.clone(),
+                        Expr::Materialize(MaterializeExpr { url, .. }) => url.clone(),
                         _ => None,
                     },
                 };

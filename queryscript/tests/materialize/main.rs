@@ -251,6 +251,7 @@ mod tests {
         let rt = queryscript::runtime::build().unwrap();
         for test_dir in test_dirs {
             for mode in TestMode::iter() {
+                eprintln!("Testing mode {:?} in {:?}", mode, test_dir);
                 // NOTE: This could probably be parallelized
                 run_test_dir(&rt, engine_type, &test_dir, mode);
             }

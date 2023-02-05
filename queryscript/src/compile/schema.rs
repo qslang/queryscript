@@ -814,10 +814,12 @@ where
 //  2) Implement writing materialized data into a table [done]
 //  ----- ^^ At this point, we should be able to rework our tests to include materialization [done]
 //  ----- ^^ Maybe also implement some targeted tests for these cases? [done]
-//  3) Implement using a materialized table in a query
+//  3) Implement using a materialized table in a query [done]
 //  ----- ^^ We'll need to inline the parameter but also keep track of the dependency (b/c in
-//  -----    save mode, we need to make sure that we materialize dependencies first)
-//  ----- ^^ At this point, we'll need to implement connection pooling of some sort to proceed
+//  -----    save mode, we need to make sure that we materialize dependencies first) [done]
+//  ----- ^^ First, we need to fix the "seen" map in materialize. It should be some kind of task
+//           wrapper that we can join to
+//  ----- ^^ At this point, we'll need to implement persistent connections of some sort to proceed
 //  4) Implement CREATE TEMPORARY TABLE AS during regular execution
 #[derive(Clone, Debug)]
 pub struct MaterializeExpr<TypeRef>
@@ -1148,7 +1150,6 @@ pub enum Importer {
 }
 
 impl Importer {
-    // XXX We may want to have a different SourceLocation option here.
     pub fn location(&self) -> Result<SourceLocation> {
         Ok(match &self {
             Importer::Schema(schema) => SourceLocation::File(schema.read()?.file.clone()),
