@@ -1,6 +1,8 @@
-use lazy_static::lazy_static;
+use lazy_static::{initialize, lazy_static};
+use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use arrow::{
@@ -79,7 +81,19 @@ pub struct ArrowRelation {
 type RelationMap = HashMap<String, ArrowRelation>;
 
 #[derive(Debug)]
-pub struct DuckDBEngine(ExclusiveConnection);
+pub struct DuckDBEngine {
+    conn: ExclusiveConnection,
+    initialized: bool,
+}
+
+impl DuckDBEngine {
+    fn build(conn: ExclusiveConnection) -> DuckDBEngine {
+        DuckDBEngine {
+            conn,
+            initialized: false,
+        }
+    }
+}
 
 impl DuckDBEngine {
     fn eval_in_place(
@@ -91,16 +105,20 @@ impl DuckDBEngine {
         // scan that accesses the relations referenced in the query parameters. I did some light
         // benchmarking and the cost to create a connection seemed relatively low, but we could
         // potentially pool or concurrently use these connections if necessary.
-        let conn = self.0.get_mut().try_clone().unwrap();
+        let conn = self.conn.get_mut().try_clone().unwrap();
 
-        unsafe {
-            // This follows suggestion [B] outlined in
-            // https://blog.knoldus.com/safe-way-to-access-private-fields-in-rust/
-            // to access the fields inside of Connection.
-            let conn: &duckdb_repr::Connection = std::mem::transmute(&conn);
+        // XXX
+        if false {
+            unsafe {
+                // This follows suggestion [B] outlined in
+                // https://blog.knoldus.com/safe-way-to-access-private-fields-in-rust/
+                // to access the fields inside of Connection.
+                let conn: &duckdb_repr::Connection = std::mem::transmute(&conn);
 
-            let db_wrapper = conn.db.borrow();
-            cppffi::init_arrow_scan(db_wrapper.con as *mut u32);
+                let db_wrapper = conn.db.borrow();
+                cppffi::init_arrow_scan(db_wrapper.con as *mut u32);
+            }
+            self.initialized = true;
         }
 
         let mut scalar_params = Vec::new();
@@ -228,7 +246,7 @@ impl SQLEngine for DuckDBEngine {
 
     async fn create(&mut self) -> Result<()> {
         // DuckDB will create the database if it doesn't exist.
-        let _ = self.0.get_mut();
+        let _ = self.conn.get_mut();
         Ok(())
     }
 
@@ -236,29 +254,44 @@ impl SQLEngine for DuckDBEngine {
         SQLEngineType::DuckDB
     }
 }
-#[derive(Debug)]
-struct ConnectionSingleton(ExclusiveConnection);
-impl ConnectionSingleton {
-    fn new(url: Arc<crate::compile::ConnectionString>) -> Result<ConnectionSingleton> {
-        Ok(Self(ExclusiveConnection::new(Connection::open(
-            url.get_url().path(),
-        )?)))
-    }
 
-    fn try_clone(&mut self) -> Result<ExclusiveConnection> {
-        Ok(ExclusiveConnection::new(self.0.get_mut().try_clone()?))
+fn initialize_duckdb_connection(conn: &mut Connection) {
+    unsafe {
+        // This follows suggestion [B] outlined in
+        // https://blog.knoldus.com/safe-way-to-access-private-fields-in-rust/
+        // to access the fields inside of Connection.
+        let conn: &duckdb_repr::Connection = std::mem::transmute(&conn);
+
+        let db_wrapper = conn.db.borrow();
+        cppffi::init_arrow_scan(db_wrapper.con as *mut u32);
     }
 }
 
 #[derive(Debug)]
-struct ExclusiveConnection(Arc<Connection>);
+struct ConnectionSingleton(ExclusiveConnection);
+impl ConnectionSingleton {
+    fn new(url: Arc<crate::compile::ConnectionString>) -> Result<ConnectionSingleton> {
+        let mut conn = Box::pin(Connection::open(url.get_url().path())?);
+        initialize_duckdb_connection(&mut conn);
+        Ok(Self(ExclusiveConnection::new(conn)))
+    }
+
+    fn try_clone(&mut self) -> Result<ExclusiveConnection> {
+        Ok(ExclusiveConnection::new(Box::pin(
+            self.0.get_mut().try_clone()?,
+        )))
+    }
+}
+
+#[derive(Debug)]
+struct ExclusiveConnection(Pin<Box<Connection>>);
 impl ExclusiveConnection {
-    fn new(conn: Connection) -> ExclusiveConnection {
-        ExclusiveConnection(Arc::new(conn))
+    fn new(conn: Pin<Box<Connection>>) -> ExclusiveConnection {
+        ExclusiveConnection(conn)
     }
 
     fn get_mut(&mut self) -> &mut Connection {
-        Arc::get_mut(&mut self.0).expect("No other references to exclusive connection should exist")
+        self.0.borrow_mut()
     }
 }
 
@@ -275,7 +308,14 @@ lazy_static! {
 impl SQLEnginePool for DuckDBEngine {
     fn new(url: Option<Arc<crate::compile::ConnectionString>>) -> Result<Box<dyn SQLEngine>> {
         let base_conn = match url {
-            None => ExclusiveConnection::new(Connection::open_in_memory()?),
+            None => {
+                eprintln!("1");
+                let mut conn = Box::pin(Connection::open_in_memory()?);
+                eprintln!("2");
+                initialize_duckdb_connection(&mut conn);
+                eprintln!("3");
+                ExclusiveConnection::new(conn)
+            }
             Some(url) => {
                 use std::collections::hash_map::Entry;
                 let mut conns = DUCKDB_CONNS.lock().unwrap();
@@ -289,7 +329,7 @@ impl SQLEnginePool for DuckDBEngine {
                 wrapper.try_clone()?
             }
         };
-        Ok(Box::new(DuckDBEngine(base_conn)))
+        Ok(Box::new(DuckDBEngine::build(base_conn)))
     }
 }
 
@@ -476,4 +516,10 @@ mod duckdb_repr {
         cache: StatementCache,
         path: Option<std::path::PathBuf>,
     }
+}
+
+#[test]
+fn test_duckdb_init() {
+    let mut conn = Connection::open_in_memory().unwrap();
+    initialize_duckdb_connection(&mut conn);
 }
