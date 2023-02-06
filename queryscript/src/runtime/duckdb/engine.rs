@@ -1,6 +1,7 @@
+use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use arrow::{
     datatypes::SchemaRef as ArrowSchemaRef, ffi::FFI_ArrowSchema, ffi_stream::FFI_ArrowArrayStream,
@@ -12,11 +13,12 @@ use sqlparser::ast as sqlast;
 
 use crate::ast::Ident;
 use crate::compile::sql::{create_table_as, select_star_from};
+use crate::runtime::SQLEngineType;
 use crate::runtime::{
+    self,
     error::{rt_unimplemented, Result},
     normalize::Normalizer,
-    sql::{SQLEngine, SQLParam},
-    Context,
+    sql::{SQLEngine, SQLEnginePool, SQLParam},
 };
 use crate::types::Type;
 use crate::types::{arrow::ArrowRecordBatchRelation, Relation, Value};
@@ -77,16 +79,11 @@ pub struct ArrowRelation {
 type RelationMap = HashMap<String, ArrowRelation>;
 
 #[derive(Debug)]
-pub struct DuckDBEngine();
+pub struct DuckDBEngine(ExclusiveConnection);
 
 impl DuckDBEngine {
-    pub fn new() -> DuckDBEngine {
-        DuckDBEngine()
-    }
-
     fn eval_in_place(
-        &self,
-        url: Option<Arc<crate::compile::ConnectionString>>,
+        &mut self,
         query: &sqlast::Statement,
         params: HashMap<Ident, SQLParam>,
     ) -> Result<Arc<dyn Relation>> {
@@ -94,10 +91,7 @@ impl DuckDBEngine {
         // scan that accesses the relations referenced in the query parameters. I did some light
         // benchmarking and the cost to create a connection seemed relatively low, but we could
         // potentially pool or concurrently use these connections if necessary.
-        let conn = match url {
-            Some(url) => Connection::open(url.get_url().path())?,
-            None => Connection::open_in_memory()?,
-        };
+        let conn = self.0.get_mut().try_clone().unwrap();
 
         unsafe {
             // This follows suggestion [B] outlined in
@@ -187,23 +181,20 @@ impl ArrowRecordBatchRelation {
 #[async_trait::async_trait]
 impl SQLEngine for DuckDBEngine {
     async fn eval(
-        &self,
-        ctx: &mut Context,
-        url: Option<Arc<crate::compile::ConnectionString>>,
+        &mut self,
         query: &sqlast::Statement,
         params: HashMap<Ident, SQLParam>,
     ) -> Result<Arc<dyn Relation>> {
+        eprintln!("IN EVAL");
         // We call block_in_place here because DuckDB may perform computationally expensive work,
         // and it's not hooked into the async coroutines that the runtime uses (and therefore cannot
         // yield work). block_in_place() tells Tokio to expect this thread to spend a while working on
         // this stuff and use other threads for other work.
-        ctx.expensive(|| self.eval_in_place(url, query, params))
+        runtime::expensive(|| self.eval_in_place(query, params))
     }
 
     async fn load(
-        &self,
-        ctx: &mut Context,
-        url: Arc<crate::compile::ConnectionString>,
+        &mut self,
         table: &sqlast::ObjectName,
         value: Value,
         type_: Type,
@@ -231,18 +222,74 @@ impl SQLEngine for DuckDBEngine {
         )]
         .into_iter()
         .collect();
-        self.eval(ctx, Some(url), &query, params).await?;
+        self.eval(&query, params).await?;
         Ok(())
     }
 
-    async fn create(
-        &self,
-        _ctx: &mut Context,
-        url: Arc<crate::compile::ConnectionString>,
-    ) -> Result<()> {
+    async fn create(&mut self) -> Result<()> {
         // DuckDB will create the database if it doesn't exist.
-        Connection::open(url.get_url().path())?;
+        let _ = self.0.get_mut();
         Ok(())
+    }
+
+    fn engine_type(&self) -> SQLEngineType {
+        SQLEngineType::DuckDB
+    }
+}
+#[derive(Debug)]
+struct ConnectionSingleton(ExclusiveConnection);
+impl ConnectionSingleton {
+    fn new(url: Arc<crate::compile::ConnectionString>) -> Result<ConnectionSingleton> {
+        Ok(Self(ExclusiveConnection::new(Connection::open(
+            url.get_url().path(),
+        )?)))
+    }
+
+    fn try_clone(&mut self) -> Result<ExclusiveConnection> {
+        Ok(ExclusiveConnection::new(self.0.get_mut().try_clone()?))
+    }
+}
+
+#[derive(Debug)]
+struct ExclusiveConnection(Arc<Connection>);
+impl ExclusiveConnection {
+    fn new(conn: Connection) -> ExclusiveConnection {
+        ExclusiveConnection(Arc::new(conn))
+    }
+
+    fn get_mut(&mut self) -> &mut Connection {
+        Arc::get_mut(&mut self.0).expect("No other references to exclusive connection should exist")
+    }
+}
+
+unsafe impl Send for ExclusiveConnection {}
+unsafe impl Sync for ExclusiveConnection {}
+
+lazy_static! {
+    // DuckDB has a very precarious ownership model, where two concurrent threads "opening" a connection
+    // to the same file can cause concurrency problems. We need to block access within the process (and assume
+    // that users are careful to not have other processes access the file).
+    static ref DUCKDB_CONNS: Mutex<HashMap<Arc<crate::compile::ConnectionString>, ConnectionSingleton>> = Mutex::new(HashMap::new());
+}
+
+impl SQLEnginePool for DuckDBEngine {
+    fn new(url: Option<Arc<crate::compile::ConnectionString>>) -> Result<Box<dyn SQLEngine>> {
+        let base_conn = match url {
+            None => ExclusiveConnection::new(Connection::open_in_memory()?),
+            Some(url) => {
+                use std::collections::hash_map::Entry;
+                let mut conns = DUCKDB_CONNS.lock().unwrap();
+                let wrapper = match conns.entry(url) {
+                    Entry::Occupied(e) => e.into_mut(),
+                    Entry::Vacant(e) => {
+                        let conn_wrapper = ConnectionSingleton::new(e.key().clone())?;
+                        e.insert(conn_wrapper)
+                    }
+                };
+                wrapper.try_clone()?
+            }
+        };
+        Ok(Box::new(DuckDBEngine(base_conn)))
     }
 }
 

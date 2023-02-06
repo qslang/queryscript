@@ -5,6 +5,7 @@ use std::sync::Arc;
 use url::Url;
 
 use crate::ast::{self, Ident, Located, SourceLocation, ToSqlIdent};
+use crate::runtime::SQLEngineType;
 
 use super::compile::ExternalTypeRank;
 use super::external::schema_infer_expr_fn;
@@ -93,8 +94,9 @@ impl ConnectionString {
             self.0.location().clone(),
         )
     }
-    pub fn engine_name(&self) -> &str {
-        self.0.scheme()
+    pub fn engine_type(&self) -> SQLEngineType {
+        SQLEngineType::from_name(self.0.scheme())
+            .expect("Engine type should have been validated in constructor")
     }
 
     pub fn get_url(&self) -> &Url {

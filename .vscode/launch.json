@@ -6,7 +6,7 @@
 			"request": "launch",
 			"name": "Run QueryScript",
 			"program": "${workspaceFolder}/target/debug/qs",
-			"args": ["${input:qsfile}"],
+			"args": ["${input:qsfile}", "--save"],
 			"cwd": "${workspaceFolder}",
 		},
 		{

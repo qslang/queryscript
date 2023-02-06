@@ -1,8 +1,6 @@
 use async_trait::async_trait;
-use snafu::prelude::*;
 use sqlparser::ast as sqlast;
 
-use crate::ast::SourceLocation;
 use crate::compile::error::*;
 use crate::compile::schema::*;
 use crate::compile::traverse::{SQLVisitor, Visit, VisitSQL, Visitor};

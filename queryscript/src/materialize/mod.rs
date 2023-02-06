@@ -1,16 +1,13 @@
 // This file is responsible for the QueryScript equivalent of orchestration: saving "views"
 // back to the original database.
-use futures::future::{BoxFuture, FutureExt};
 use snafu::prelude::*;
 use sqlparser::ast as sqlast;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::{collections::HashMap, sync::RwLock};
 
 use crate::compile::inference::mkcref;
 use crate::compile::schema::{CRef, SQLBody};
 use crate::runtime::context::ContextPool;
-use crate::runtime::SQLEngine;
 use crate::types::Type;
 use crate::{
     ast::SourceLocation,
@@ -20,14 +17,13 @@ use crate::{
         sql::{create_table_as, create_view_as},
         ConnectionString, Result, SchemaRef,
     },
-    runtime::{self, new_engine, Context, SQLEngineType},
+    runtime,
 };
 use tokio::task::JoinHandle;
 
 fn execute_create_view(
     ctx_pool: &ContextPool,
     schema: SchemaRef,
-    engine: Arc<dyn SQLEngine>,
     url: Option<Arc<ConnectionString>>,
     name: &Ident,
     sql: &Arc<SQLSnippet<Arc<RwLock<Type>>, SQLBody>>,
@@ -81,7 +77,13 @@ fn execute_create_view(
             }
         );
 
-        let result = engine.eval(&mut ctx, url, &query, HashMap::new()).await;
+        let result = ctx
+            .sql_engine(&url)
+            .context(RuntimeSnafu {
+                loc: SourceLocation::Unknown,
+            })?
+            .eval(&query, HashMap::new())
+            .await;
 
         completed_ref.unify(&mkcref(()))?;
         result.context(RuntimeSnafu {
@@ -116,22 +118,18 @@ async fn process_view<'a>(
     let expr = expr.read()?.to_runtime_type()?;
     match expr {
         Expr::SQL(ref sql, url) => {
-            let engine = match &url {
-                Some(url) => new_engine(SQLEngineType::from_name(url.engine_name())?),
-                None => {
-                    eprintln!(
-                        "Skipping \"{}\" because it does not belong to a database",
-                        name
-                    );
-                    return Ok(());
-                }
-            };
+            if url.is_none() {
+                eprintln!(
+                    "Skipping \"{}\" because it does not belong to a database",
+                    name
+                );
+                return Ok(());
+            }
 
             let query = create_view_as(object_name, sql.body.as_query());
             execute_create_view(
                 ctx_pool,
                 schema.clone(),
-                engine,
                 url.clone(),
                 &name,
                 &sql,
@@ -143,14 +141,10 @@ async fn process_view<'a>(
         Expr::Materialize(MaterializeExpr { expr, url, .. }) => {
             match (url, expr.expr.as_ref()) {
                 (Some(url), Expr::SQL(sql, Some(sql_url))) if url.as_ref() == sql_url.as_ref() => {
-                    // If the URL is unspecified, use the SQL query's URL
-                    let engine = new_engine(SQLEngineType::from_name(url.engine_name())?);
-
                     let query = create_table_as(object_name.into(), sql.body.as_query(), false);
                     execute_create_view(
                         ctx_pool,
                         schema.clone(),
-                        engine,
                         Some(url.clone()),
                         &name,
                         &sql,
@@ -160,7 +154,6 @@ async fn process_view<'a>(
                     )?;
                 }
                 (Some(url), _) => {
-                    let engine = new_engine(SQLEngineType::from_name(url.engine_name())?);
                     handles.push(tokio::spawn({
                         let mut ctx = ctx_pool.get();
                         let url = url.clone();
@@ -170,15 +163,12 @@ async fn process_view<'a>(
                                 runtime::eval(&mut ctx, &expr).await.context(RuntimeSnafu {
                                     loc: SourceLocation::Unknown,
                                 })?;
+                            let engine = ctx.sql_engine(&Some(url)).context(RuntimeSnafu {
+                                loc: SourceLocation::Unknown,
+                            })?;
+
                             engine
-                                .load(
-                                    &mut ctx,
-                                    url.clone(),
-                                    &object_name,
-                                    data,
-                                    type_,
-                                    false, /*temporary*/
-                                )
+                                .load(&object_name, data, type_, false /*temporary*/)
                                 .await
                                 .context(RuntimeSnafu {
                                     loc: SourceLocation::Unknown,

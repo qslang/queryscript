@@ -138,7 +138,7 @@ impl LoadFileFn {
     ) -> Result<Value> {
         let format_type = Self::derive_format(file_path, &format);
 
-        let records = ctx.expensive(move || {
+        let records = runtime::expensive(move || {
             let fd = std::fs::File::open(file_path)?;
 
             // NOTES:
@@ -220,7 +220,7 @@ impl LoadFileFn {
         let file_path = &*file_path;
         let format_type = Self::derive_format(file_path, &format);
 
-        ctx.expensive(move || {
+        runtime::expensive(move || {
             let fd = std::fs::File::open(file_path)?;
 
             Ok(crate::types::Type::List(Box::new(match format_type {

@@ -8,11 +8,7 @@ use crate::{
     types::{Arc, Value},
 };
 
-use super::{
-    context::Context,
-    error::*,
-    sql::{new_engine, SQLEngineType, SQLParam},
-};
+use super::{context::Context, error::*, sql::SQLParam};
 
 type TypeRef = schema::Ref<types::Type>;
 
@@ -27,6 +23,18 @@ pub fn build() -> Result<Runtime> {
         tokio::runtime::Builder::new_current_thread()
     }
     .build()?)
+}
+
+pub fn expensive<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(f)
+        }
+        _ => f(),
+    }
 }
 
 pub async fn eval_params<'a>(
@@ -134,13 +142,10 @@ pub fn eval<'a>(
                 let sql_params = eval_params(ctx, &names.params).await?;
                 let query = body.as_statement();
 
-                let engine = match &url {
-                    Some(url) => new_engine(SQLEngineType::from_name(url.engine_name())?),
-                    None => ctx.sql_engine.clone(),
-                };
+                let engine = ctx.sql_engine(&url)?;
 
                 // TODO: This ownership model implies some necessary copying (below).
-                let rows = engine.eval(ctx, url.clone(), &query, sql_params).await?;
+                let rows = engine.eval(&query, sql_params).await?;
 
                 // Before returning, we perform some runtime checks that might only be necessary in debug mode:
                 // - For expressions, validate that the result is a single row and column

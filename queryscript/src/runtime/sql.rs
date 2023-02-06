@@ -1,8 +1,9 @@
 use sqlparser::ast as sqlast;
 use std::{collections::HashMap, sync::Arc};
 
-use super::{error::Result, Context};
+use super::error::Result;
 use crate::ast::Ident;
+use crate::compile::ConnectionString;
 use crate::types::{Relation, Type, Value};
 
 use async_trait::async_trait;
@@ -14,28 +15,26 @@ use async_trait::async_trait;
 #[async_trait]
 pub trait SQLEngine: std::fmt::Debug + Send + Sync {
     async fn eval(
-        &self,
-        ctx: &mut Context,
-        url: Option<Arc<crate::compile::ConnectionString>>,
+        &mut self,
         query: &sqlast::Statement,
         params: HashMap<Ident, SQLParam>,
     ) -> Result<Arc<dyn Relation>>;
 
     async fn load(
-        &self,
-        ctx: &mut Context,
-        url: Arc<crate::compile::ConnectionString>,
+        &mut self,
         table: &sqlast::ObjectName,
         value: Value,
         type_: Type,
         temporary: bool,
     ) -> Result<()>;
 
-    async fn create(
-        &self,
-        ctx: &mut Context,
-        url: Arc<crate::compile::ConnectionString>,
-    ) -> Result<()>;
+    async fn create(&mut self) -> Result<()>;
+
+    fn engine_type(&self) -> SQLEngineType;
+}
+
+pub trait SQLEnginePool {
+    fn new(url: Option<Arc<ConnectionString>>) -> Result<Box<dyn SQLEngine>>;
 }
 
 #[derive(Debug, Clone)]
@@ -75,9 +74,18 @@ impl SQLEngineType {
     }
 }
 
-pub fn new_engine(kind: SQLEngineType) -> Arc<dyn SQLEngine> {
+pub fn embedded_engine(kind: SQLEngineType) -> Box<dyn SQLEngine> {
     use SQLEngineType::*;
     match kind {
-        DuckDB => Arc::new(super::duckdb::DuckDBEngine::new()),
+        DuckDB => super::duckdb::DuckDBEngine::new(None),
+    }
+    .expect("Failed to create embedded engine")
+}
+
+// TODO We should turn this into a real pool
+pub fn new_engine(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>> {
+    use SQLEngineType::*;
+    match url.engine_type() {
+        DuckDB => super::duckdb::DuckDBEngine::new(Some(url)),
     }
 }
