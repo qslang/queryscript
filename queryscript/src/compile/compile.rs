@@ -575,7 +575,10 @@ pub fn lookup_schema(
                 // (eg. postgres://localhost/$db_name) and parse/apply them here
                 mkref(ImportedSchema {
                     args: None,
-                    schema: Importer::Connection(mkref(ConnectionSchema::new(url.clone()))),
+                    schema: Importer::Connection(mkref(ConnectionSchema::new(
+                        url.clone(),
+                        SourceLocation::Unknown, // XXX Plumb location into SchemaPath::Connection
+                    ))),
                 })
             }
         };
@@ -1153,7 +1156,10 @@ fn declare_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
                 ast::ImportList::None => {
                     let name = match &path {
                         SchemaPath::Schema(path) => path.last().unwrap().clone(),
-                        SchemaPath::Connection(cs) => cs.db_name().clone(),
+                        SchemaPath::Connection(cs) => {
+                            // XXX Plumb location into SchemaPath::Connection
+                            Located::new(cs.db_name().clone(), SourceLocation::Unknown)
+                        }
                     };
                     schema_decls.push((name, false /* extern_ */, path));
                 }

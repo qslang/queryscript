@@ -152,15 +152,8 @@ mod tests {
 
         // Re-initialize the database
         let mut ctx = ctx_pool.get();
-        rt.block_on(async {
-            // XXX Fix this atrocity
-            ctx_pool
-                .get()
-                .sql_engine
-                .create(&mut ctx, conn_str.clone())
-                .await
-        })
-        .unwrap();
+        rt.block_on(async { ctx.sql_engine(Some(conn_str.clone()))?.create().await })
+            .unwrap();
 
         let compiler = Compiler::new().unwrap();
 
@@ -182,6 +175,7 @@ mod tests {
             .unwrap();
 
         // Now, snapshot the value of each export view in the view_schema
+        // XXX let mut ctx = ctx_pool.get();
         let expected_snapshot = rt
             .block_on(async { snapshot(&mut ctx, &view_schema).await })
             .unwrap();
@@ -206,24 +200,16 @@ mod tests {
 
         // Compare the two snapshots
         assert_eq!(expected_snapshot, actual_snapshot);
+        eprintln!("EXPECTED SNAPSHOT: {:?}", expected_snapshot);
 
         let expected_view_names: HashSet<Ident> = actual_snapshot.keys().cloned().collect();
 
         // Get the set of views from the database
         let actual_view_names = rt
             .block_on({
-                let conn_str = conn_str.clone();
                 async {
-                    // XXX Fix this montrocity
-                    ctx_pool
-                        .get()
-                        .sql_engine
-                        .eval(
-                            &mut ctx,
-                            Some(conn_str),
-                            &show_views_query(engine_type),
-                            HashMap::new(),
-                        )
+                    ctx.sql_engine(Some(conn_str.clone()))?
+                        .eval(&show_views_query(engine_type), HashMap::new())
                         .await
                 }
             })
@@ -269,8 +255,7 @@ mod tests {
         }
     }
 
-    // XXX RE-enable
-    // #[test]
+    #[test]
     fn test_materialize_duckdb() {
         test_materialize(SQLEngineType::DuckDB)
     }

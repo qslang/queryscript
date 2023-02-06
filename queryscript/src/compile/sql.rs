@@ -355,12 +355,15 @@ pub fn compile_reference(
         None => match importer {
             Importer::Schema(..) => return Err(CompileError::no_such_entry(path.clone())),
             Importer::Connection(schema) => {
-                let url = schema.read()?.url.clone();
+                let (url, loc) = {
+                    let s = schema.read()?;
+                    (s.url.clone(), s.location.clone())
+                };
                 Decl {
                     public: true,
                     extern_: false,
                     fn_arg: false,
-                    name: url.db_name(),
+                    name: Located::new(url.db_name(), loc),
                     value: STypedExpr {
                         type_: SType::new_mono(mkcref(MType::Generic(Located::new(
                             ConnectionType::new(&SourceLocation::Unknown, Vec::new())?,

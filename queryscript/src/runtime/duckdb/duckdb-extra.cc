@@ -135,9 +135,7 @@ void init_arrow_scan(uint32_t *connection_ptr)
 
     // This code is mirrored from duckdb_register_table_function
     auto con = (duckdb::Connection *)connection_ptr;
-    fprintf(stderr, "init_arrow_scan %d\n", con->HasActiveTransaction());
     con->context->RunFunctionInTransaction([&]() {
-        fprintf(stderr, "init_arrow_scan 2\n");
         auto &catalog = duckdb::Catalog::GetCatalog(*con->context);
         catalog.CreateTableFunction(*con->context, &tf_info);
     });

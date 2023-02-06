@@ -142,7 +142,7 @@ pub fn eval<'a>(
                 let sql_params = eval_params(ctx, &names.params).await?;
                 let query = body.as_statement();
 
-                let engine = ctx.sql_engine(&url)?;
+                let engine = ctx.sql_engine(url.clone())?;
 
                 // TODO: This ownership model implies some necessary copying (below).
                 let rows = engine.eval(&query, sql_params).await?;

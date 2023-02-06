@@ -78,7 +78,7 @@ fn execute_create_view(
         );
 
         let result = ctx
-            .sql_engine(&url)
+            .sql_engine(url.clone())
             .context(RuntimeSnafu {
                 loc: SourceLocation::Unknown,
             })?
@@ -154,6 +154,13 @@ async fn process_view<'a>(
                     )?;
                 }
                 (Some(url), _) => {
+                    // XXX We may need to wait for dependencies?
+
+                    let completed_ref = signals
+                        .entry(name.clone())
+                        .or_insert_with(|| CRef::new_unknown(&name.to_string()))
+                        .clone();
+
                     handles.push(tokio::spawn({
                         let mut ctx = ctx_pool.get();
                         let url = url.clone();
@@ -163,16 +170,18 @@ async fn process_view<'a>(
                                 runtime::eval(&mut ctx, &expr).await.context(RuntimeSnafu {
                                     loc: SourceLocation::Unknown,
                                 })?;
-                            let engine = ctx.sql_engine(&Some(url)).context(RuntimeSnafu {
+                            let engine = ctx.sql_engine(Some(url)).context(RuntimeSnafu {
                                 loc: SourceLocation::Unknown,
                             })?;
 
-                            engine
+                            let result = engine
                                 .load(&object_name, data, type_, false /*temporary*/)
                                 .await
                                 .context(RuntimeSnafu {
                                     loc: SourceLocation::Unknown,
-                                })?;
+                                });
+                            completed_ref.unify(&mkcref(()))?;
+                            result?;
                             Ok(())
                         }
                     }));

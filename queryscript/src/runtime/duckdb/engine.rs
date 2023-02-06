@@ -105,24 +105,11 @@ impl DuckDBEngine {
         // scan that accesses the relations referenced in the query parameters. I did some light
         // benchmarking and the cost to create a connection seemed relatively low, but we could
         // potentially pool or concurrently use these connections if necessary.
-        let conn = self.conn.get_mut().try_clone().unwrap();
-
-        // XXX
-        if false {
-            unsafe {
-                // This follows suggestion [B] outlined in
-                // https://blog.knoldus.com/safe-way-to-access-private-fields-in-rust/
-                // to access the fields inside of Connection.
-                let conn: &duckdb_repr::Connection = std::mem::transmute(&conn);
-
-                let db_wrapper = conn.db.borrow();
-                cppffi::init_arrow_scan(db_wrapper.con as *mut u32);
-            }
-            self.initialized = true;
-        }
+        let conn = self.conn.get_mut();
 
         let mut scalar_params = Vec::new();
-        let mut relations = RelationMap::new();
+        let relations = &mut conn.relations;
+        relations.clear();
 
         for (key, param) in params.iter() {
             match &param.value {
@@ -144,26 +131,6 @@ impl DuckDBEngine {
             }
         }
 
-        // This block installs a replacement scan (https://duckdb.org/docs/api/c/replacement_scans.html)
-        // that calls back into our code (replacement_scan_callback) when duckdb encounters a table name
-        // it does not know about (i.e. any of our __qsrel_N relations). The replacement for these scans
-        // is a function call (arrow_scan_qs) that scans arrow data. This technique is the same method
-        // that duckdb uses internally to automatically query python variables (backed by Arrow, Pandas, etc.).
-        unsafe {
-            // This follows suggestion [B] outlined in
-            // https://blog.knoldus.com/safe-way-to-access-private-fields-in-rust/
-            // to access the fields inside of Connection.
-            let conn: &duckdb_repr::Connection = std::mem::transmute(&conn);
-
-            let db_wrapper = conn.db.borrow();
-            cffi::duckdb_add_replacement_scan(
-                db_wrapper.db,
-                Some(replacement_scan_callback),
-                &mut relations as *mut _ as *mut c_void,
-                None,
-            );
-        }
-
         scalar_params.sort();
 
         let normalizer = DuckDBNormalizer::new(&scalar_params);
@@ -175,9 +142,21 @@ impl DuckDBEngine {
             .map(|k| &params.get(k).unwrap().value as &dyn duckdb::ToSql)
             .collect();
 
-        let mut stmt = conn.prepare(&query_string)?;
+        eprintln!("ABOUT TO RUN QUERY {}", query_string);
+        {
+            let foo = conn.conn.try_clone()?;
+            let mut stmt = foo.prepare("SHOW TABLES")?;
+            let query_result = stmt.query_arrow([])?;
+            eprintln!(
+                "RESULTS: {:?}",
+                ArrowRecordBatchRelation::from_duckdb(query_result)
+            );
+        }
+
+        let mut stmt = conn.conn.prepare(&query_string)?;
 
         let query_result = stmt.query_arrow(duckdb_params.as_slice())?;
+        eprintln!("RAN QUERY");
 
         // NOTE: We could probably avoid collecting the whole result here and instead make
         // ArrowRecordBatchRelation accept an iterator as input.
@@ -203,7 +182,6 @@ impl SQLEngine for DuckDBEngine {
         query: &sqlast::Statement,
         params: HashMap<Ident, SQLParam>,
     ) -> Result<Arc<dyn Relation>> {
-        eprintln!("IN EVAL");
         // We call block_in_place here because DuckDB may perform computationally expensive work,
         // and it's not hooked into the async coroutines that the runtime uses (and therefore cannot
         // yield work). block_in_place() tells Tokio to expect this thread to spend a while working on
@@ -255,42 +233,74 @@ impl SQLEngine for DuckDBEngine {
     }
 }
 
-fn initialize_duckdb_connection(conn: &mut Connection) {
+fn initialize_duckdb_connection(conn_state: &mut ConnectionState) {
     unsafe {
         // This follows suggestion [B] outlined in
         // https://blog.knoldus.com/safe-way-to-access-private-fields-in-rust/
         // to access the fields inside of Connection.
-        let conn: &duckdb_repr::Connection = std::mem::transmute(&conn);
+        let conn: &duckdb_repr::Connection = std::mem::transmute(&mut conn_state.conn);
 
         let db_wrapper = conn.db.borrow();
         cppffi::init_arrow_scan(db_wrapper.con as *mut u32);
+
+        // This block installs a replacement scan (https://duckdb.org/docs/api/c/replacement_scans.html)
+        // that calls back into our code (replacement_scan_callback) when duckdb encounters a table name
+        // it does not know about (i.e. any of our __qsrel_N relations). The replacement for these scans
+        // is a function call (arrow_scan_qs) that scans arrow data. This technique is the same method
+        // that duckdb uses internally to automatically query python variables (backed by Arrow, Pandas, etc.).
+        cffi::duckdb_add_replacement_scan(
+            db_wrapper.db,
+            Some(replacement_scan_callback),
+            &mut conn_state.relations as *mut _ as *mut c_void,
+            None,
+        );
     }
 }
 
 #[derive(Debug)]
 struct ConnectionSingleton(ExclusiveConnection);
 impl ConnectionSingleton {
-    fn new(url: Arc<crate::compile::ConnectionString>) -> Result<ConnectionSingleton> {
-        let mut conn = Box::pin(Connection::open(url.get_url().path())?);
-        initialize_duckdb_connection(&mut conn);
+    fn new(url: Option<Arc<crate::compile::ConnectionString>>) -> Result<ConnectionSingleton> {
+        let conn = match url {
+            Some(url) => Connection::open(url.get_url().path()),
+            None => Connection::open_in_memory(),
+        }?;
         Ok(Self(ExclusiveConnection::new(conn)))
     }
 
-    fn try_clone(&mut self) -> Result<ExclusiveConnection> {
-        Ok(ExclusiveConnection::new(Box::pin(
-            self.0.get_mut().try_clone()?,
-        )))
+    fn into_inner(self) -> ExclusiveConnection {
+        self.0
     }
+
+    /*
+    fn try_clone(&mut self) -> Result<ExclusiveConnection> {
+        Ok(ExclusiveConnection::new(self.0.get_mut().conn.try_clone()?))
+    }
+    */
 }
 
 #[derive(Debug)]
-struct ExclusiveConnection(Pin<Box<Connection>>);
+struct ConnectionState {
+    conn: Connection,
+    relations: RelationMap,
+}
+#[derive(Debug)]
+struct ExclusiveConnection(Pin<Box<ConnectionState>>);
 impl ExclusiveConnection {
-    fn new(conn: Pin<Box<Connection>>) -> ExclusiveConnection {
+    fn new(conn: Connection) -> ExclusiveConnection {
+        let mut conn = Box::pin(ConnectionState {
+            conn,
+            relations: HashMap::new(),
+        });
+        initialize_duckdb_connection(&mut conn);
         ExclusiveConnection(conn)
     }
 
-    fn get_mut(&mut self) -> &mut Connection {
+    fn get(&mut self) -> &Connection {
+        &self.0.conn
+    }
+
+    fn get_mut(&mut self) -> &mut ConnectionState {
         self.0.borrow_mut()
     }
 }
@@ -309,24 +319,25 @@ impl SQLEnginePool for DuckDBEngine {
     fn new(url: Option<Arc<crate::compile::ConnectionString>>) -> Result<Box<dyn SQLEngine>> {
         let base_conn = match url {
             None => {
-                eprintln!("1");
-                let mut conn = Box::pin(Connection::open_in_memory()?);
-                eprintln!("2");
-                initialize_duckdb_connection(&mut conn);
-                eprintln!("3");
-                ExclusiveConnection::new(conn)
+                // Do not use the pool for in-memory connections, so they can have their own
+                // independent scratch space. I'm not sure this is strictly necessary, and in
+                // fact it could be more performant to share a singleton!
+                ConnectionSingleton::new(None)?.into_inner()
             }
             Some(url) => {
+                ConnectionSingleton::new(Some(url))?.into_inner()
+                /*
                 use std::collections::hash_map::Entry;
                 let mut conns = DUCKDB_CONNS.lock().unwrap();
                 let wrapper = match conns.entry(url) {
                     Entry::Occupied(e) => e.into_mut(),
                     Entry::Vacant(e) => {
-                        let conn_wrapper = ConnectionSingleton::new(e.key().clone())?;
+                        let conn_wrapper = ConnectionSingleton::new(Some(e.key().clone()))?;
                         e.insert(conn_wrapper)
                     }
                 };
                 wrapper.try_clone()?
+                */
             }
         };
         Ok(Box::new(DuckDBEngine::build(base_conn)))
@@ -520,6 +531,46 @@ mod duckdb_repr {
 
 #[test]
 fn test_duckdb_init() {
-    let mut conn = Connection::open_in_memory().unwrap();
-    initialize_duckdb_connection(&mut conn);
+    ExclusiveConnection::new(Connection::open_in_memory().unwrap());
+}
+
+#[test]
+fn test_duckdb_concurrency() {
+    fn run_query(conn: &mut ExclusiveConnection, query: &str) -> Result<Arc<dyn Relation>> {
+        let conn = &mut conn.get_mut().conn;
+        let t = conn.transaction()?;
+        let mut stmt = t.prepare(query)?;
+        let query_result = stmt.query_arrow([])?;
+        let ret = ArrowRecordBatchRelation::from_duckdb(query_result);
+        t.commit()?;
+        Ok(ret)
+    }
+    let _ = std::fs::remove_file("/tmp/test_duckdb_concurrency.duckdb");
+    let url = crate::compile::ConnectionString::maybe_parse(
+        None,
+        "duckdb:///tmp/test_duckdb_concurrency.duckdb",
+        &crate::ast::SourceLocation::Unknown,
+    )
+    .unwrap();
+
+    let mut conn = ConnectionSingleton::new(url.clone()).unwrap().into_inner();
+    run_query(&mut conn, "DROP TABLE IF EXISTS t").unwrap();
+    run_query(&mut conn, "CREATE TABLE t AS SELECT 1 AS a").unwrap();
+
+    let mut conn1 = ConnectionSingleton::new(url.clone()).unwrap().into_inner();
+    let mut conn2 = ConnectionSingleton::new(url.clone()).unwrap().into_inner();
+    run_query(&mut conn2, "CREATE OR REPLACE VIEW x AS SELECT * FROM t").unwrap();
+
+    eprintln!(
+        "CONN 1 TABLES:\n{:?}",
+        run_query(&mut conn1, "SHOW TABLES").unwrap()
+    );
+    eprintln!(
+        "CONN 2 TABLES:\n{:?}",
+        run_query(&mut conn2, "SHOW TABLES").unwrap()
+    );
+    run_query(&mut conn2, "SELECT * FROM x").unwrap();
+
+    run_query(&mut conn1, "SELECT * FROM t").unwrap();
+    run_query(&mut conn1, "SELECT * FROM x").unwrap();
 }
