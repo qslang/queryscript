@@ -997,7 +997,7 @@ pub fn mkref<T>(t: T) -> Ref<T> {
 #[derive(Clone, Debug)]
 pub enum SchemaPath {
     Schema(ast::Path),
-    Connection(Arc<ConnectionString>),
+    Connection(Located<Arc<ConnectionString>>),
 }
 
 // Implement PartialEq, etc. so that we strip the locations away before doing comparisons

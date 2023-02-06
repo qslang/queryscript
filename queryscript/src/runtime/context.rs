@@ -16,8 +16,7 @@ pub struct Context {
     pub disable_typechecks: bool,
 
     /// Connections that persist for the lifetime of the context. This guarantees that any given context
-    /// has exactly one connection to a given database. It's up to each connection to internally ensure
-    /// that it's thread-safe with respect to the connection.
+    /// has exactly one connection to a given database.
     connections: BTreeMap<Arc<ConnectionString>, Box<dyn SQLEngine>>,
 
     /// Materializations that we've saved up and can re-use. Each materialization is itself

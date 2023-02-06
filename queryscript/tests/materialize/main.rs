@@ -175,7 +175,6 @@ mod tests {
             .unwrap();
 
         // Now, snapshot the value of each export view in the view_schema
-        // XXX let mut ctx = ctx_pool.get();
         let expected_snapshot = rt
             .block_on(async { snapshot(&mut ctx, &view_schema).await })
             .unwrap();

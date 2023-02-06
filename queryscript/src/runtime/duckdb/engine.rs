@@ -83,15 +83,11 @@ type RelationMap = HashMap<String, ArrowRelation>;
 #[derive(Debug)]
 pub struct DuckDBEngine {
     conn: ExclusiveConnection,
-    initialized: bool,
 }
 
 impl DuckDBEngine {
     fn build(conn: ExclusiveConnection) -> DuckDBEngine {
-        DuckDBEngine {
-            conn,
-            initialized: false,
-        }
+        DuckDBEngine { conn }
     }
 }
 
@@ -105,10 +101,10 @@ impl DuckDBEngine {
         // scan that accesses the relations referenced in the query parameters. I did some light
         // benchmarking and the cost to create a connection seemed relatively low, but we could
         // potentially pool or concurrently use these connections if necessary.
-        let conn = self.conn.get_mut();
+        let conn_state = self.conn.get_state();
 
         let mut scalar_params = Vec::new();
-        let relations = &mut conn.relations;
+        let relations = &mut conn_state.relations;
         relations.clear();
 
         for (key, param) in params.iter() {
@@ -142,7 +138,7 @@ impl DuckDBEngine {
             .map(|k| &params.get(k).unwrap().value as &dyn duckdb::ToSql)
             .collect();
 
-        let mut stmt = conn.conn.prepare(&query_string)?;
+        let mut stmt = conn_state.conn.prepare(&query_string)?;
 
         let query_result = stmt.query_arrow(duckdb_params.as_slice())?;
 
@@ -212,7 +208,7 @@ impl SQLEngine for DuckDBEngine {
 
     async fn create(&mut self) -> Result<()> {
         // DuckDB will create the database if it doesn't exist.
-        let _ = self.conn.get_mut();
+        let _ = self.conn.get_state();
         Ok(())
     }
 
@@ -244,7 +240,42 @@ fn initialize_duckdb_connection(conn_state: &mut ConnectionState) {
         );
     }
 }
+#[derive(Debug)]
+struct ConnectionState {
+    conn: Connection,
+    relations: RelationMap,
+}
+/// This is a Pinned connection which is guaranteed (via the typesystem) to only be accessed
+/// by one connection. Therefore, we allow it to be both Send and Sync. Note that the relations
+/// state is pinned alongside the connection. That's because we initialize the replacement scan
+/// once, while creating the connection, and need its memory to never move while we clear/replace
+/// the relations to execute queries with parameters..
+#[derive(Debug)]
+struct ExclusiveConnection(Pin<Box<ConnectionState>>);
+impl ExclusiveConnection {
+    fn new(conn: Connection) -> ExclusiveConnection {
+        let mut conn = Box::pin(ConnectionState {
+            conn,
+            relations: HashMap::new(),
+        });
+        initialize_duckdb_connection(&mut conn);
+        ExclusiveConnection(conn)
+    }
 
+    fn get_state(&mut self) -> &mut ConnectionState {
+        self.0.borrow_mut()
+    }
+}
+
+unsafe impl Send for ExclusiveConnection {}
+unsafe impl Sync for ExclusiveConnection {}
+
+/// DuckDB has a very precarious ownership model, where two concurrent threads "opening" a connection
+/// to the same file can cause concurrency problems (namely, they may not see DDL updates). Instead, you
+/// need to "clone" from an original connection. Therefore, we funnel all access within the process (and assume
+/// that users are careful to not have other threads access the file directly). Luckily, other processes will
+/// be blocked via filesystem locks. This singleton class allows us to implement that ownership model, by
+/// keeping a single connection open and cloning it as needed for subquent connections.
 #[derive(Debug)]
 struct ConnectionSingleton(ExclusiveConnection);
 impl ConnectionSingleton {
@@ -261,46 +292,15 @@ impl ConnectionSingleton {
     }
 
     fn try_clone(&mut self) -> Result<ExclusiveConnection> {
-        Ok(ExclusiveConnection::new(self.0.get_mut().conn.try_clone()?))
+        Ok(ExclusiveConnection::new(
+            self.0.get_state().conn.try_clone()?,
+        ))
     }
 }
-
-#[derive(Debug)]
-struct ConnectionState {
-    conn: Connection,
-    relations: RelationMap,
-}
-#[derive(Debug)]
-struct ExclusiveConnection(Pin<Box<ConnectionState>>);
-impl ExclusiveConnection {
-    fn new(conn: Connection) -> ExclusiveConnection {
-        let mut conn = Box::pin(ConnectionState {
-            conn,
-            relations: HashMap::new(),
-        });
-        initialize_duckdb_connection(&mut conn);
-        ExclusiveConnection(conn)
-    }
-
-    fn get(&mut self) -> &Connection {
-        &self.0.conn
-    }
-
-    fn get_mut(&mut self) -> &mut ConnectionState {
-        self.0.borrow_mut()
-    }
-}
-
-unsafe impl Send for ExclusiveConnection {}
-unsafe impl Sync for ExclusiveConnection {}
 
 lazy_static! {
-    // DuckDB has a very precarious ownership model, where two concurrent threads "opening" a connection
-    // to the same file can cause concurrency problems (namely, they may not see DDL updates). Instead, you
-    // need to "clone" from an original connection. Therefore, we funnel all access within the process (and assume
-    // that users are careful to not have other threads access the file directly). Luckily, other processes will
-    // be blocked via filesystem locks.
-    static ref DUCKDB_CONNS: Mutex<HashMap<Arc<crate::compile::ConnectionString>, ConnectionSingleton>> = Mutex::new(HashMap::new());
+    static ref DUCKDB_CONNS: Mutex<HashMap<Arc<crate::compile::ConnectionString>, ConnectionSingleton>> =
+        Mutex::new(HashMap::new());
 }
 
 impl SQLEnginePool for DuckDBEngine {

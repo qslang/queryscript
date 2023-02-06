@@ -23,12 +23,11 @@ use tokio::task::JoinHandle;
 
 fn execute_create_view(
     ctx_pool: &ContextPool,
-    schema: SchemaRef,
     url: Option<Arc<ConnectionString>>,
     name: &Ident,
     sql: &Arc<SQLSnippet<Arc<RwLock<Type>>, SQLBody>>,
     query: sqlparser::ast::Statement,
-    signals: &mut HashMap<Ident, CRef<()>>,
+    signals: &mut Signals,
     handles: &mut Vec<JoinHandle<Result<()>>>,
 ) -> crate::runtime::Result<()> {
     let mut dependencies = Vec::new();
@@ -41,12 +40,7 @@ fn execute_create_view(
                 ..
             }) => {
                 dependency_names.push(format!("{}", decl_name));
-                dependencies.push(
-                    signals
-                        .entry(decl_name.clone())
-                        .or_insert_with(|| CRef::new_unknown(&decl_name.to_string()))
-                        .clone(),
-                );
+                dependencies.push(signals.get(decl_name));
             }
             _ => {
                 eprintln!("Skipping \"{}\" because it has parameters that must be evaluated outside the database", name);
@@ -54,11 +48,7 @@ fn execute_create_view(
         }
     }
 
-    let completed_ref = signals
-        .entry(name.clone())
-        .or_insert_with(|| CRef::new_unknown(&name.to_string()))
-        .clone();
-
+    let completed_ref = signals.get(name);
     let mut ctx = ctx_pool.get();
     let url = url.clone();
     let name = name.clone();
@@ -98,7 +88,7 @@ async fn process_view<'a>(
     ctx_pool: &'a ContextPool,
     schema: SchemaRef,
     name: &'a Ident,
-    signals: &'a mut HashMap<Ident, CRef<()>>,
+    signals: &'a mut Signals,
     handles: &'a mut Vec<tokio::task::JoinHandle<Result<()>>>,
 ) -> crate::runtime::Result<()> {
     let object_name = sqlast::ObjectName(vec![sqlast::Located::new(name.into(), None)]);
@@ -127,16 +117,7 @@ async fn process_view<'a>(
             }
 
             let query = create_view_as(object_name, sql.body.as_query());
-            execute_create_view(
-                ctx_pool,
-                schema.clone(),
-                url.clone(),
-                &name,
-                &sql,
-                query,
-                signals,
-                handles,
-            )?;
+            execute_create_view(ctx_pool, url.clone(), &name, &sql, query, signals, handles)?;
         }
         Expr::Materialize(MaterializeExpr { expr, url, .. }) => {
             match (url, expr.expr.as_ref()) {
@@ -144,7 +125,6 @@ async fn process_view<'a>(
                     let query = create_table_as(object_name.into(), sql.body.as_query(), false);
                     execute_create_view(
                         ctx_pool,
-                        schema.clone(),
                         Some(url.clone()),
                         &name,
                         &sql,
@@ -154,12 +134,7 @@ async fn process_view<'a>(
                     )?;
                 }
                 (Some(url), _) => {
-                    // XXX We may need to wait for dependencies?
-
-                    let completed_ref = signals
-                        .entry(name.clone())
-                        .or_insert_with(|| CRef::new_unknown(&name.to_string()))
-                        .clone();
+                    let completed_ref = signals.get(name);
 
                     handles.push(tokio::spawn({
                         let mut ctx = ctx_pool.get();
@@ -207,7 +182,7 @@ async fn process_view<'a>(
 
 pub async fn save_views(ctx_pool: &ContextPool, schema: SchemaRef) -> Result<()> {
     let mut handles = Vec::new();
-    let mut signals = HashMap::new();
+    let mut signals = Signals::new();
     eprintln!("Processing views...");
     for (name, decl) in schema.read()?.expr_decls.iter() {
         process_view(ctx_pool, schema.clone(), name, &mut signals, &mut handles)
@@ -223,4 +198,18 @@ pub async fn save_views(ctx_pool: &ContextPool, schema: SchemaRef) -> Result<()>
     eprintln!("--\nSuccess!");
 
     Ok(())
+}
+
+struct Signals(HashMap<Ident, CRef<()>>);
+impl Signals {
+    fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+    fn get(&mut self, name: &Ident) -> CRef<()> {
+        self.0
+            .entry(name.clone())
+            .or_insert_with(|| CRef::new_unknown(&name.to_string()))
+            .clone()
+    }
 }
