@@ -132,6 +132,7 @@ void init_arrow_scan(uint32_t *connection_ptr)
     arrow.filter_prune = true;
 
     auto tf_info = CreateTableFunctionInfo(move(arrow));
+    tf_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
 
     // This code is mirrored from duckdb_register_table_function
     auto con = (duckdb::Connection *)connection_ptr;

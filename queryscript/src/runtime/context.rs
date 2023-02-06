@@ -49,7 +49,6 @@ impl Context {
         &'a mut self,
         url: Option<Arc<crate::compile::ConnectionString>>,
     ) -> Result<&'a mut (dyn SQLEngine + 'static)> {
-        eprintln!("{:?} Connections {:?}", self.connections.keys(), url);
         let url = match url {
             Some(url) => url,
             None => return Ok(self.embedded_sql.borrow_mut()),
@@ -57,10 +56,7 @@ impl Context {
 
         use std::collections::btree_map::Entry;
         Ok(match self.connections.entry(url.clone()) {
-            Entry::Occupied(entry) => {
-                eprintln!("HIT!");
-                entry.into_mut().borrow_mut()
-            }
+            Entry::Occupied(entry) => entry.into_mut().borrow_mut(),
             Entry::Vacant(entry) => {
                 // TODO We should turn this into a real pool
                 let engine = new_engine(url)?;

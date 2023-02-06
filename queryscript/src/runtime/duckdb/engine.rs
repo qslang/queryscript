@@ -142,21 +142,9 @@ impl DuckDBEngine {
             .map(|k| &params.get(k).unwrap().value as &dyn duckdb::ToSql)
             .collect();
 
-        eprintln!("ABOUT TO RUN QUERY {}", query_string);
-        {
-            let foo = conn.conn.try_clone()?;
-            let mut stmt = foo.prepare("SHOW TABLES")?;
-            let query_result = stmt.query_arrow([])?;
-            eprintln!(
-                "RESULTS: {:?}",
-                ArrowRecordBatchRelation::from_duckdb(query_result)
-            );
-        }
-
         let mut stmt = conn.conn.prepare(&query_string)?;
 
         let query_result = stmt.query_arrow(duckdb_params.as_slice())?;
-        eprintln!("RAN QUERY");
 
         // NOTE: We could probably avoid collecting the whole result here and instead make
         // ArrowRecordBatchRelation accept an iterator as input.
@@ -272,11 +260,9 @@ impl ConnectionSingleton {
         self.0
     }
 
-    /*
     fn try_clone(&mut self) -> Result<ExclusiveConnection> {
         Ok(ExclusiveConnection::new(self.0.get_mut().conn.try_clone()?))
     }
-    */
 }
 
 #[derive(Debug)]
@@ -310,8 +296,10 @@ unsafe impl Sync for ExclusiveConnection {}
 
 lazy_static! {
     // DuckDB has a very precarious ownership model, where two concurrent threads "opening" a connection
-    // to the same file can cause concurrency problems. We need to block access within the process (and assume
-    // that users are careful to not have other processes access the file).
+    // to the same file can cause concurrency problems (namely, they may not see DDL updates). Instead, you
+    // need to "clone" from an original connection. Therefore, we funnel all access within the process (and assume
+    // that users are careful to not have other threads access the file directly). Luckily, other processes will
+    // be blocked via filesystem locks.
     static ref DUCKDB_CONNS: Mutex<HashMap<Arc<crate::compile::ConnectionString>, ConnectionSingleton>> = Mutex::new(HashMap::new());
 }
 
@@ -325,8 +313,6 @@ impl SQLEnginePool for DuckDBEngine {
                 ConnectionSingleton::new(None)?.into_inner()
             }
             Some(url) => {
-                ConnectionSingleton::new(Some(url))?.into_inner()
-                /*
                 use std::collections::hash_map::Entry;
                 let mut conns = DUCKDB_CONNS.lock().unwrap();
                 let wrapper = match conns.entry(url) {
@@ -337,7 +323,6 @@ impl SQLEnginePool for DuckDBEngine {
                     }
                 };
                 wrapper.try_clone()?
-                */
             }
         };
         Ok(Box::new(DuckDBEngine::build(base_conn)))
@@ -536,13 +521,10 @@ fn test_duckdb_init() {
 
 #[test]
 fn test_duckdb_concurrency() {
-    fn run_query(conn: &mut ExclusiveConnection, query: &str) -> Result<Arc<dyn Relation>> {
-        let conn = &mut conn.get_mut().conn;
-        let t = conn.transaction()?;
-        let mut stmt = t.prepare(query)?;
+    fn run_query(conn: &mut Connection, query: &str) -> Result<Arc<dyn Relation>> {
+        let mut stmt = conn.prepare(query)?;
         let query_result = stmt.query_arrow([])?;
         let ret = ArrowRecordBatchRelation::from_duckdb(query_result);
-        t.commit()?;
         Ok(ret)
     }
     let _ = std::fs::remove_file("/tmp/test_duckdb_concurrency.duckdb");
@@ -551,24 +533,20 @@ fn test_duckdb_concurrency() {
         "duckdb:///tmp/test_duckdb_concurrency.duckdb",
         &crate::ast::SourceLocation::Unknown,
     )
+    .unwrap()
     .unwrap();
 
-    let mut conn = ConnectionSingleton::new(url.clone()).unwrap().into_inner();
+    let mut conn = Connection::open(url.get_url().path()).unwrap();
     run_query(&mut conn, "DROP TABLE IF EXISTS t").unwrap();
     run_query(&mut conn, "CREATE TABLE t AS SELECT 1 AS a").unwrap();
 
-    let mut conn1 = ConnectionSingleton::new(url.clone()).unwrap().into_inner();
-    let mut conn2 = ConnectionSingleton::new(url.clone()).unwrap().into_inner();
+    let mut conn1 = Connection::open(url.get_url().path()).unwrap();
+
+    // NOTE: A prior version of this test opened the connection separately here, which would cause
+    // conn1 to "not see" x (https://github.com/wangfenjin/duckdb-rs/issues/117).
+    let mut conn2 = conn1.try_clone().unwrap();
     run_query(&mut conn2, "CREATE OR REPLACE VIEW x AS SELECT * FROM t").unwrap();
 
-    eprintln!(
-        "CONN 1 TABLES:\n{:?}",
-        run_query(&mut conn1, "SHOW TABLES").unwrap()
-    );
-    eprintln!(
-        "CONN 2 TABLES:\n{:?}",
-        run_query(&mut conn2, "SHOW TABLES").unwrap()
-    );
     run_query(&mut conn2, "SELECT * FROM x").unwrap();
 
     run_query(&mut conn1, "SELECT * FROM t").unwrap();
