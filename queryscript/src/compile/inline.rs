@@ -158,7 +158,7 @@ impl Visitor<CRef<MType>> for ParamInliner {
                             key,
                             url,
                             decl_name,
-                            inlined,
+                            inlined: _,
                         }) => {
                             // If we can inline tables, then we can inline materialized expressions (we simply expect them
                             // to have been saved to the database at some point).

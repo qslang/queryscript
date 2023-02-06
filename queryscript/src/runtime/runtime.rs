@@ -2,6 +2,7 @@ use futures::future::{BoxFuture, FutureExt};
 use std::collections::HashMap;
 
 use crate::compile::schema;
+use crate::compile::sql::{create_table_as, with_object_name};
 use crate::{
     ast::Ident,
     types,
@@ -98,7 +99,13 @@ pub fn eval<'a>(
                     _ => return rt_unimplemented!("native function: {}", name),
                 }
             }
-            schema::Expr::Materialize(schema::MaterializeExpr { key, expr, url, .. }) => {
+            schema::Expr::Materialize(schema::MaterializeExpr {
+                key,
+                expr,
+                url,
+                decl_name,
+                ..
+            }) => {
                 let mut materializations = ctx.materializations.lock().await;
                 match materializations.entry(key.clone()) {
                     std::collections::btree_map::Entry::Occupied(e) => {
@@ -111,7 +118,23 @@ pub fn eval<'a>(
                         let mut locked = entry.lock().await;
                         drop(materializations);
 
-                        let result = eval(ctx, expr).await?;
+                        let result = match (url, expr.expr.as_ref()) {
+                            (None, schema::Expr::SQL(sql, sql_url)) => {
+                                let query = create_table_as(
+                                    with_object_name(decl_name),
+                                    sql.body.as_query(),
+                                    true,
+                                );
+                                let sql_params = eval_params(ctx, &sql.names.params).await?;
+                                Value::Relation(
+                                    ctx.sql_engine(sql_url.clone())?
+                                        .eval(&query, sql_params)
+                                        .await?,
+                                )
+                            }
+                            _ => eval(ctx, expr).await?,
+                        };
+
                         *locked = result;
                         Ok(locked.clone())
                     }

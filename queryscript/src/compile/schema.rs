@@ -809,18 +809,6 @@ where
     pub ctx_folder: Option<String>,
 }
 
-// XXX TODO:
-//  1) Implement CREATE TABLE AS in save() [done]
-//  2) Implement writing materialized data into a table [done]
-//  ----- ^^ At this point, we should be able to rework our tests to include materialization [done]
-//  ----- ^^ Maybe also implement some targeted tests for these cases? [done]
-//  3) Implement using a materialized table in a query [done]
-//  ----- ^^ We'll need to inline the parameter but also keep track of the dependency (b/c in
-//  -----    save mode, we need to make sure that we materialize dependencies first) [done]
-//  ----- ^^ First, we need to fix the "seen" map in materialize. It should be some kind of task
-//           wrapper that we can join to
-//  ----- ^^ At this point, we'll need to implement persistent connections of some sort to proceed
-//  4) Implement CREATE TEMPORARY TABLE AS during regular execution
 #[derive(Clone, Debug)]
 pub struct MaterializeExpr<TypeRef>
 where

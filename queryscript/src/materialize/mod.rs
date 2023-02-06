@@ -32,15 +32,24 @@ fn execute_create_view(
 ) -> crate::runtime::Result<()> {
     let mut dependencies = Vec::new();
     let mut dependency_names = Vec::new();
+    let mut params = crate::compile::schema::Params::new();
     for (name, param) in &sql.names.params {
         match param.expr.as_ref() {
             Expr::Materialize(MaterializeExpr {
-                inlined: true,
-                decl_name,
-                ..
+                inlined, decl_name, ..
             }) => {
-                dependency_names.push(format!("{}", decl_name));
-                dependencies.push(signals.get(decl_name));
+                if *inlined {
+                    dependency_names.push(format!("{}", decl_name));
+                    dependencies.push(signals.get(decl_name));
+                } else {
+                    // XXX This logic isn't quite right, because this parameter gets "inlined" but
+                    // not exported, and therefore doesn't hit this case. I think we need to clear up
+                    // the semantics.
+                    //
+                    // Also, I think we're just running the queries that are dependencies (i.e. materialize)
+                    // and probably discarding their results. Should fix that.
+                    params.insert(name.clone(), param.clone());
+                }
             }
             _ => {
                 eprintln!("Skipping \"{}\" because it has parameters that must be evaluated outside the database", name);
