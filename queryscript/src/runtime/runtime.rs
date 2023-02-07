@@ -102,7 +102,7 @@ pub fn eval<'a>(
             schema::Expr::Materialize(schema::MaterializeExpr {
                 key,
                 expr,
-                url,
+                inlined,
                 decl_name,
                 ..
             }) => {
@@ -118,8 +118,8 @@ pub fn eval<'a>(
                         let mut locked = entry.lock().await;
                         drop(materializations);
 
-                        let result = match (url, expr.expr.as_ref()) {
-                            (None, schema::Expr::SQL(sql, sql_url)) => {
+                        let result = match (inlined, expr.expr.as_ref()) {
+                            (true, schema::Expr::SQL(sql, sql_url)) => {
                                 let query = create_table_as(
                                     with_object_name(decl_name),
                                     sql.body.as_query(),
