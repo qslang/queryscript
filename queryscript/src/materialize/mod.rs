@@ -73,11 +73,7 @@ fn execute_create_view(
                     dependency_names.push(format!("{}", decl_name));
                     dependencies.push(signal.clone());
                 } else {
-                    // XXX This logic isn't quite right, because this parameter gets "inlined" but
-                    // not exported, and therefore doesn't hit this case. I think we need to clear up
-                    // the semantics.
-                    //
-                    // Also, I think we're just running the queries that are dependencies (i.e. materialize)
+                    // XXX Also, I think we're just running the queries that are dependencies (i.e. materialize)
                     // and probably discarding their results. Should fix that.
                     params.insert(name.clone(), param.clone());
                 }
@@ -112,9 +108,6 @@ fn execute_create_view(
         }
 
         eprintln!("Creating view \"{}\"", name);
-        if params.len() > 0 {
-            eprintln!("{} Params: {:?}", name, params);
-        }
         let sql_params = runtime::eval_params(&mut ctx, &params).await?;
 
         let result = ctx.sql_engine(url.clone())?.eval(&query, sql_params).await;
@@ -204,7 +197,7 @@ pub async fn save_views(ctx_pool: &ContextPool, schema: SchemaRef) -> Result<()>
     let locked_schema = schema.read()?;
     let signals = gather_materialize_candidates(&locked_schema.expr_decls)?;
 
-    eprintln!("Processing views...");
+    eprintln!("Processing views...\n--");
     let mut handles = Vec::new();
     let mut locations = Vec::new();
     for (name, decl) in locked_schema.expr_decls.iter() {
@@ -218,7 +211,7 @@ pub async fn save_views(ctx_pool: &ContextPool, schema: SchemaRef) -> Result<()>
             })?;
         locations.push(decl.location().clone());
     }
-    eprintln!("Waiting for all views to complete...\n--");
+    eprintln!("--\nWaiting for all views to complete...\n--");
     for (i, handle) in handles.into_iter().enumerate() {
         handle
             .await

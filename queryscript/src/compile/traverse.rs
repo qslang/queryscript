@@ -91,6 +91,60 @@ impl<V: SQLVisitor> VisitSQL<V> for Statement {
                 with_options: with_options.visit_sql(visitor),
                 cluster_by: cluster_by.visit_sql(visitor),
             },
+
+            // XXX This is broken (it only traverses some of the tree), but that's good
+            // enough to make our use of CREATE TABLE AS work. We should switch to the new
+            // VisitorMut trait in sqlparser.
+            Statement::CreateTable {
+                or_replace,
+                temporary,
+                external,
+                global,
+                if_not_exists,
+                name,
+                columns,
+                constraints,
+                hive_distribution,
+                hive_formats,
+                table_properties,
+                with_options,
+                file_format,
+                location,
+                query,
+                without_rowid,
+                like,
+                clone,
+                engine,
+                default_charset,
+                collation,
+                on_commit,
+                on_cluster,
+            } => Statement::CreateTable {
+                or_replace: *or_replace,
+                temporary: *temporary,
+                external: *external,
+                global: *global,
+                if_not_exists: *if_not_exists,
+                name: name.visit_sql(visitor),
+                columns: columns.visit_sql(visitor),
+                constraints: constraints.clone(),
+                hive_distribution: hive_distribution.clone(),
+                hive_formats: hive_formats.clone(),
+                table_properties: table_properties.clone(),
+                with_options: with_options.clone(),
+                file_format: file_format.clone(),
+                location: location.clone(),
+                query: query.as_ref().map(|q| q.visit_sql(visitor)),
+                without_rowid: *without_rowid,
+                like: like.visit_sql(visitor),
+                clone: clone.visit_sql(visitor),
+                engine: engine.clone(),
+                default_charset: default_charset.clone(),
+                collation: collation.clone(),
+                on_commit: on_commit.clone(),
+                on_cluster: on_cluster.clone(),
+            },
+
             _ => self.clone(),
         }
     }
@@ -791,6 +845,26 @@ impl<V: SQLVisitor> VisitSQL<V> for SqlOption {
         SqlOption {
             name: self.name.visit_sql(visitor),
             value: self.value.clone(),
+        }
+    }
+}
+
+impl<V: SQLVisitor> VisitSQL<V> for ColumnDef {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        ColumnDef {
+            name: self.name.visit_sql(visitor),
+            data_type: self.data_type.clone(),
+            collation: self.collation.visit_sql(visitor),
+            options: self.options.visit_sql(visitor),
+        }
+    }
+}
+
+impl<V: SQLVisitor> VisitSQL<V> for ColumnOptionDef {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        ColumnOptionDef {
+            name: self.name.visit_sql(visitor),
+            option: self.option.clone(),
         }
     }
 }

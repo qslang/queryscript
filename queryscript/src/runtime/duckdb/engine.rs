@@ -91,6 +91,36 @@ pub struct ArrowRelation {
 
 type RelationMap = HashMap<String, ArrowRelation>;
 
+struct LocalRelations(HashSet<String>, Arc<Mutex<RelationMap>>);
+
+impl LocalRelations {
+    pub fn new(relations: Arc<Mutex<RelationMap>>) -> LocalRelations {
+        LocalRelations(HashSet::new(), relations)
+    }
+}
+
+impl std::ops::Deref for LocalRelations {
+    type Target = HashSet<String>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for LocalRelations {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl std::ops::Drop for LocalRelations {
+    fn drop(&mut self) {
+        let mut relations = self.1.lock().unwrap();
+        for relation in self.0.iter() {
+            relations.remove(relation);
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct DuckDBEngine {
     conn: ExclusiveConnection,
@@ -114,10 +144,10 @@ impl DuckDBEngine {
 
         let mut scalar_params = Vec::new();
 
-        let mut relation_params = HashSet::new(); // XXX DELETE THESE RELATIONS
+        let mut relation_params = LocalRelations::new(conn_state.relations.clone());
         for (key, param) in params.iter() {
             match &param.value {
-                Value::Relation(r) => {
+                Value::Relation(_) => {
                     relation_params.insert(key.to_string());
                 }
                 Value::Fn(_) => {
