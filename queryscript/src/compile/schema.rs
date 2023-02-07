@@ -33,10 +33,41 @@ pub struct MField {
     pub nullable: bool,
 }
 
+impl Constrainable for MField {
+    fn unify(&self, other: &MField) -> Result<()> {
+        if self.name != other.name || self.nullable != other.nullable {
+            // TODO: Make the name located so we can use it here.
+            //
+            return Err(CompileError::wrong_type(
+                &MType::Record(Located::new(vec![self.clone()], SourceLocation::Unknown)),
+                &MType::Record(Located::new(vec![other.clone()], SourceLocation::Unknown)),
+            ));
+        }
+        self.type_.unify(&other.type_)?;
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MFnType {
     pub args: Vec<MField>,
     pub ret: CRef<MType>,
+}
+
+impl Constrainable for MFnType {
+    fn unify(&self, other: &MFnType) -> Result<()> {
+        let MFnType {
+            args: largs,
+            ret: lret,
+        } = self;
+        let MFnType {
+            args: rargs,
+            ret: rret,
+        } = other;
+        largs.unify(&rargs)?;
+        lret.unify(&rret)?;
+        Ok(())
+    }
 }
 
 impl MField {
@@ -353,26 +384,10 @@ impl Constrainable for MType {
                 MType::List(rinner) => linner.unify(rinner)?,
                 _ => return Err(CompileError::wrong_type(self, other)),
             },
-            MType::Fn(lmfn) => {
-                let MFnType {
-                    args: largs,
-                    ret: lret,
-                } = lmfn.get();
-                let lloc = lmfn.location();
-                match other {
-                    MType::Fn(rmfn) => {
-                        let MFnType {
-                            args: rargs,
-                            ret: rret,
-                        } = rmfn.get();
-                        let rloc = rmfn.location();
-                        Located::new(largs.clone(), lloc.clone())
-                            .unify(&Located::new(rargs.clone(), rloc.clone()))?;
-                        lret.unify(rret)?;
-                    }
-                    _ => return Err(CompileError::wrong_type(self, other)),
-                }
-            }
+            MType::Fn(lmfn) => match other {
+                MType::Fn(rmfn) => lmfn.unify(rmfn)?,
+                _ => return Err(CompileError::wrong_type(self, other)),
+            },
             MType::Name(name) => {
                 return Err(CompileError::internal(
                     name.location().clone(),

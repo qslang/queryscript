@@ -61,7 +61,31 @@ impl Constrainable for () {
         Ok(())
     }
 }
-impl<T> Constrainable for Vec<T> where T: Constrainable {}
+impl<T> Constrainable for Vec<T>
+where
+    T: Constrainable,
+{
+    fn unify(&self, other: &Vec<T>) -> Result<()> {
+        if self.len() != other.len() {
+            return Err(CompileError::internal(
+                ErrorLocation::Unknown,
+                format!(
+                    "cannot unify Vec<{}>:\n{:#?}\n{:#?}",
+                    std::any::type_name::<T>(),
+                    self,
+                    other
+                )
+                .as_str(),
+            ));
+        }
+
+        for (a, b) in self.iter().zip(other.iter()) {
+            a.unify(b)?;
+        }
+
+        Ok(())
+    }
+}
 impl<K, V> Constrainable for BTreeMap<K, V>
 where
     K: Constrainable,
