@@ -1,8 +1,9 @@
-use lazy_static::{initialize, lazy_static};
+use lazy_static::lazy_static;
 use std::borrow::BorrowMut;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use arrow::{
@@ -50,15 +51,25 @@ pub struct DuckDBNormalizer {
     params: HashMap<String, String>,
 }
 
+static mut NEXT_DUCKDB_PLACEHOLDER: AtomicUsize = AtomicUsize::new(0);
 impl DuckDBNormalizer {
-    pub fn new(params: &[Ident]) -> DuckDBNormalizer {
-        DuckDBNormalizer {
-            params: params
-                .iter()
-                .enumerate()
-                .map(|(i, s)| (s.to_string(), format!("${}", i + 1)))
-                .collect(),
+    pub fn new(scalar_params: &[Ident], relations: &HashSet<String>) -> DuckDBNormalizer {
+        let mut params: HashMap<String, String> = scalar_params
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.to_string(), format!("${}", i + 1)))
+            .collect();
+
+        for relation in relations {
+            params.insert(
+                relation.to_string(),
+                format!("__qs_duck_{}", unsafe {
+                    NEXT_DUCKDB_PLACEHOLDER.fetch_add(1, Ordering::SeqCst)
+                }),
+            );
         }
+
+        DuckDBNormalizer { params }
     }
 }
 
@@ -89,9 +100,7 @@ impl DuckDBEngine {
     fn build(conn: ExclusiveConnection) -> DuckDBEngine {
         DuckDBEngine { conn }
     }
-}
 
-impl DuckDBEngine {
     fn eval_in_place(
         &mut self,
         query: &sqlast::Statement,
@@ -104,19 +113,12 @@ impl DuckDBEngine {
         let conn_state = self.conn.get_state();
 
         let mut scalar_params = Vec::new();
-        let relations = &mut conn_state.relations;
-        relations.clear();
 
+        let mut relation_params = HashSet::new(); // XXX DELETE THESE RELATIONS
         for (key, param) in params.iter() {
             match &param.value {
                 Value::Relation(r) => {
-                    relations.insert(
-                        key.into(),
-                        ArrowRelation {
-                            relation: r.clone(),
-                            schema: Arc::new((&param.type_).try_into()?),
-                        },
-                    );
+                    relation_params.insert(key.to_string());
                 }
                 Value::Fn(_) => {
                     return rt_unimplemented!("Function parameters");
@@ -128,9 +130,28 @@ impl DuckDBEngine {
         }
 
         scalar_params.sort();
-
-        let normalizer = DuckDBNormalizer::new(&scalar_params);
+        let normalizer = DuckDBNormalizer::new(&scalar_params, &relation_params);
         let query = normalizer.normalize(&query);
+
+        {
+            let relations = &mut conn_state.relations.lock()?;
+
+            for (key, param) in params.iter() {
+                match &param.value {
+                    Value::Relation(r) => {
+                        relations.insert(
+                            normalizer.params.get(&key.to_string()).unwrap().clone(),
+                            ArrowRelation {
+                                relation: r.clone(),
+                                schema: Arc::new((&param.type_).try_into()?),
+                            },
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         let query_string = format!("{}", query);
 
         let duckdb_params: Vec<&dyn duckdb::ToSql> = scalar_params
@@ -243,7 +264,7 @@ fn initialize_duckdb_connection(conn_state: &mut ConnectionState) {
 #[derive(Debug)]
 struct ConnectionState {
     conn: Connection,
-    relations: RelationMap,
+    relations: Arc<Mutex<RelationMap>>,
 }
 /// This is a Pinned connection which is guaranteed (via the typesystem) to only be accessed
 /// by one connection. Therefore, we allow it to be both Send and Sync. Note that the relations
@@ -256,10 +277,18 @@ impl ExclusiveConnection {
     fn new(conn: Connection) -> ExclusiveConnection {
         let mut conn = Box::pin(ConnectionState {
             conn,
-            relations: HashMap::new(),
+            relations: Arc::new(Mutex::new(HashMap::new())),
         });
         initialize_duckdb_connection(&mut conn);
         ExclusiveConnection(conn)
+    }
+
+    fn try_clone(&mut self) -> Result<ExclusiveConnection> {
+        let mut state = self.0.borrow_mut();
+        Ok(ExclusiveConnection(Box::pin(ConnectionState {
+            conn: state.conn.try_clone()?,
+            relations: state.relations.clone(),
+        })))
     }
 
     fn get_state(&mut self) -> &mut ConnectionState {
@@ -292,9 +321,7 @@ impl ConnectionSingleton {
     }
 
     fn try_clone(&mut self) -> Result<ExclusiveConnection> {
-        Ok(ExclusiveConnection::new(
-            self.0.get_state().conn.try_clone()?,
-        ))
+        self.0.try_clone()
     }
 }
 
@@ -345,7 +372,8 @@ pub unsafe extern "C" fn replacement_scan_callback(
         Err(_e) => return,
     };
 
-    let relations = unsafe { &mut *(relation_map as *mut RelationMap) };
+    let relations = unsafe { &mut *(relation_map as *mut Arc<Mutex<RelationMap>>) };
+    let relations = relations.lock().unwrap();
     let relation = match relations.get(table_str) {
         Some(relation) => relation,
         None => return,
@@ -551,4 +579,35 @@ fn test_duckdb_concurrency() {
 
     run_query(&mut conn1, "SELECT * FROM t").unwrap();
     run_query(&mut conn1, "SELECT * FROM x").unwrap();
+}
+
+#[test]
+fn test_replacemnt_scan() {
+    fn run_query(conn: &mut Connection, query: &str) -> Result<Arc<dyn Relation>> {
+        let mut stmt = conn.prepare(query)?;
+        let query_result = stmt.query_arrow([])?;
+        let ret = ArrowRecordBatchRelation::from_duckdb(query_result);
+        Ok(ret)
+    }
+    let _ = std::fs::remove_file("/tmp/test_duckdb_replacement.duckdb");
+    let url = crate::compile::ConnectionString::maybe_parse(
+        None,
+        "duckdb:///tmp/test_duckdb_replacement.duckdb",
+        &crate::ast::SourceLocation::Unknown,
+    )
+    .unwrap()
+    .unwrap();
+
+    let mut conn1 = ExclusiveConnection::new(Connection::open(url.get_url().path()).unwrap());
+    let _ = run_query(&mut conn1.get_state().conn, "SELECT * FROM dne_1");
+    let mut conn2 = conn1.try_clone().unwrap();
+    conn1.try_clone().unwrap();
+    conn1.try_clone().unwrap();
+
+    let conn1 = conn1.get_state();
+    let conn2 = conn2.get_state();
+
+    let _ = run_query(&mut conn1.conn, "SELECT * FROM dne_1");
+    let _ = run_query(&mut conn2.conn, "SELECT * FROM dne_2");
+    let _ = run_query(&mut conn1.conn, "SELECT * FROM dne_1");
 }
