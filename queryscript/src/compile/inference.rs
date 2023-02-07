@@ -133,9 +133,12 @@ pub enum Constrained<T>
 where
     T: Constrainable,
 {
-    Known(Ref<T>),
+    Known {
+        value: Ref<T>,
+        debug: Vec<String>,
+    },
     Unknown {
-        debug_names: Vec<Ident>,
+        debug: Vec<String>,
         error: Option<CompileError>,
         constraints: Vec<Ref<dyn Constraint<T>>>,
     },
@@ -145,10 +148,10 @@ where
 impl<T: Constrainable> fmt::Debug for Constrained<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Constrained::Known(t) => t.read().unwrap().fmt(f),
-            Constrained::Unknown { debug_names, .. } => {
-                if debug_names.len() > 0 {
-                    f.write_str(format!("?{}?", debug_names[0]).as_str())
+            Constrained::Known { value, .. } => value.read().unwrap().fmt(f),
+            Constrained::Unknown { debug, .. } => {
+                if debug.len() > 0 {
+                    f.write_str(format!("?{}?", debug[0]).as_str())
                 } else {
                     f.write_str("?")
                 }
@@ -177,9 +180,9 @@ impl<T: Constrainable> fmt::Debug for CRef<T> {
 }
 
 impl<T: 'static + Constrainable> CRef<T> {
-    pub fn new_unknown(debug_name: &str) -> CRef<T> {
+    pub fn new_unknown(debug: &str) -> CRef<T> {
         CRef(mkref(Constrained::Unknown {
-            debug_names: vec![debug_name.to_string().into()],
+            debug: vec![debug.to_string()],
             error: None,
             constraints: Vec::new(),
         }))
@@ -187,14 +190,15 @@ impl<T: 'static + Constrainable> CRef<T> {
 
     pub fn new_error(e: CompileError) -> CRef<T> {
         CRef(mkref(Constrained::Unknown {
-            debug_names: vec!["error".to_string().into()],
+            debug: vec!["error".to_string().into()],
             error: Some(e),
             constraints: Vec::new(),
         }))
     }
 
-    pub fn new_known(t: Ref<T>) -> CRef<T> {
-        CRef(mkref(Constrained::Known(t)))
+    pub fn new_known(value: Ref<T>) -> CRef<T> {
+        let debug = vec![format!("known {:?}", &*value.read().unwrap())];
+        CRef(mkref(Constrained::Known { value, debug }))
     }
 
     pub fn new_result(r: Result<Ref<T>>) -> CRef<T> {
@@ -202,6 +206,10 @@ impl<T: 'static + Constrainable> CRef<T> {
             Ok(t) => CRef::new_known(t),
             Err(e) => CRef::new_error(e),
         }
+    }
+
+    pub fn id(&self) -> Result<String> {
+        Ok(format!("{:p}", Arc::as_ptr(&self.find()?.0)))
     }
 
     pub fn read(&self) -> Result<std::sync::RwLockReadGuard<'_, Constrained<T>>> {
@@ -214,7 +222,7 @@ impl<T: 'static + Constrainable> CRef<T> {
 
     pub fn must(&self) -> runtime::error::Result<Ref<T>> {
         match &*self.find().unwrap().0.read()? {
-            Constrained::Known(t) => Ok(t.clone()),
+            Constrained::Known { value, .. } => Ok(value.clone()),
             Constrained::Unknown { .. } => {
                 runtime::error::fail!("Unknown type cannot exist at runtime ({:?})", self)
             }
@@ -225,7 +233,7 @@ impl<T: 'static + Constrainable> CRef<T> {
     pub fn is_known(&self) -> Result<bool> {
         match &*self.find()?.read()? {
             Constrained::Unknown { .. } => Ok(false),
-            Constrained::Known(_) => Ok(true),
+            Constrained::Known { .. } => Ok(true),
             _ => Err(CompileError::internal(
                 ErrorLocation::Unknown,
                 "Canon value should never be a ref",
@@ -288,12 +296,11 @@ impl<T: 'static + Constrainable> CRef<T> {
     }
 
     fn add_constraint(&self, constraint: Ref<dyn Constraint<T>>) -> Result<()> {
-        match &mut *self.find()?.write()? {
-            Constrained::Known(t) => {
-                constraint.write()?(t.clone())?;
-            }
+        let known = match &mut *self.find()?.write()? {
+            Constrained::Known { value, .. } => value.clone(),
             Constrained::Unknown { constraints, .. } => {
                 constraints.push(constraint);
+                return Ok(());
             }
             _ => {
                 return Err(CompileError::internal(
@@ -301,7 +308,9 @@ impl<T: 'static + Constrainable> CRef<T> {
                     "Canon value should never be a ref",
                 ))
             }
-        }
+        };
+
+        constraint.write()?(known)?;
 
         Ok(())
     }
@@ -325,31 +334,37 @@ impl<T: 'static + Constrainable> CRef<T> {
         let them = other.find()?;
 
         if !Arc::ptr_eq(&us.0, &them.0) {
-            match &mut *them.write()? {
+            let (constraints, mut debug) = match &mut *them.write()? {
                 Constrained::Unknown {
-                    constraints,
-                    debug_names,
-                    ..
+                    constraints, debug, ..
+                } => (constraints.drain(..).collect(), debug.drain(..).collect()),
+                Constrained::Known { debug, .. } => (vec![], debug.drain(..).collect()),
+                _ => (vec![], vec![]),
+            };
+
+            match &mut *us.write()? {
+                Constrained::Known {
+                    debug: our_debug, ..
                 } => {
-                    for constraint in constraints.drain(..) {
-                        us.add_constraint(constraint)?;
+                    for d in debug.drain(..) {
+                        our_debug.push(d);
                     }
-                    match &mut *us.write()? {
-                        Constrained::Unknown {
-                            debug_names: our_debug_names,
-                            ..
-                        } => {
-                            for debug_name in debug_names.drain(..) {
-                                our_debug_names.push(debug_name);
-                            }
-                        }
-                        _ => {}
+                }
+                Constrained::Unknown {
+                    debug: our_debug, ..
+                } => {
+                    for d in debug.drain(..) {
+                        our_debug.push(d);
                     }
                 }
                 _ => {}
             }
 
             *them.write()? = Constrained::Ref(us.clone());
+
+            for constraint in constraints {
+                us.add_constraint(constraint)?;
+            }
         }
 
         Ok(())
@@ -364,7 +379,7 @@ macro_rules! ConstrainableImpl {
                 let canon = self.find()?;
                 let mut guard = canon.write()?;
                 match &mut *guard {
-                    Constrained::Known(t) => Ok(Poll::Ready(Ok(t.clone()))),
+                    Constrained::Known { value, .. } => Ok(Poll::Ready(Ok(value.clone()))),
                     Constrained::Unknown { constraints, .. } => {
                         let waker = cx.waker().clone();
                         constraints.push(mkref(move |_: Ref<T>| {

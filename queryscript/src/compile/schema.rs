@@ -459,7 +459,7 @@ impl Constrainable for Located<Vec<MField>> {
 impl CRef<MType> {
     pub fn substitute(&self, variables: &BTreeMap<Ident, CRef<MType>>) -> Result<CRef<MType>> {
         match &*self.read()? {
-            Constrained::Known(t) => t.read()?.substitute(variables),
+            Constrained::Known { value, .. } => value.read()?.substitute(variables),
             Constrained::Unknown { .. } => Ok(self.clone()),
             Constrained::Ref(r) => r.substitute(variables),
         }
