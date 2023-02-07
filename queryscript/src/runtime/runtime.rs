@@ -118,6 +118,15 @@ pub fn eval<'a>(
                         let mut locked = entry.lock().await;
                         drop(materializations);
 
+                        // XXX We have a few problems here. We may want to address them backwards!
+                        //  1) If we're a param, then we do not want to return the actual value. If we're
+                        //      an expression though, we do want to return the value. The problem is that if
+                        //      were once a param, then we'll have saved some garbage in the cache. I think the
+                        //      solution is to separately track which materializations we've cached and which
+                        //      we have created (or checked) temp tables for.
+                        //  2) If the underlying table exists (has been materialized), we should skip creating
+                        //      a temporary table
+                        //  3) materializations does not need to be locked
                         let result = match (inlined, expr.expr.as_ref()) {
                             (true, schema::Expr::SQL(sql, sql_url)) => {
                                 let query = create_table_as(

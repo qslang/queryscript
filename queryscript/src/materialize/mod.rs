@@ -40,7 +40,7 @@ fn gather_materialize_candidates(decls: &DeclMap<STypedExpr>) -> Result<Signals>
         match &expr {
             Expr::SQL(_, url) | Expr::Materialize(MaterializeExpr { url, .. }) => {
                 if url.is_some() {
-                    signals.insert(name.clone(), mkcref(()));
+                    signals.insert(name.clone(), CRef::new_unknown(&format!("{}", name)));
                 }
             }
             _ => continue,
@@ -73,8 +73,6 @@ fn execute_create_view(
                     dependency_names.push(format!("{}", decl_name));
                     dependencies.push(signal.clone());
                 } else {
-                    // XXX Also, I think we're just running the queries that are dependencies (i.e. materialize)
-                    // and probably discarding their results. Should fix that.
                     params.insert(name.clone(), param.clone());
                 }
             }
