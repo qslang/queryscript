@@ -1246,7 +1246,7 @@ fn declare_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
             false, /* extern_ */
             MType::new_unknown(nt.name.get().as_ref()),
         )),
-        ast::StmtBody::FnDef { name, .. } => expr_decls.push((
+        ast::StmtBody::FnDef(ast::FnDef { name, .. }) => expr_decls.push((
             name.clone(),
             false, /* extern_ */
             STypedExpr::new_unknown(name.get().as_ref()),
@@ -1395,6 +1395,188 @@ pub fn compile_schema_entries(
     result
 }
 
+#[derive(Eq, PartialEq)]
+pub enum FnContext {
+    Decl,
+    Call,
+}
+
+pub fn compile_fn_body(
+    compiler: Compiler,
+    schema: Ref<Schema>,
+    loc: SourceLocation,
+    def: &ast::FnDef,
+    context: FnContext,
+) -> Result<(CTypedExpr, Vec<Located<Ident>>)> {
+    let mut def = def.clone();
+    let inner_schema = Schema::new(schema.read()?.file.clone(), schema.read()?.folder.clone());
+    inner_schema.write()?.parent_scope = Some(schema.clone());
+
+    let generic_return_type_name = || Located::new("__Return".into(), loc.clone());
+    if !def.generics.is_empty() && def.ret.is_none() {
+        let ast::Range { start, end } = loc.range().unwrap_or(ast::Range {
+            start: ast::Location { line: 0, column: 0 },
+            end: ast::Location { line: 0, column: 0 },
+        });
+        def.generics.push(generic_return_type_name());
+        def.ret = Some(ast::Type {
+            start,
+            end,
+            body: ast::TypeBody::Reference(vec![generic_return_type_name()]),
+        });
+    }
+
+    let has_expr_body = matches!(def.body, ast::FnBody::Expr(_));
+    let compile_body = match context {
+        FnContext::Decl => def.generics.is_empty() || !has_expr_body,
+        FnContext::Call => !def.generics.is_empty() && has_expr_body,
+    };
+    let mut unknowns = BTreeMap::new();
+    for generic in def.generics.iter() {
+        inner_schema.write()?.type_decls.insert(
+            generic.get().clone(),
+            Located::new(
+                Decl {
+                    public: false,
+                    extern_: true,
+                    fn_arg: true,
+                    name: generic.clone(),
+                    value: mkcref(MType::Name(generic.clone())),
+                },
+                loc.clone(),
+            ),
+        );
+        let unknown = CRef::new_unknown(generic.as_str());
+        if !compile_body {
+            unknown.then({
+                let generic = generic.clone();
+                move |_: Ref<MType>| -> Result<CRef<()>> {
+                    Err(CompileError::internal(
+                        generic.location().clone(),
+                        format!("generic {} should not be known", generic).as_str(),
+                    ))
+                }
+            })?;
+        } else if context == FnContext::Call {
+            unknowns.insert(generic.get().clone(), unknown);
+        }
+    }
+
+    let mut compiled_args = Vec::new();
+    for arg in &def.args {
+        if inner_schema.read()?.expr_decls.get(&arg.name).is_some() {
+            return Err(CompileError::duplicate_entry(vec![arg.name.clone()]));
+        }
+        let mut type_ = resolve_type(compiler.clone(), inner_schema.clone(), &arg.type_)?;
+        if compile_body {
+            type_ = type_.substitute(&unknowns)?;
+        }
+
+        let stype = SType::new_mono(type_.clone());
+        inner_schema.write()?.expr_decls.insert(
+            arg.name.get().clone(),
+            Located::new(
+                Decl {
+                    public: false,
+                    extern_: true,
+                    fn_arg: true,
+                    name: arg.name.clone(),
+                    value: STypedExpr {
+                        type_: stype.clone(),
+                        expr: mkcref(Expr::ContextRef(arg.name.get().clone())),
+                    },
+                },
+                loc.clone(),
+            ),
+        );
+        compiler.run_on_symbol::<ExprEntry>(
+            arg.name.clone(),
+            SymbolKind::Argument,
+            stype,
+            arg.name.location().clone(),
+            None,
+        )?;
+        inner_schema
+            .write()?
+            .externs
+            .insert(arg.name.get().clone(), type_.clone());
+        compiled_args.push(MField::new_nullable(arg.name.get().clone(), type_.clone()));
+    }
+
+    let mut ret_type = if let Some(ret) = &def.ret {
+        resolve_type(compiler.clone(), inner_schema.clone(), ret)?
+    } else if def.generics.is_empty() {
+        MType::new_unknown("return")
+    } else {
+        mkcref(MType::Name(generic_return_type_name()))
+    };
+    if compile_body {
+        ret_type = ret_type.substitute(&unknowns)?;
+    }
+
+    let expr = if compile_body {
+        let (compiled, is_sql) = match &def.body {
+            ast::FnBody::Native => {
+                if !compiler.allow_native()? {
+                    return Err(CompileError::internal(
+                        loc.clone(),
+                        "Cannot compile native functions",
+                    ));
+                }
+
+                (
+                    CTypedExpr {
+                        type_: MType::new_unknown(&format!("__native('{}')", def.name)),
+                        expr: mkcref(Expr::NativeFn(def.name.get().clone())),
+                    },
+                    false,
+                )
+            }
+            ast::FnBody::SQL => (
+                CTypedExpr {
+                    type_: MType::new_unknown(&format!("__sql('{}')", def.name)),
+                    expr: mkcref(Expr::Unknown),
+                },
+                true,
+            ),
+            ast::FnBody::Expr(expr) => (
+                compile_expr(compiler.clone(), inner_schema.clone(), expr)?,
+                false,
+            ),
+        };
+
+        ret_type.unify(&compiled.type_)?;
+        compiled.expr.then(move |expr: Ref<Expr<CRef<MType>>>| {
+            let expr = expr.read()?;
+            Ok(mkcref(match &*expr {
+                Expr::NativeFn(..) => expr.clone(),
+                _ => Expr::Fn(FnExpr {
+                    inner_schema: inner_schema.clone(),
+                    body: if is_sql {
+                        FnBody::SQLBuiltin
+                    } else {
+                        FnBody::Expr(Arc::new(expr.clone()))
+                    },
+                }),
+            }))
+        })?
+    } else {
+        mkcref(Expr::UncompiledFn(def.clone()))
+    };
+    let fn_type = MFnType {
+        args: compiled_args,
+        ret: ret_type,
+    };
+
+    Ok((
+        CTypedExpr {
+            type_: mkcref(MType::Fn(Located::new(fn_type, loc))),
+            expr,
+        },
+        def.generics.clone(),
+    ))
+}
+
 fn compile_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::Stmt) -> Result<()> {
     let loc = SourceLocation::Range(
         schema.read()?.file.clone(),
@@ -1414,146 +1596,25 @@ fn compile_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
             let type_ = resolve_type(compiler.clone(), schema.clone(), &nt.def)?;
             unify_type_decl(compiler.clone(), schema.clone(), &nt.name, type_)?;
         }
-        ast::StmtBody::FnDef {
-            name,
-            generics,
-            args,
-            ret,
-            body,
-        } => {
-            let inner_schema =
-                Schema::new(schema.read()?.file.clone(), schema.read()?.folder.clone());
-            inner_schema.write()?.parent_scope = Some(schema.clone());
-
-            let mut unknowns = BTreeMap::new();
-            for generic in generics {
-                inner_schema.write()?.type_decls.insert(
-                    generic.get().clone(),
-                    Located::new(
-                        Decl {
-                            public: false,
-                            extern_: true,
-                            fn_arg: true,
-                            name: generic.clone(),
-                            value: mkcref(MType::Name(generic.clone())),
-                        },
-                        loc.clone(),
-                    ),
-                );
-                unknowns.insert(generic.get().clone(), CRef::new_unknown(generic.as_str()));
-            }
-            let mut compiled_args = Vec::new();
-            for arg in args {
-                if inner_schema.read()?.expr_decls.get(&arg.name).is_some() {
-                    return Err(CompileError::duplicate_entry(vec![arg.name.clone()]));
-                }
-                let type_ = resolve_type(compiler.clone(), inner_schema.clone(), &arg.type_)?;
-                let substituted = type_.substitute(&unknowns)?;
-                let stype = SType::new_mono(substituted.clone());
-                inner_schema.write()?.expr_decls.insert(
-                    arg.name.get().clone(),
-                    Located::new(
-                        Decl {
-                            public: false,
-                            extern_: true,
-                            fn_arg: true,
-                            name: arg.name.clone(),
-                            value: STypedExpr {
-                                type_: stype.clone(),
-                                expr: mkcref(Expr::ContextRef(arg.name.get().clone())),
-                            },
-                        },
-                        loc.clone(),
-                    ),
-                );
-                compiler.run_on_symbol::<ExprEntry>(
-                    arg.name.clone(),
-                    SymbolKind::Argument,
-                    stype,
-                    arg.name.location().clone(),
-                    None,
-                )?;
-                inner_schema
-                    .write()?
-                    .externs
-                    .insert(arg.name.get().clone(), type_.clone());
-                compiled_args.push(MField::new_nullable(arg.name.get().clone(), type_.clone()));
-            }
-
-            let (compiled, is_sql) = match body {
-                ast::FnBody::Native => {
-                    if !compiler.allow_native()? {
-                        return Err(CompileError::internal(
-                            loc.clone(),
-                            "Cannot compile native functions",
-                        ));
-                    }
-
-                    (
-                        CTypedExpr {
-                            type_: MType::new_unknown(&format!("__native('{}')", name)),
-                            expr: mkcref(Expr::NativeFn(name.get().clone())),
-                        },
-                        false,
-                    )
-                }
-                ast::FnBody::SQL => (
-                    CTypedExpr {
-                        type_: MType::new_unknown(&format!("__sql('{}')", name)),
-                        expr: mkcref(Expr::Unknown),
-                    },
-                    true,
-                ),
-                ast::FnBody::Expr(expr) => (
-                    compile_expr(compiler.clone(), inner_schema.clone(), expr)?,
-                    false,
-                ),
-            };
-
-            if let Some(ret) = ret {
-                let ret = resolve_type(compiler.clone(), inner_schema.clone(), ret)?;
-                let ret = ret.substitute(&unknowns)?;
-                ret.unify(&compiled.type_)?
-            }
-
-            for generic in generics {
-                unknowns
-                    .get(&generic)
-                    .unwrap()
-                    .unify(&mkcref(MType::Name(generic.clone())))?;
-            }
-
-            let fn_type = SType::new_poly(
-                mkcref(MType::Fn(Located::new(
-                    MFnType {
-                        args: compiled_args,
-                        ret: compiled.type_.clone(),
-                    },
-                    loc,
-                ))),
-                BTreeSet::from_iter(generics.to_idents().into_iter()),
-            );
+        ast::StmtBody::FnDef(def) => {
+            let (compiled_fn, generics) = compile_fn_body(
+                compiler.clone(),
+                schema.clone(),
+                loc.clone(),
+                def,
+                FnContext::Decl,
+            )?;
 
             unify_expr_decl(
                 compiler.clone(),
                 schema.clone(),
-                name,
+                &def.name,
                 &STypedExpr {
-                    type_: fn_type,
-                    expr: compiled.expr.then(move |expr: Ref<Expr<CRef<MType>>>| {
-                        let expr = expr.read()?;
-                        Ok(mkcref(match &*expr {
-                            Expr::NativeFn(..) => expr.clone(),
-                            _ => Expr::Fn(FnExpr {
-                                inner_schema: inner_schema.clone(),
-                                body: if is_sql {
-                                    FnBody::SQLBuiltin
-                                } else {
-                                    FnBody::Expr(Arc::new(expr.clone()))
-                                },
-                            }),
-                        }))
-                    })?,
+                    type_: SType::new_poly(
+                        compiled_fn.type_,
+                        BTreeSet::from_iter(generics.to_idents().into_iter()),
+                    ),
+                    expr: compiled_fn.expr,
                 },
             )?;
         }

@@ -482,13 +482,13 @@ impl<'a> Parser<'a> {
             FnBody::Expr(body)
         };
 
-        Ok(StmtBody::FnDef {
+        Ok(StmtBody::FnDef(FnDef {
             name,
             generics,
             args,
             ret,
             body,
-        })
+        }))
     }
 
     pub fn parse_let(&mut self, materialize: bool) -> Result<StmtBody> {

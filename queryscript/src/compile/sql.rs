@@ -9,11 +9,14 @@ use std::sync::Arc;
 
 use crate::compile::coerce::CoerceOp;
 use crate::compile::compile::{
-    lookup_path, resolve_global_atom, typecheck_path, Compiler, SymbolKind,
+    compile_fn_body, lookup_path, resolve_global_atom, typecheck_path, Compiler, FnContext,
+    SymbolKind,
 };
 use crate::compile::error::*;
 use crate::compile::generics;
-use crate::compile::generics::{as_generic, ConnectionType, ExternalType, Generic, GenericConstructor};
+use crate::compile::generics::{
+    as_generic, ConnectionType, ExternalType, Generic, GenericConstructor,
+};
 use crate::compile::inference::*;
 use crate::compile::inline::*;
 use crate::compile::schema::*;
@@ -2408,8 +2411,22 @@ pub fn compile_sqlexpr(
                     }
 
                     let func_expr = func.expr.unwrap_schema_entry().await?;
+                    let compiled_func_expr = match func_expr {
+                        Expr::UncompiledFn(def) => {
+                            let (compiled_body, _) = compile_fn_body(
+                                compiler.clone(),
+                                schema.clone(),
+                                loc.clone(),
+                                &def,
+                                FnContext::Call,
+                            )?;
+                            compiled_body.type_.unify(&func.type_)?;
+                            compiled_body.expr.await?.read()?.clone()
+                        }
+                        _ => func_expr,
+                    };
 
-                    let (fn_kind, fn_body) = match &func_expr {
+                    let (fn_kind, fn_body) = match compiled_func_expr {
                         Expr::NativeFn(_) => (FnKind::Native, None),
                         Expr::Fn(FnExpr { body, .. }) => match body {
                             FnBody::SQLBuiltin => (FnKind::SQLBuiltin, None),
@@ -2730,7 +2747,7 @@ pub fn compile_sqlexpr(
                     names.extend(subquery.names);
 
                     Ok(mkcref(Expr::native_sql(Arc::new(SQL {
-                        names: names,
+                        names,
                         body: SQLBody::Expr(sqlast::Expr::InSubquery {
                             expr: Box::new(expr.body.as_expr()),
                             subquery: Box::new(subquery.body),

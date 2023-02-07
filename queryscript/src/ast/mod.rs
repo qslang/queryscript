@@ -272,6 +272,15 @@ pub struct MaterializeArgs {
 }
 
 #[derive(Clone, Debug)]
+pub struct FnDef {
+    pub name: Located<Ident>,
+    pub generics: Vec<Located<Ident>>,
+    pub args: Vec<FnArg>,
+    pub ret: Option<Type>,
+    pub body: FnBody,
+}
+
+#[derive(Clone, Debug)]
 pub enum StmtBody {
     Noop,
     Unparsed,
@@ -282,13 +291,7 @@ pub enum StmtBody {
         args: Option<Vec<NameAndExpr>>,
     },
     TypeDef(NameAndType),
-    FnDef {
-        name: Located<Ident>,
-        generics: Vec<Located<Ident>>,
-        args: Vec<FnArg>,
-        ret: Option<Type>,
-        body: FnBody,
-    },
+    FnDef(FnDef),
     Let {
         name: Located<Ident>,
         type_: Option<Type>,
