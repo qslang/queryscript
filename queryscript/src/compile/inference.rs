@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use crate::ast::Ident;
-use crate::compile::coerce::CoerceOp;
 use crate::compile::error::*;
 use crate::compile::schema::{mkref, Ref};
 use crate::runtime;
@@ -23,14 +22,6 @@ pub trait Constrainable: Clone + fmt::Debug + Send + Sync {
             )
             .as_str(),
         ))
-    }
-
-    fn coerce(_op: &CoerceOp, left: &Ref<Self>, right: &Ref<Self>) -> Result<CRef<Self>>
-    where
-        Self: 'static,
-    {
-        left.unify(right)?;
-        Ok(mkcref(left.read()?.clone()))
     }
 }
 
@@ -285,15 +276,15 @@ impl<T: 'static + Constrainable> CRef<T> {
         Ok(())
     }
 
-    // Private methods
-    //
-
-    fn constrain<F: 'static + Clone + Send + Sync + FnMut(Ref<T>) -> Result<()>>(
+    pub fn constrain<F: 'static + Clone + Send + Sync + FnMut(Ref<T>) -> Result<()>>(
         &self,
         constraint: F,
     ) -> Result<()> {
         self.add_constraint(mkref(constraint.clone()))
     }
+
+    // Private methods
+    //
 
     fn add_constraint(&self, constraint: Ref<dyn Constraint<T>>) -> Result<()> {
         let known = match &mut *self.find()?.write()? {
