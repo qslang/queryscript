@@ -92,9 +92,10 @@ impl<V: SQLVisitor> VisitSQL<V> for Statement {
                 cluster_by: cluster_by.visit_sql(visitor),
             },
 
-            // XXX This is broken (it only traverses some of the tree), but that's good
+            // TODO This is broken (it only traverses some of the tree), but that's good
             // enough to make our use of CREATE TABLE AS work. We should switch to the new
             // VisitorMut trait in sqlparser.
+            // (see https://github.com/qscl/queryscript/issues/46)
             Statement::CreateTable {
                 or_replace,
                 temporary,
@@ -654,7 +655,7 @@ impl<V: SQLVisitor> VisitSQL<V> for TableFactor {
                 with_hints,
             } => Table {
                 name: name.visit_sql(visitor),
-                alias: alias.visit_sql(visitor),
+                alias: alias.clone(), // Do not visit the alias -- changing it can bork the type
                 args: args.visit_sql(visitor),
                 with_hints: with_hints.visit_sql(visitor),
             },
@@ -665,11 +666,11 @@ impl<V: SQLVisitor> VisitSQL<V> for TableFactor {
             } => Derived {
                 lateral: *lateral,
                 subquery: subquery.visit_sql(visitor),
-                alias: alias.visit_sql(visitor),
+                alias: alias.clone(),
             },
             TableFunction { expr, alias } => TableFunction {
                 expr: expr.visit_sql(visitor),
-                alias: alias.visit_sql(visitor),
+                alias: alias.clone(),
             },
             UNNEST {
                 alias,
@@ -677,17 +678,17 @@ impl<V: SQLVisitor> VisitSQL<V> for TableFactor {
                 with_offset,
                 with_offset_alias,
             } => UNNEST {
-                alias: alias.visit_sql(visitor),
+                alias: alias.clone(),
                 array_expr: array_expr.visit_sql(visitor),
                 with_offset: *with_offset,
-                with_offset_alias: with_offset_alias.visit_sql(visitor),
+                with_offset_alias: with_offset_alias.clone(),
             },
             NestedJoin {
                 table_with_joins,
                 alias,
             } => NestedJoin {
                 table_with_joins: table_with_joins.visit_sql(visitor),
-                alias: alias.visit_sql(visitor),
+                alias: alias.clone(),
             },
         }
     }
@@ -788,7 +789,7 @@ impl<V: SQLVisitor> VisitSQL<V> for IdentWithAlias {
     fn visit_sql(&self, visitor: &V) -> Self {
         IdentWithAlias {
             ident: self.ident.visit_sql(visitor),
-            alias: self.alias.visit_sql(visitor), // NOTE: We may not want to visit the alias
+            alias: self.alias.clone(), // Do not visit the alias -- changing it can bork the type
         }
     }
 }

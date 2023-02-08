@@ -38,24 +38,6 @@
         ),
         (
             None,
-            RuntimeError {
-                source: DuckDBError {
-                    source: DuckDBFailure(
-                        Error {
-                            code: Unknown,
-                            extended_code: 1,
-                        },
-                        Some(
-                            "Binder Error: Table \"u2\" does not have a column named \"a\"\nLINE 1: ..., \"users\" AS \"u2\" WHERE \"users\".\"id\" = \"u2\".\"a\" LIMIT 0\n                                                  ^",
-                        ),
-                    ),
-                    backtrace: None,
-                },
-                loc: Unknown,
-            },
-        ),
-        (
-            None,
             DuplicateEntry {
                 path: [
                     "a",
@@ -270,12 +252,6 @@
                     ),
                 ),
                 value: "| id | org_id | name | active |\n|----|--------|------|--------|\n| 1  | 1      | Foo  | true   |\n| 2  | 1      | Bar  | false  |",
-            },
-        ),
-        Err(
-            StringError {
-                what: "Unknown type cannot exist at runtime (?unsafe expr?)",
-                backtrace: None,
             },
         ),
         Err(
