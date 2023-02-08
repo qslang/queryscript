@@ -19,10 +19,8 @@ pub struct Context {
     /// has exactly one connection to a given database.
     connections: BTreeMap<Arc<ConnectionString>, Box<dyn SQLEngine>>,
 
-    /// Materializations that we've saved up and can re-use. Each materialization is itself
-    /// protected by a lock, so that if multiple tasks running in parallel are trying to compute
-    /// the same materialization, we can ensure only one does.
-    pub materializations: Arc<tokio::sync::Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<Value>>>>>,
+    /// Materializations that we've saved up and can re-use.
+    pub materializations: BTreeMap<String, Value>,
 }
 
 impl Context {
@@ -33,7 +31,7 @@ impl Context {
             embedded_sql: embedded_engine(engine_type),
             disable_typechecks: false,
             connections: BTreeMap::new(),
-            materializations: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
+            materializations: BTreeMap::new(),
         }
     }
 

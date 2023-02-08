@@ -199,7 +199,6 @@ mod tests {
 
         // Compare the two snapshots
         assert_eq!(expected_snapshot, actual_snapshot);
-        eprintln!("EXPECTED SNAPSHOT: {:?}", expected_snapshot);
 
         let expected_view_names: HashSet<Ident> = actual_snapshot.keys().cloned().collect();
 
@@ -247,7 +246,7 @@ mod tests {
         let rt = queryscript::runtime::build().unwrap();
         for test_dir in test_dirs {
             for mode in TestMode::iter() {
-                eprintln!("Testing mode {:?} in {:?}", mode, test_dir);
+                eprintln!("!!!! Testing mode {:?} in {:?}", mode, test_dir);
                 // NOTE: This could probably be parallelized
                 run_test_dir(&rt, engine_type, &test_dir, mode);
             }

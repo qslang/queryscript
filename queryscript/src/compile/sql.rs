@@ -198,10 +198,6 @@ pub fn create_table_as(
     }
 }
 
-pub fn with_object_name(name: &Ident) -> sqlast::ObjectName {
-    sqlast::ObjectName(vec![sqlast::Located::new(name.into(), None)])
-}
-
 pub fn with_table_alias(
     table: &sqlast::TableFactor,
     alias: Option<sqlast::TableAlias>,

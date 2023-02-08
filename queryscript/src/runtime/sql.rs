@@ -8,10 +8,9 @@ use crate::types::{Relation, Type, Value};
 
 use async_trait::async_trait;
 
-// TODO: For foreign databases (e.g. Postgres), we'll either need to store
-// parameters to these databases in the engine (which may manage 1 or more
-// connections), or pass them in. Either way, engines are expected to manage
-// interior mutability, since concurrency properties may differ across them.
+/// An engine is a wrapper around a connection to a database, capable of running certain
+/// commands. The functions except a mutable reference to the engine, so that we can leverage
+/// the Rust compiler to ensure exclusive access.
 #[async_trait]
 pub trait SQLEngine: std::fmt::Debug + Send + Sync {
     async fn eval(
@@ -29,6 +28,11 @@ pub trait SQLEngine: std::fmt::Debug + Send + Sync {
     ) -> Result<()>;
 
     async fn create(&mut self) -> Result<()>;
+
+    /// Ideally, this gets generalized and we use information schema tables. However, there's
+    /// no standard way to tell what database we're currently in. We should generalize this function
+    /// eventually.
+    async fn table_exists(&mut self, name: &sqlast::ObjectName) -> Result<bool>;
 
     fn engine_type(&self) -> SQLEngineType;
 }

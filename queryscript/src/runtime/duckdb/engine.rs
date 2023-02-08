@@ -263,6 +263,17 @@ impl SQLEngine for DuckDBEngine {
         Ok(())
     }
 
+    async fn table_exists(&mut self, table: &sqlast::ObjectName) -> Result<bool> {
+        let conn_state = self.conn.get_state();
+        let mut stmt = conn_state
+            .conn
+            .prepare("SELECT 1 FROM information_schema.tables WHERE table_name = ?")?;
+        let result = stmt
+            .query_map(&[&table.to_string()], |row| row.get::<usize, u32>(0))
+            .unwrap();
+        Ok(result.count() > 0)
+    }
+
     fn engine_type(&self) -> SQLEngineType {
         SQLEngineType::DuckDB
     }
@@ -314,7 +325,7 @@ impl ExclusiveConnection {
     }
 
     fn try_clone(&mut self) -> Result<ExclusiveConnection> {
-        let mut state = self.0.borrow_mut();
+        let state = self.0.borrow_mut();
         Ok(ExclusiveConnection(Box::pin(ConnectionState {
             conn: state.conn.try_clone()?,
             relations: state.relations.clone(),
@@ -640,4 +651,20 @@ fn test_replacemnt_scan() {
     let _ = run_query(&mut conn1.conn, "SELECT * FROM dne_1");
     let _ = run_query(&mut conn2.conn, "SELECT * FROM dne_2");
     let _ = run_query(&mut conn1.conn, "SELECT * FROM dne_1");
+}
+
+#[test]
+fn test_table_not_exists() {
+    let mut conn1 = ExclusiveConnection::new(Connection::open_in_memory().unwrap());
+    let conn = &mut conn1.get_state().conn;
+
+    let foo = Into::<sqlast::ObjectName>::into(&Into::<Ident>::into("foo"));
+
+    let mut stmt = conn
+        .prepare("SELECT 1 FROM information_schema.tables WHERE table_name = ?")
+        .unwrap();
+    let result = stmt
+        .query_map(&[&foo.to_string()], |row| row.get::<usize, u32>(0))
+        .unwrap();
+    assert!(result.count() == 0)
 }

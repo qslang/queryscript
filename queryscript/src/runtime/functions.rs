@@ -132,7 +132,7 @@ impl LoadFileFn {
 
     pub async fn load(
         &self,
-        ctx: &Context,
+        _ctx: &Context,
         file_path: &FilePath,
         format: Option<String>,
     ) -> Result<Value> {

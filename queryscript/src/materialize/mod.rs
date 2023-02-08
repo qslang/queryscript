@@ -1,7 +1,6 @@
 // This file is responsible for the QueryScript equivalent of orchestration: saving "views"
 // back to the original database.
 use snafu::prelude::*;
-use sqlparser::ast as sqlast;
 use std::sync::Arc;
 use std::{collections::HashMap, sync::RwLock};
 
@@ -124,7 +123,7 @@ async fn process_view(
     signals: &Signals,
     handles: &mut Vec<tokio::task::JoinHandle<crate::runtime::Result<()>>>,
 ) -> crate::runtime::Result<()> {
-    let object_name = sqlast::ObjectName(vec![sqlast::Located::new(name.into(), None)]);
+    let object_name = name.into();
 
     let expr = decl.value.expr.must()?;
     let expr = expr.read()?.to_runtime_type()?;
