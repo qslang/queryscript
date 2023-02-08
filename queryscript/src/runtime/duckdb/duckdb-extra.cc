@@ -120,6 +120,8 @@ void init_arrow_scan(uint32_t *connection_ptr)
 {
     using namespace duckdb;
 
+    // We create our own arrow scan function that does not push filters down, since our arrow implementation (Rust's)
+    // does not know how to process filters.
     // This code is mirrored from ArrowTableFunction::RegisterFunction
     TableFunction arrow("arrow_scan_qs", {LogicalType::POINTER, LogicalType::POINTER, LogicalType::POINTER},
                         ArrowTableFunction::ArrowScanFunction, ArrowTableFunction::ArrowScanBind,
@@ -133,10 +135,15 @@ void init_arrow_scan(uint32_t *connection_ptr)
 
     auto tf_info = CreateTableFunctionInfo(move(arrow));
 
+    // The arrow replacement scan function actually gets installed globally into the catalog. If we open multiple
+    // connections to the same database, they'll therefore conflict while trying to create it. As far as I can tell,
+    // this does _not_ get persisted in the database though, so it's better to ignore on conflict than replace.
+    tf_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+
     // This code is mirrored from duckdb_register_table_function
     auto con = (duckdb::Connection *)connection_ptr;
-    con->context->RunFunctionInTransaction([&]()
-                                           {
+    con->context->RunFunctionInTransaction([&]() {
         auto &catalog = duckdb::Catalog::GetCatalog(*con->context);
-        catalog.CreateTableFunction(*con->context, &tf_info); });
+        catalog.CreateTableFunction(*con->context, &tf_info);
+    });
 }

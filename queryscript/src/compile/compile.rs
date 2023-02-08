@@ -575,7 +575,10 @@ pub fn lookup_schema(
                 // (eg. postgres://localhost/$db_name) and parse/apply them here
                 mkref(ImportedSchema {
                     args: None,
-                    schema: Importer::Connection(mkref(ConnectionSchema::new(url.clone()))),
+                    schema: Importer::Connection(mkref(ConnectionSchema::new(
+                        url.get().clone(),
+                        url.location().clone(),
+                    ))),
                 })
             }
         };
@@ -860,39 +863,27 @@ fn compile_expr(compiler: Compiler, schema: Ref<Schema>, expr: &ast::Expr) -> Re
     if expr.is_unsafe {
         compile_unsafe_expr(compiler, schema, &expr.body, &loc)
     } else {
-        match &expr.body {
+        Ok(match &expr.body {
             ast::ExprBody::SQLQuery(q) => {
                 let (_scope, type_, query) =
                     compile_sqlquery(compiler.clone(), schema.clone(), None, &loc, q)?;
-                Ok(CTypedExpr {
+                CTypedExpr {
                     type_,
                     expr: compiler.async_cref(async move {
                         let query = cunwrap(query.await?)?;
 
-                        // This inline pass will compress together SQL that can be pushed down to an underlying
-                        // remote database by comparing the URLs of subtrees and pushing down the SQL for any
-                        // subtree whose URLs are all the same or empty and the parent's is empty.
-                        let sql = inline_params(&Expr::native_sql(Arc::new(SQL {
+                        Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                             names: query.names,
                             body: SQLBody::Query(query.body),
-                        })))
-                        .await?;
-
-                        Ok(mkcref(sql))
+                        }))))
                     })?,
-                })
+                }
             }
             ast::ExprBody::SQLExpr(e) => {
                 let scope = SQLScope::new(None);
-                Ok(compile_sqlexpr(
-                    compiler.clone(),
-                    schema.clone(),
-                    scope,
-                    &loc,
-                    e,
-                )?)
+                compile_sqlexpr(compiler.clone(), schema.clone(), scope, &loc, e)?
             }
-        }
+        })
     }
 }
 
@@ -952,6 +943,7 @@ fn compile_schema_ast(
         schema.clone(),
         ast,
     ));
+    result.absorb(optimize_schema(compiler.clone(), schema.clone()));
     match gather_schema_externs(schema) {
         Ok(_) => {}
         Err(e) => result.add_error(None, e),
@@ -1079,7 +1071,7 @@ fn declare_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
                 &loc,
             )? {
                 None => SchemaPath::Schema(path.clone()),
-                Some(cs) => SchemaPath::Connection(cs),
+                Some(cs) => SchemaPath::Connection(Located::new(cs, path[0].location().clone())),
             };
 
             let imported = lookup_schema(compiler.clone(), schema.clone(), &path)?;
@@ -1164,7 +1156,9 @@ fn declare_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
                 ast::ImportList::None => {
                     let name = match &path {
                         SchemaPath::Schema(path) => path.last().unwrap().clone(),
-                        SchemaPath::Connection(cs) => cs.db_name().clone(),
+                        SchemaPath::Connection(cs) => {
+                            Located::new(cs.db_name().clone(), cs.location().clone())
+                        }
                     };
                     schema_decls.push((name, false /* extern_ */, path));
                 }
@@ -1337,6 +1331,53 @@ pub fn unify_expr_decl(
     run_on_decl(compiler.clone(), decl.name.clone(), decl.get())?;
 
     Ok(())
+}
+
+fn compile_materialized_expr(
+    compiler: Compiler,
+    schema: SchemaRef,
+    loc: SourceLocation,
+    decl_name: Ident,
+    expr: CTypedExpr,
+    args: ast::MaterializeArgs,
+) -> Result<CRef<Expr<CRef<MType>>>> {
+    compiler.async_cref({
+        let compiler = compiler.clone();
+        async move {
+            let url = match args.db {
+                Some(expr) => {
+                    let expr = compile_expr(compiler.clone(), schema.clone(), &expr)?;
+                    let url = expr.expr.await?;
+                    let url = url.read()?.clone();
+
+                    match url.unwrap_schema_entry().await? {
+                        Expr::Connection(url) => Some(url.clone()),
+                        _ => {
+                            return Err(CompileError::internal(
+                                loc.clone(),
+                                &format!(
+                                    "Expected a connection as the second argument of materialize()"
+                                ),
+                            ))
+                        }
+                    }
+                }
+                None => None,
+            };
+
+            let type_ = expr.type_;
+            let expr = expr.expr.await?;
+            let expr = Arc::new(expr.read()?.clone());
+
+            Ok(mkcref(Expr::Materialize(MaterializeExpr {
+                decl_name,
+                key: compiler.next_placeholder("materialized")?,
+                expr: TypedExpr { expr, type_ },
+                url,
+                inlined: false,
+            })))
+        }
+    })
 }
 
 pub fn compile_schema_entries(
@@ -1517,13 +1558,31 @@ fn compile_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
                 },
             )?;
         }
-        ast::StmtBody::Let { name, type_, body } => {
+        ast::StmtBody::Let {
+            name,
+            type_,
+            body,
+            materialize,
+        } => {
             let lhs_type = if let Some(t) = type_ {
                 resolve_type(compiler.clone(), schema.clone(), &t)?
             } else {
                 MType::new_unknown(format!("typeof {}", name).as_str())
             };
-            let compiled = compile_expr(compiler.clone(), schema.clone(), &body)?;
+            let mut compiled = compile_expr(compiler.clone(), schema.clone(), &body)?;
+
+            compiled.expr = match materialize {
+                None => compiled.expr.clone(),
+                Some(args) => compile_materialized_expr(
+                    compiler.clone(),
+                    schema.clone(),
+                    loc.clone(),
+                    name.get().clone(),
+                    compiled.clone(),
+                    args.clone(),
+                )?,
+            };
+
             lhs_type.unify(&compiled.type_)?;
             unify_expr_decl(
                 compiler.clone(),
@@ -1549,6 +1608,41 @@ fn compile_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
     };
 
     Ok(())
+}
+
+fn cref_inline_params(
+    compiler: Compiler,
+    expr: CRef<Expr<CRef<MType>>>,
+) -> Result<CRef<Expr<CRef<MType>>>> {
+    compiler.async_cref(async move {
+        // This inline pass will compress together SQL that can be pushed down to an underlying
+        // remote database by comparing the URLs of subtrees and pushing down the SQL for any
+        // subtree whose URLs are all the same or empty and the parent's is empty.
+        let expr = expr.await?;
+
+        // TODO The only reason this needs to be async is because of unwrap_schema_entry().
+        // If we remove that, then we should not need to
+        let expr = expr.read()?.clone();
+        Ok(mkcref(inline_params(&expr).await?))
+    })
+}
+
+fn optimize_schema(compiler: Compiler, schema: Ref<Schema>) -> CompileResult<()> {
+    let mut result = CompileResult::new(());
+
+    let mut s = c_try!(result, schema.write());
+    for expr in s.expr_decls.values_mut() {
+        let expr_value = expr.value.expr.clone();
+        expr.get_mut().value.expr =
+            c_try!(result, cref_inline_params(compiler.clone(), expr_value));
+    }
+
+    for expr in s.exprs.iter_mut() {
+        let expr_value = expr.expr.clone();
+        expr.get_mut().expr = c_try!(result, cref_inline_params(compiler.clone(), expr_value));
+    }
+
+    result
 }
 
 pub fn gather_schema_externs(schema: Ref<Schema>) -> Result<()> {

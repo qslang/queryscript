@@ -2,6 +2,8 @@ use crate::parser::error::{ErrorLocation, FormattedError, PrettyError};
 use snafu::{Backtrace, ErrorCompat, Snafu};
 use std::fmt;
 
+pub type Result<T, E = QSError> = std::result::Result<T, E>;
+
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
 pub enum QSError {
@@ -21,7 +23,7 @@ pub enum QSError {
     RuntimeError {
         #[snafu(backtrace)]
         source: crate::runtime::error::RuntimeError,
-        file: String,
+        file: Option<String>,
     },
 
     #[snafu(whatever, display("{message}"))]
@@ -83,7 +85,10 @@ impl PrettyError for QSError {
         match self {
             QSError::ParserError { source } => source.location(),
             QSError::CompileError { source } => source.location(),
-            QSError::RuntimeError { file, .. } => ErrorLocation::File(file.clone()),
+            QSError::RuntimeError { file, .. } => match file {
+                Some(file) => ErrorLocation::File(file.clone()),
+                None => ErrorLocation::Unknown,
+            },
             _ => ErrorLocation::Unknown,
         }
     }

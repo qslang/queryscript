@@ -16,3 +16,4 @@ home = "0.5.4"
 queryscript = { path = "../queryscript" }
 rustyline = "10.0.0"
 snafu = { version = "0.7.3", features = ["backtraces"] }
+tokio = "1.23"

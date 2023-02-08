@@ -595,6 +595,10 @@ impl SQLBody {
         }
     }
 
+    pub fn as_statement(&self) -> sqlast::Statement {
+        sqlast::Statement::Query(Box::new(self.as_query()))
+    }
+
     // Returns a query that can be run as-is, but violates the array vs. result set invariants.
     //
     pub fn as_query(&self) -> sqlast::Query {
@@ -806,6 +810,18 @@ where
 }
 
 #[derive(Clone, Debug)]
+pub struct MaterializeExpr<TypeRef>
+where
+    TypeRef: Clone + fmt::Debug + Send + Sync,
+{
+    pub key: String,
+    pub decl_name: Ident,
+    pub expr: TypedExpr<TypeRef>,
+    pub url: Option<Arc<ConnectionString>>,
+    pub inlined: bool,
+}
+
+#[derive(Clone, Debug)]
 pub enum Expr<TypeRef>
 where
     TypeRef: Clone + fmt::Debug + Send + Sync,
@@ -816,6 +832,8 @@ where
     FnCall(FnCallExpr<TypeRef>),
     NativeFn(Ident),
     ContextRef(Ident),
+    Connection(Arc<ConnectionString>),
+    Materialize(MaterializeExpr<TypeRef>),
     Unknown,
 }
 
@@ -858,6 +876,20 @@ impl Expr<CRef<MType>> {
             Expr::SchemaEntry(e) => e.expr.must()?.read()?.to_runtime_type(),
             Expr::NativeFn(f) => Ok(Expr::NativeFn(f.clone())),
             Expr::ContextRef(r) => Ok(Expr::ContextRef(r.clone())),
+            Expr::Connection(c) => Ok(Expr::Connection(c.clone())),
+            Expr::Materialize(MaterializeExpr {
+                key,
+                expr,
+                url: target_url,
+                decl_name,
+                inlined,
+            }) => Ok(Expr::Materialize(MaterializeExpr {
+                key: key.clone(),
+                expr: expr.to_runtime_type()?,
+                url: target_url.clone(),
+                decl_name: decl_name.clone(),
+                inlined: inlined.clone(),
+            })),
             Expr::Unknown => Ok(Expr::Unknown),
         }
     }
@@ -953,7 +985,7 @@ pub fn mkref<T>(t: T) -> Ref<T> {
 #[derive(Clone, Debug)]
 pub enum SchemaPath {
     Schema(ast::Path),
-    Connection(Arc<ConnectionString>),
+    Connection(Located<Arc<ConnectionString>>),
 }
 
 // Implement PartialEq, etc. so that we strip the locations away before doing comparisons
@@ -1106,7 +1138,6 @@ pub enum Importer {
 }
 
 impl Importer {
-    // XXX We may want to have a different SourceLocation option here.
     pub fn location(&self) -> Result<SourceLocation> {
         Ok(match &self {
             Importer::Schema(schema) => SourceLocation::File(schema.read()?.file.clone()),

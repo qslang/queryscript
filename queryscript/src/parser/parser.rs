@@ -223,7 +223,9 @@ impl<'a> Parser<'a> {
         } else if self.consume_keyword("extern") {
             self.parse_extern()
         } else if self.consume_keyword("let") {
-            self.parse_let()
+            self.parse_let(false)
+        } else if self.consume_keyword("mat") {
+            self.parse_let(true)
         } else if self.consume_keyword("type") {
             self.parse_typedef()
         } else if self.consume_keyword("import") || export {
@@ -250,6 +252,7 @@ impl<'a> Parser<'a> {
                     && !self.peek_keyword("fn")
                     && !self.peek_keyword("extern")
                     && !self.peek_keyword("let")
+                    && !self.peek_keyword("mat")
                     && !self.peek_keyword("type")
                     && !self.peek_keyword("import")
                     && !self.peek_keyword("select")
@@ -437,13 +440,14 @@ impl<'a> Parser<'a> {
                 args.push(FnArg { name, type_ });
 
                 self.autocomplete_tokens(&[Token::Comma, Token::RParen]);
-                match self.next_token().token {
+                let next_token = self.next_token();
+                match &next_token.token {
                     Token::Comma => {}
                     Token::RParen => break args,
                     _ => {
                         return unexpected_token!(
                             self.file.clone(),
-                            self.peek_token(),
+                            &next_token,
                             "Expected: ',' | ')'"
                         );
                     }
@@ -487,7 +491,59 @@ impl<'a> Parser<'a> {
         })
     }
 
-    pub fn parse_let(&mut self) -> Result<StmtBody> {
+    pub fn parse_let(&mut self, materialize: bool) -> Result<StmtBody> {
+        let materialize = if materialize {
+            let mut args = Vec::new();
+            if self.peek_token() == Token::LParen {
+                let _ = self.consume_token(&Token::LParen);
+                args = self
+                    .sqlparser
+                    .parse_optional_args()
+                    .context(self.token_context())?;
+            }
+
+            if args.len() > 1 {
+                return Err(ParserError::unimplemented(
+                    self.token_location(),
+                    "mat supports up to 1 argument (db)",
+                ));
+            }
+            let mut db = None;
+            for (i, arg) in args.into_iter().enumerate() {
+                match arg {
+                    sqlast::FunctionArg::Named { name, arg } => {
+                        if Into::<Ident>::into(name.get()) == Into::<Ident>::into("db") {
+                            db = Some(arg);
+                        }
+                    }
+                    sqlast::FunctionArg::Unnamed(arg) => {
+                        if i == 0 {
+                            db = Some(arg);
+                        }
+                    }
+                }
+            }
+            Some(MaterializeArgs {
+                db: match db {
+                    Some(sqlast::FunctionArgExpr::Expr(e)) => Some(Expr {
+                        body: ExprBody::SQLExpr(e),
+                        start: self.peek_start_location().clone(),
+                        end: self.peek_start_location().clone(),
+                        is_unsafe: false,
+                    }),
+                    Some(_) => {
+                        return Err(ParserError::unimplemented(
+                            self.token_location(),
+                            "mat conn argument must be an expression",
+                        ));
+                    }
+                    None => None,
+                },
+            })
+        } else {
+            None
+        };
+
         // Assume the leading "let" or "export" keywords have already been consumed
         //
         let name = self.parse_ident()?;
@@ -514,7 +570,12 @@ impl<'a> Parser<'a> {
 
         self.expect_eos()?;
 
-        Ok(StmtBody::Let { name, type_, body })
+        Ok(StmtBody::Let {
+            name,
+            type_,
+            body,
+            materialize,
+        })
     }
 
     pub fn parse_expr_stmt(&mut self) -> Result<StmtBody> {
@@ -552,6 +613,7 @@ impl<'a> Parser<'a> {
                 loop {
                     args.push(self.parse_type()?);
                     self.autocomplete_tokens(&[Token::Comma, Token::Gt]);
+
                     match self.next_token().token {
                         Token::Comma => {}
                         Token::Gt => break,
@@ -565,6 +627,8 @@ impl<'a> Parser<'a> {
                     }
                 }
                 TypeBody::Generic(type_name, args)
+            } else if self.consume_token(&Token::Neq) {
+                TypeBody::Generic(type_name, Vec::new())
             } else {
                 TypeBody::Reference(type_name)
             }

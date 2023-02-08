@@ -1796,6 +1796,7 @@ dependencies = [
  "snafu",
  "sqllogictest",
  "sqlparser",
+ "strum",
  "tabled",
  "tokio",
  "ts-rs",
@@ -1814,6 +1815,7 @@ dependencies = [
  "queryscript",
  "rustyline",
  "snafu",
+ "tokio",
 ]
 
 [[package]]

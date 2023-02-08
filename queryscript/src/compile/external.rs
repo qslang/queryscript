@@ -40,7 +40,7 @@ pub fn schema_infer_expr_fn(
     inner_type: CRef<MType>,
 ) -> impl std::future::Future<Output = Result<()>> + Send + 'static {
     async move {
-        let ctx = crate::runtime::Context::new(folder, crate::runtime::SQLEngineType::DuckDB)
+        let mut ctx = crate::runtime::Context::new(folder, crate::runtime::SQLEngineType::DuckDB)
             .disable_typechecks();
 
         let typed_expr = CTypedExpr {
@@ -55,7 +55,7 @@ pub fn schema_infer_expr_fn(
             loc: SourceLocation::Unknown,
         })?;
 
-        let result = crate::runtime::eval(&ctx, &typed_expr)
+        let result = crate::runtime::eval(&mut ctx, &typed_expr)
             .await
             .context(RuntimeSnafu {
                 loc: SourceLocation::Unknown,

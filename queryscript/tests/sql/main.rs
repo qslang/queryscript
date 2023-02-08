@@ -52,7 +52,7 @@ mod tests {
             .unwrap();
 
         let target_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/generated")
+            .join("tests/generated/sql")
             .join(test_suffix);
 
         let mut qs_tester = None;

@@ -26,7 +26,7 @@ let series_ranked = unsafe
 let first_round_bye =
     SELECT
         series_ranked.season, series_ranked.team, series_ranked.round_number
-    FROM series_ranked
+    FROM series_ranked series_ranked
     JOIN series_ranked o ON series_ranked.opponent = o.team AND o.opponent = series_ranked.team AND series_ranked.season = o.season
     WHERE
         series_ranked.round_number = 1 AND o.round_number = 2
@@ -38,7 +38,7 @@ let series_ranked_with_bye = unsafe
     SELECT
         series_ranked.season, series_ranked.team, series_ranked.opponent, series_ranked.winner, series_ranked.first_game,
         series_ranked.round_number + (CASE WHEN first_round_bye.team IS NULL THEN 0 ELSE 1 END) AS round_number
-    FROM series_ranked LEFT JOIN first_round_bye USING (season, team)
+    FROM series_ranked series_ranked LEFT JOIN first_round_bye first_round_bye USING (season, team)
 ;
 
 -- Let the 0th round be the "entry" to the playoffs, and the rest (e.g. 1st) be the winner.
@@ -54,14 +54,14 @@ let all_series = unsafe
 -- Teams that showed up in the playoffs the most
 SELECT teams.full_name, total FROM (
     SELECT team, COUNT(*) total FROM all_series GROUP BY 1
-) appearances JOIN teams ON appearances.team = teams.ID ORDER BY 2 DESC LIMIT 10;
+) appearances JOIN teams teams ON appearances.team = teams.ID ORDER BY 2 DESC LIMIT 10;
 
 -- Teams that showed up in the finals the most
 unsafe SELECT teams.full_name, total FROM (
     SELECT team, COUNT(*) total FROM all_series
         WHERE round_number = (SELECT DISTINCT round_number FROM all_series ORDER BY round_number DESC LIMIT 1 OFFSET 1)
     GROUP BY 1
-) appearances JOIN teams ON appearances.team = teams.ID ORDER BY 2 DESC LIMIT 10;
+) appearances JOIN teams teams ON appearances.team = teams.ID ORDER BY 2 DESC LIMIT 10;
 
 let winners = unsafe
     SELECT team, COUNT(*) total FROM all_series
@@ -70,14 +70,14 @@ let winners = unsafe
 ;
 
 -- Teams that won the most
-SELECT teams.full_name, total FROM winners appearances JOIN teams ON appearances.team = teams.ID ORDER BY 2 DESC LIMIT 10;
+SELECT teams.full_name, total FROM winners appearances JOIN teams teams ON appearances.team = teams.ID ORDER BY 2 DESC LIMIT 10;
 
 -- Teams that showed up in the playoffs but never won
 unsafe SELECT teams.full_name, total FROM (
     SELECT team, COUNT(*) total FROM all_series
         WHERE team NOT IN (SELECT team FROM winners)
     GROUP BY 1
-) appearances JOIN teams ON appearances.team = teams.ID ORDER BY 2 DESC LIMIT 10;
+) appearances JOIN teams teams ON appearances.team = teams.ID ORDER BY 2 DESC LIMIT 10;
 
 -- Teams that showed up in the finals but never won
 unsafe SELECT teams.full_name, total FROM (
@@ -85,6 +85,6 @@ unsafe SELECT teams.full_name, total FROM (
         WHERE round_number = (SELECT DISTINCT round_number FROM all_series ORDER BY round_number DESC LIMIT 1 OFFSET 1)
         AND team NOT IN (SELECT team FROM winners)
     GROUP BY 1
-) appearances JOIN teams ON appearances.team = teams.ID ORDER BY 2 DESC LIMIT 10;
+) appearances JOIN teams teams ON appearances.team = teams.ID ORDER BY 2 DESC LIMIT 10;
 
-SELECT round_number, COUNT(DISTINCT team) teams FROM all_series GROUP BY 1 ORDER BY 1;
+SELECT round_number, COUNT(DISTINCT team) teams FROM all_series all_series GROUP BY 1 ORDER BY 1;

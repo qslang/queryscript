@@ -1,9 +1,11 @@
+use snafu::prelude::*;
 use sqlparser::ast as sqlast;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use url::Url;
 
 use crate::ast::{self, Ident, Located, SourceLocation, ToSqlIdent};
+use crate::runtime::SQLEngineType;
 
 use super::compile::ExternalTypeRank;
 use super::external::schema_infer_expr_fn;
@@ -14,13 +16,13 @@ use super::schema::{
 };
 use super::sql::select_limit_0;
 use super::{
-    error::Result,
+    error::{Result, RuntimeSnafu},
     schema::{DeclMap, ExprEntry},
     CompileError,
 };
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct ConnectionString(Located<Url>);
+pub struct ConnectionString(Url);
 
 impl ConnectionString {
     pub fn maybe_parse(
@@ -42,12 +44,9 @@ impl ConnectionString {
                     "file:// URLs are not supported. Use a relative path instead.",
                 ));
             }
-            "duckdb" => {}
-            other => {
-                return Err(CompileError::unimplemented(
-                    loc.clone(),
-                    &format!("{} URLs", other),
-                ));
+            scheme => {
+                let _ = crate::runtime::SQLEngineType::from_name(scheme)
+                    .context(RuntimeSnafu { loc: loc.clone() })?;
             }
         };
 
@@ -82,26 +81,21 @@ impl ConnectionString {
             ));
         }
 
-        Ok(Some(Arc::new(ConnectionString(Located::new(
-            url,
-            loc.clone(),
-        )))))
+        Ok(Some(Arc::new(ConnectionString(url))))
     }
 
-    pub fn db_name(&self) -> Located<Ident> {
+    pub fn db_name(&self) -> Ident {
         let path = Path::new(self.0.path());
-        Located::new(
-            path.file_stem().unwrap().to_str().unwrap().into(),
-            self.0.location().clone(),
-        )
+        path.file_stem().unwrap().to_str().unwrap().into()
+    }
+
+    pub fn engine_type(&self) -> SQLEngineType {
+        SQLEngineType::from_name(self.0.scheme())
+            .expect("Engine type should have been validated in constructor")
     }
 
     pub fn get_url(&self) -> &Url {
-        self.0.get()
-    }
-
-    pub fn location(&self) -> &SourceLocation {
-        self.0.location()
+        &self.0
     }
 }
 
@@ -121,13 +115,15 @@ impl std::fmt::Debug for ConnectionString {
 #[derive(Debug, Clone)]
 pub struct ConnectionSchema {
     pub url: Arc<ConnectionString>,
+    pub location: SourceLocation,
     expr_decls: DeclMap<ExprEntry>,
 }
 
 impl ConnectionSchema {
-    pub fn new(url: Arc<ConnectionString>) -> Self {
+    pub fn new(url: Arc<ConnectionString>, location: SourceLocation) -> Self {
         Self {
             url,
+            location,
             expr_decls: DeclMap::new(),
         }
     }
@@ -200,7 +196,7 @@ impl ConnectionSchema {
                             expr,
                         },
                     },
-                    self.url.as_ref().location().clone(),
+                    self.location.clone(),
                 );
 
                 // Ideally we use the entry interface for this, but it's a little dicey with ownership

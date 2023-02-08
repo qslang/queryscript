@@ -39,6 +39,12 @@ impl Into<sqlast::Ident> for &Ident {
     }
 }
 
+impl Into<sqlast::ObjectName> for &Ident {
+    fn into(self) -> sqlast::ObjectName {
+        sqlast::ObjectName(vec![sqlast::Located::new(self.into(), None)])
+    }
+}
+
 impl From<String> for Ident {
     fn from(s: String) -> Ident {
         Ident(UniCase::new(s))

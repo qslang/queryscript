@@ -70,6 +70,87 @@ where
     async fn visit(&self, visitor: &V) -> Result<Self>;
 }
 
+impl<V: SQLVisitor> VisitSQL<V> for Statement {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        match self {
+            Statement::Query(query) => Statement::Query(query.visit_sql(visitor)),
+            Statement::CreateView {
+                name,
+                columns,
+                query,
+                materialized,
+                or_replace,
+                with_options,
+                cluster_by,
+            } => Statement::CreateView {
+                name: name.visit_sql(visitor),
+                columns: columns.visit_sql(visitor),
+                query: query.visit_sql(visitor),
+                materialized: *materialized,
+                or_replace: *or_replace,
+                with_options: with_options.visit_sql(visitor),
+                cluster_by: cluster_by.visit_sql(visitor),
+            },
+
+            // TODO This is broken (it only traverses some of the tree), but that's good
+            // enough to make our use of CREATE TABLE AS work. We should switch to the new
+            // VisitorMut trait in sqlparser.
+            // (see https://github.com/qscl/queryscript/issues/46)
+            Statement::CreateTable {
+                or_replace,
+                temporary,
+                external,
+                global,
+                if_not_exists,
+                name,
+                columns,
+                constraints,
+                hive_distribution,
+                hive_formats,
+                table_properties,
+                with_options,
+                file_format,
+                location,
+                query,
+                without_rowid,
+                like,
+                clone,
+                engine,
+                default_charset,
+                collation,
+                on_commit,
+                on_cluster,
+            } => Statement::CreateTable {
+                or_replace: *or_replace,
+                temporary: *temporary,
+                external: *external,
+                global: *global,
+                if_not_exists: *if_not_exists,
+                name: name.visit_sql(visitor),
+                columns: columns.visit_sql(visitor),
+                constraints: constraints.clone(),
+                hive_distribution: hive_distribution.clone(),
+                hive_formats: hive_formats.clone(),
+                table_properties: table_properties.clone(),
+                with_options: with_options.clone(),
+                file_format: file_format.clone(),
+                location: location.clone(),
+                query: query.as_ref().map(|q| q.visit_sql(visitor)),
+                without_rowid: *without_rowid,
+                like: like.visit_sql(visitor),
+                clone: clone.visit_sql(visitor),
+                engine: engine.clone(),
+                default_charset: default_charset.clone(),
+                collation: collation.clone(),
+                on_commit: on_commit.clone(),
+                on_cluster: on_cluster.clone(),
+            },
+
+            _ => self.clone(),
+        }
+    }
+}
+
 impl<V: SQLVisitor> VisitSQL<V> for Query {
     fn visit_sql(&self, visitor: &V) -> Self {
         if let Some(q) = visitor.visit_sqlquery(self) {
@@ -574,7 +655,7 @@ impl<V: SQLVisitor> VisitSQL<V> for TableFactor {
                 with_hints,
             } => Table {
                 name: name.visit_sql(visitor),
-                alias: alias.visit_sql(visitor),
+                alias: alias.clone(), // Do not visit the alias -- changing it can bork the type
                 args: args.visit_sql(visitor),
                 with_hints: with_hints.visit_sql(visitor),
             },
@@ -585,11 +666,11 @@ impl<V: SQLVisitor> VisitSQL<V> for TableFactor {
             } => Derived {
                 lateral: *lateral,
                 subquery: subquery.visit_sql(visitor),
-                alias: alias.visit_sql(visitor),
+                alias: alias.clone(),
             },
             TableFunction { expr, alias } => TableFunction {
                 expr: expr.visit_sql(visitor),
-                alias: alias.visit_sql(visitor),
+                alias: alias.clone(),
             },
             UNNEST {
                 alias,
@@ -597,17 +678,17 @@ impl<V: SQLVisitor> VisitSQL<V> for TableFactor {
                 with_offset,
                 with_offset_alias,
             } => UNNEST {
-                alias: alias.visit_sql(visitor),
+                alias: alias.clone(),
                 array_expr: array_expr.visit_sql(visitor),
                 with_offset: *with_offset,
-                with_offset_alias: with_offset_alias.visit_sql(visitor),
+                with_offset_alias: with_offset_alias.clone(),
             },
             NestedJoin {
                 table_with_joins,
                 alias,
             } => NestedJoin {
                 table_with_joins: table_with_joins.visit_sql(visitor),
-                alias: alias.visit_sql(visitor),
+                alias: alias.clone(),
             },
         }
     }
@@ -655,7 +736,7 @@ impl<V: SQLVisitor> VisitSQL<V> for SelectItem {
             UnnamedExpr(e) => UnnamedExpr(e.visit_sql(visitor)),
             ExprWithAlias { expr, alias } => ExprWithAlias {
                 expr: expr.visit_sql(visitor),
-                alias: alias.visit_sql(visitor),
+                alias: alias.clone(), // Do not visit the alias -- changing it can bork the type
             },
             QualifiedWildcard(name, options) => {
                 QualifiedWildcard(name.visit_sql(visitor), options.visit_sql(visitor))
@@ -708,7 +789,7 @@ impl<V: SQLVisitor> VisitSQL<V> for IdentWithAlias {
     fn visit_sql(&self, visitor: &V) -> Self {
         IdentWithAlias {
             ident: self.ident.visit_sql(visitor),
-            alias: self.alias.visit_sql(visitor), // NOTE: We may not want to visit the alias
+            alias: self.alias.clone(), // Do not visit the alias -- changing it can bork the type
         }
     }
 }
@@ -756,6 +837,35 @@ impl<V: SQLVisitor> VisitSQL<V> for OrderByExpr {
             expr: self.expr.visit_sql(visitor),
             asc: self.asc.clone(),
             nulls_first: self.nulls_first.clone(),
+        }
+    }
+}
+
+impl<V: SQLVisitor> VisitSQL<V> for SqlOption {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        SqlOption {
+            name: self.name.visit_sql(visitor),
+            value: self.value.clone(),
+        }
+    }
+}
+
+impl<V: SQLVisitor> VisitSQL<V> for ColumnDef {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        ColumnDef {
+            name: self.name.visit_sql(visitor),
+            data_type: self.data_type.clone(),
+            collation: self.collation.visit_sql(visitor),
+            options: self.options.visit_sql(visitor),
+        }
+    }
+}
+
+impl<V: SQLVisitor> VisitSQL<V> for ColumnOptionDef {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        ColumnOptionDef {
+            name: self.name.visit_sql(visitor),
+            option: self.option.clone(),
         }
     }
 }
@@ -856,6 +966,20 @@ impl<V: Visitor<schema::CRef<schema::MType>> + Sync> Visit<V, schema::CRef<schem
             }
             Expr::NativeFn(f) => Expr::NativeFn(f.clone()),
             Expr::ContextRef(r) => Expr::ContextRef(r.clone()),
+            Expr::Connection(u) => Expr::Connection(u.clone()),
+            Expr::Materialize(MaterializeExpr {
+                key,
+                expr,
+                url,
+                decl_name,
+                inlined,
+            }) => Expr::Materialize(MaterializeExpr {
+                key: key.clone(),
+                expr: expr.visit(visitor).await?,
+                url: url.clone(),
+                decl_name: decl_name.clone(),
+                inlined: inlined.clone(),
+            }),
             Expr::Unknown => Expr::Unknown,
         })
     }

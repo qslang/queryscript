@@ -1,0 +1,35 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let foo": [{
+        	org_id Int32,
+        	c Int64,
+        }],
+        "let users": [{
+        	id Int32,
+        	org_id Int32,
+        	name Utf8,
+        	active Boolean,
+        }],
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "MAX(c)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| MAX(c) |\n|--------|\n| 2      |",
+            },
+        ),
+    ],
+}

@@ -6,6 +6,7 @@ use std::path::Path;
 
 use queryscript::compile;
 use queryscript::error::*;
+use queryscript::materialize;
 use queryscript::parser;
 use queryscript::parser::error::PrettyError;
 use queryscript::runtime;
@@ -34,18 +35,24 @@ struct Cli {
     #[arg(short, long)]
     execute: Option<String>,
 
+    /// Disable inlining (e.g. function calls)
     #[arg(long)]
     no_inlining: bool,
 
     /// Ignore compilation errors and continue executing queries
     #[arg(long)]
     ignore_errors: bool,
+
+    /// Save the exported views back to the original database
+    #[arg(long)]
+    save: bool,
 }
 
 enum Mode {
     Execute,
     Compile,
     Parse,
+    Save,
 }
 
 fn main() {
@@ -67,10 +74,18 @@ fn main_result() -> Result<(), QSError> {
         whatever!("Cannot run with --compile and --parse");
     }
 
+    if cli.save {
+        if cli.compile || cli.parse || cli.execute.is_some() {
+            whatever!("Cannot run with --save and --compile, --parse, or --execute");
+        }
+    }
+
     let mode = if cli.compile {
         Mode::Compile
     } else if cli.parse {
         Mode::Parse
+    } else if cli.save {
+        Mode::Save
     } else {
         Mode::Execute
     };
@@ -121,6 +136,9 @@ fn main_result() -> Result<(), QSError> {
             }
             if cli.execute.is_some() {
                 whatever!("Cannot run single expression (--execute) in the repl");
+            }
+            if cli.save {
+                whatever!("Cannot run save back to the database (--save) in the repl");
             }
             let rt = runtime::build().context(RuntimeSnafu {
                 file: "<repl>".to_string(),
@@ -202,6 +220,8 @@ fn run_file(
             .as_result()?;
     }
 
+    let ctx_pool =
+        queryscript::runtime::ContextPool::new(schema.read()?.folder.clone(), engine_type);
     if matches!(mode, Mode::Compile) {
         if execute.is_none() {
             println!("{:#?}", schema);
@@ -209,16 +229,19 @@ fn run_file(
             println!("{:#?}", schema.read()?.exprs.first().unwrap());
         }
         return Ok(());
+    } else if matches!(mode, Mode::Save) {
+        rt.block_on(async { materialize::save_views(&ctx_pool, schema).await })?;
+        return Ok(());
     }
 
-    let ctx = queryscript::runtime::Context::new(schema.read()?.folder.clone(), engine_type);
     let locked_schema = schema.read()?;
+    let mut ctx = ctx_pool.get();
     for expr in locked_schema.exprs.iter() {
         let expr = expr.to_runtime_type().context(RuntimeSnafu {
             file: file.to_string(),
         })?;
         let value = rt
-            .block_on(async { runtime::eval(&ctx, &expr).await })
+            .block_on(async { runtime::eval(&mut ctx, &expr).await })
             .context(RuntimeSnafu {
                 file: file.to_string(),
             })?;

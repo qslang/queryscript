@@ -12,7 +12,7 @@ use crate::compile::compile::{
     coerce, lookup_path, resolve_global_atom, typecheck_path, Compiler, SymbolKind,
 };
 use crate::compile::error::*;
-use crate::compile::generics::{as_generic, ExternalType};
+use crate::compile::generics::{as_generic, ConnectionType, ExternalType, GenericConstructor};
 use crate::compile::inference::*;
 use crate::compile::inline::*;
 use crate::compile::schema::*;
@@ -150,6 +150,52 @@ pub fn select_limit_0(mut query: sqlast::Query) -> sqlast::Query {
         false,
     )));
     query
+}
+
+pub fn create_view_as(name: sqlast::ObjectName, query: sqlast::Query) -> sqlast::Statement {
+    sqlast::Statement::CreateView {
+        name,
+        query: Box::new(query),
+        or_replace: true,
+
+        columns: Vec::new(),
+        materialized: false,
+        with_options: Vec::new(),
+        cluster_by: Vec::new(),
+    }
+}
+
+pub fn create_table_as(
+    name: sqlast::ObjectName,
+    query: sqlast::Query,
+    temporary: bool,
+) -> sqlast::Statement {
+    sqlast::Statement::CreateTable {
+        name,
+        query: Some(Box::new(query)),
+        or_replace: true,
+
+        temporary,
+        external: false,
+        global: None,
+        if_not_exists: false,
+        columns: Vec::new(),
+        constraints: Vec::new(),
+        hive_distribution: sqlast::HiveDistributionStyle::NONE,
+        hive_formats: None,
+        table_properties: Vec::new(),
+        with_options: Vec::new(),
+        file_format: None,
+        location: None,
+        without_rowid: false,
+        like: None,
+        clone: None,
+        engine: None,
+        default_charset: None,
+        collation: None,
+        on_commit: None,
+        on_cluster: None,
+    }
 }
 
 pub fn with_table_alias(
@@ -296,7 +342,7 @@ pub fn compile_reference(
     schema: Ref<Schema>,
     path: &ast::Path,
 ) -> Result<TypedExpr<CRef<MType>>> {
-    let (_, decl, remainder) = lookup_path::<ExprEntry>(
+    let (importer, decl, remainder) = lookup_path::<ExprEntry>(
         compiler.clone(),
         Importer::Schema(schema.clone()),
         &path,
@@ -304,7 +350,31 @@ pub fn compile_reference(
         true, /* resolve_last */
     )?;
 
-    let decl = decl.ok_or_else(|| CompileError::no_such_entry(path.clone()))?;
+    let decl = match decl {
+        Some(decl) => decl,
+        None => match importer {
+            Importer::Schema(..) => return Err(CompileError::no_such_entry(path.clone())),
+            Importer::Connection(schema) => {
+                let (url, loc) = {
+                    let s = schema.read()?;
+                    (s.url.clone(), s.location.clone())
+                };
+                Decl {
+                    public: true,
+                    extern_: false,
+                    fn_arg: false,
+                    name: Located::new(url.db_name(), loc),
+                    value: STypedExpr {
+                        type_: SType::new_mono(mkcref(MType::Generic(Located::new(
+                            ConnectionType::new(&SourceLocation::Unknown, Vec::new())?,
+                            SourceLocation::Unknown,
+                        )))),
+                        expr: mkcref(Expr::Connection(url.clone())),
+                    },
+                }
+            }
+        },
+    };
     let remainder_cpy = remainder.clone();
 
     let expr = &decl.value;
@@ -1609,7 +1679,7 @@ pub fn schema_infer_load_fn(
     inner_type: CRef<MType>,
 ) -> impl std::future::Future<Output = Result<()>> + Send + 'static {
     async move {
-        let ctx = crate::runtime::Context::new(
+        let mut ctx = crate::runtime::Context::new(
             schema.read()?.folder.clone(),
             crate::runtime::SQLEngineType::DuckDB,
         )
@@ -1619,11 +1689,13 @@ pub fn schema_infer_load_fn(
             let runtime_expr = e.to_typed_expr().to_runtime_type().context(RuntimeSnafu {
                 loc: SourceLocation::Unknown,
             })?;
-            let eval_expr = crate::runtime::eval(&ctx, &runtime_expr).await.context({
-                RuntimeSnafu {
-                    loc: SourceLocation::Unknown,
-                }
-            })?;
+            let eval_expr = crate::runtime::eval(&mut ctx, &runtime_expr)
+                .await
+                .context({
+                    RuntimeSnafu {
+                        loc: SourceLocation::Unknown,
+                    }
+                })?;
             runtime_args.push(eval_expr);
         }
         let inferred_type = crate::runtime::functions::LoadFileFn::infer(&ctx, runtime_args)

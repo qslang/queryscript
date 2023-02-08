@@ -173,12 +173,12 @@ fn run_command(
             };
 
             if let Some(compiled) = compiled {
-                let ctx = queryscript::runtime::Context::new(folder, engine_type);
+                let mut ctx = queryscript::runtime::Context::new(folder, engine_type);
                 let expr = compiled.to_runtime_type().context(RuntimeSnafu {
                     file: file.to_string(),
                 })?;
                 let value = rt
-                    .block_on(async move { runtime::eval(&ctx, &expr).await })
+                    .block_on(async move { runtime::eval(&mut ctx, &expr).await })
                     .context(RuntimeSnafu {
                         file: file.to_string(),
                     })?;

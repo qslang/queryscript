@@ -1,25 +1,44 @@
 use sqlparser::ast as sqlast;
 use std::{collections::HashMap, sync::Arc};
 
-use super::{error::Result, Context};
+use super::error::Result;
 use crate::ast::Ident;
+use crate::compile::ConnectionString;
 use crate::types::{Relation, Type, Value};
 
 use async_trait::async_trait;
 
-// TODO: For foreign databases (e.g. Postgres), we'll either need to store
-// parameters to these databases in the engine (which may manage 1 or more
-// connections), or pass them in. Either way, engines are expected to manage
-// interior mutability, since concurrency properties may differ across them.
+/// An engine is a wrapper around a connection to a database, capable of running certain
+/// commands. The functions except a mutable reference to the engine, so that we can leverage
+/// the Rust compiler to ensure exclusive access.
 #[async_trait]
 pub trait SQLEngine: std::fmt::Debug + Send + Sync {
     async fn eval(
-        &self,
-        ctx: &Context,
-        url: Option<Arc<crate::compile::ConnectionString>>,
-        query: &sqlast::Query,
+        &mut self,
+        query: &sqlast::Statement,
         params: HashMap<Ident, SQLParam>,
     ) -> Result<Arc<dyn Relation>>;
+
+    async fn load(
+        &mut self,
+        table: &sqlast::ObjectName,
+        value: Value,
+        type_: Type,
+        temporary: bool,
+    ) -> Result<()>;
+
+    async fn create(&mut self) -> Result<()>;
+
+    /// Ideally, this gets generalized and we use information schema tables. However, there's
+    /// no standard way to tell what database we're currently in. We should generalize this function
+    /// eventually.
+    async fn table_exists(&mut self, name: &sqlast::ObjectName) -> Result<bool>;
+
+    fn engine_type(&self) -> SQLEngineType;
+}
+
+pub trait SQLEnginePool {
+    fn new(url: Option<Arc<ConnectionString>>) -> Result<Box<dyn SQLEngine>>;
 }
 
 #[derive(Debug, Clone)]
@@ -59,9 +78,18 @@ impl SQLEngineType {
     }
 }
 
-pub fn new_engine(kind: SQLEngineType) -> Arc<dyn SQLEngine> {
+pub fn embedded_engine(kind: SQLEngineType) -> Box<dyn SQLEngine> {
     use SQLEngineType::*;
     match kind {
-        DuckDB => Arc::new(super::duckdb::DuckDBEngine::new()),
+        DuckDB => super::duckdb::DuckDBEngine::new(None),
+    }
+    .expect("Failed to create embedded engine")
+}
+
+// TODO We should turn this into a real pool
+pub fn new_engine(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>> {
+    use SQLEngineType::*;
+    match url.engine_type() {
+        DuckDB => super::duckdb::DuckDBEngine::new(Some(url)),
     }
 }

@@ -240,6 +240,18 @@ pub struct Expr {
     pub is_unsafe: bool,
 }
 
+impl Expr {
+    pub fn unlocated(body: ExprBody) -> Self {
+        let empty_loc = Location { line: 0, column: 0 };
+        Expr {
+            body,
+            start: empty_loc.clone(),
+            end: empty_loc,
+            is_unsafe: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum ImportList {
     None,
@@ -252,6 +264,11 @@ pub enum FnBody {
     Expr(Expr),
     Native, // A NativeFn (e.g. load)
     SQL,    // A function we expect to exist in the SQL runtime
+}
+
+#[derive(Clone, Debug)]
+pub struct MaterializeArgs {
+    pub db: Option<Expr>,
 }
 
 #[derive(Clone, Debug)]
@@ -276,6 +293,7 @@ pub enum StmtBody {
         name: Located<Ident>,
         type_: Option<Type>,
         body: Expr,
+        materialize: Option<MaterializeArgs>,
     },
     Extern {
         name: Located<Ident>,

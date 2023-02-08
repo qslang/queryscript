@@ -2,10 +2,11 @@ use futures::future::{BoxFuture, FutureExt};
 use std::collections::HashMap;
 
 use crate::compile::schema;
+use crate::compile::sql::create_table_as;
 use crate::{
     ast::Ident,
     types,
-    types::{Arc, Value},
+    types::{arrow::EMPTY_RELATION, Arc, Value},
 };
 
 use super::{context::Context, error::*, sql::SQLParam};
@@ -25,8 +26,20 @@ pub fn build() -> Result<Runtime> {
     .build()?)
 }
 
+pub fn expensive<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(f)
+        }
+        _ => f(),
+    }
+}
+
 pub async fn eval_params<'a>(
-    ctx: &'a Context,
+    ctx: &'a mut Context,
     params: &'a schema::Params<TypeRef>,
 ) -> Result<HashMap<Ident, SQLParam>> {
     let mut param_values = HashMap::new();
@@ -42,7 +55,7 @@ pub async fn eval_params<'a>(
 }
 
 pub fn eval<'a>(
-    ctx: &'a Context,
+    ctx: &'a mut Context,
     typed_expr: &'a schema::TypedExpr<TypeRef>,
 ) -> BoxFuture<'a, crate::runtime::Result<crate::types::Value>> {
     async move {
@@ -52,6 +65,9 @@ pub fn eval<'a>(
             }
             schema::Expr::SchemaEntry(schema::STypedExpr { .. }) => {
                 return Err(RuntimeError::new("unresolved schema entry"));
+            }
+            schema::Expr::Connection(..) => {
+                return Err(RuntimeError::new("unresolved connection"));
             }
             schema::Expr::ContextRef(r) => match ctx.values.get(r) {
                 Some(v) => Ok(v.clone()), // Can we avoid this clone??
@@ -83,6 +99,45 @@ pub fn eval<'a>(
                     _ => return rt_unimplemented!("native function: {}", name),
                 }
             }
+            schema::Expr::Materialize(schema::MaterializeExpr {
+                key,
+                expr,
+                inlined,
+                decl_name,
+                ..
+            }) => {
+                if let Some(value) = ctx.materializations.get(key) {
+                    return Ok(value.clone());
+                }
+
+                let result = match (inlined, expr.expr.as_ref()) {
+                    (true, schema::Expr::SQL(sql, sql_url)) => {
+                        let table_name = decl_name.into();
+                        let engine = ctx.sql_engine(sql_url.clone())?;
+
+                        if !engine.table_exists(&table_name).await? {
+                            let query = create_table_as(table_name, sql.body.as_query(), true);
+                            let sql_params = eval_params(ctx, &sql.names.params).await?;
+                            let _ = ctx
+                                .sql_engine(sql_url.clone())?
+                                .eval(&query, sql_params)
+                                .await?;
+                        }
+
+                        // Don't stash the fact that we created the temporary table in the materialization index
+                        // NOTE: For performance sake, we could cache something here (that we created the temp
+                        // table), but for now we assume checking if the table exists is fast enough.
+                        return Ok(EMPTY_RELATION.clone());
+                    }
+                    _ => eval(ctx, expr).await?,
+                };
+
+                Ok(ctx
+                    .materializations
+                    .entry(key.clone())
+                    .or_insert(result)
+                    .clone())
+            }
             schema::Expr::FnCall(schema::FnCallExpr {
                 func,
                 args,
@@ -96,23 +151,22 @@ pub fn eval<'a>(
                     //
                     arg_values.push(eval(ctx, arg).await?);
                 }
-                let fn_val = match eval(&new_ctx, func.as_ref()).await? {
+                let fn_val = match eval(&mut new_ctx, func.as_ref()).await? {
                     Value::Fn(f) => f,
                     _ => return fail!("Cannot call non-function"),
                 };
 
-                fn_val.execute(&new_ctx, arg_values).await
+                fn_val.execute(&mut new_ctx, arg_values).await
             }
             schema::Expr::SQL(e, url) => {
                 let schema::SQL { body, names } = e.as_ref();
                 let sql_params = eval_params(ctx, &names.params).await?;
-                let query = body.as_query();
+                let query = body.as_statement();
+
+                let engine = ctx.sql_engine(url.clone())?;
 
                 // TODO: This ownership model implies some necessary copying (below).
-                let rows = ctx
-                    .sql_engine
-                    .eval(ctx, url.clone(), &query, sql_params)
-                    .await?;
+                let rows = engine.eval(&query, sql_params).await?;
 
                 // Before returning, we perform some runtime checks that might only be necessary in debug mode:
                 // - For expressions, validate that the result is a single row and column

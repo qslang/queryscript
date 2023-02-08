@@ -50,6 +50,30 @@ impl Relation for ArrowRecordBatchRelation {
     }
 }
 
+lazy_static::lazy_static! {
+    pub static ref EMPTY_RELATION: Value = Value::Relation(Arc::new(EmptyRelation()));
+}
+#[derive(Debug, Clone)]
+pub struct EmptyRelation();
+
+impl Relation for EmptyRelation {
+    fn schema(&self) -> Vec<Field> {
+        vec![]
+    }
+
+    fn num_batches(&self) -> usize {
+        0
+    }
+
+    fn batch(&self, _index: usize) -> &dyn RecordBatch {
+        panic!("No batches in empty relation")
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
 impl RecordBatch for ArrowRecordBatch {
     fn schema(&self) -> Vec<Field> {
         try_arrow_fields_to_fields(&self.schema().fields).expect("Failed to convert relation type")
