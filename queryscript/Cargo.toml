@@ -3,6 +3,15 @@ name = "queryscript"
 version = "0.1.0"
 edition = "2021"
 authors = ["Ankur Goyal <ankrgyl@gmail.com>", "Michael Andrews <09mandrews@gmail.com>"]
+description = "Queryscript is a SQL-based language that allows you to use higher order abstractions like variables, functions, and modules alongside SQL queries."
+homepage = "https://github.com/qscl/queryscript"
+repository = "https://github.com/qscl/queryscript"
+readme = "../README.md"
+license = "MIT"
+keywords = ["sql", "bi"]
+exclude = [
+    "tests/**"
+]
 
 [lib]
 name = "queryscript"
@@ -39,7 +48,7 @@ lazy_static = "1.4.0"
 object_store = "0.5.0"
 serde = { version = "1", optional = true }
 snafu = { version = "0.7.3" }
-sqlparser = { path = "../sqlparser-rs" }
+sqlparser = { path = "../sqlparser-rs", version = "0.30.0" }
 tabled = "0.10"
 tokio = "1.23"
 ts-rs = { version = "6.2", optional = true }
