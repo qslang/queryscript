@@ -769,7 +769,7 @@ pub fn resolve_type(
                 None => return Err(CompileError::no_such_entry(path.clone())),
             };
 
-            Ok(mkcref(MType::Generic(Located::new(generic, loc))))
+            Ok(MType::Generic(Located::new(generic, loc)).resolve_generics()?)
         }
     }
 }

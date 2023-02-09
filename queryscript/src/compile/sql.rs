@@ -14,9 +14,7 @@ use crate::compile::compile::{
 };
 use crate::compile::error::*;
 use crate::compile::generics;
-use crate::compile::generics::{
-    as_generic, ConnectionType, ExternalType, Generic, GenericConstructor,
-};
+use crate::compile::generics::{as_generic, ConnectionType, ExternalType, GenericConstructor};
 use crate::compile::inference::*;
 use crate::compile::inline::*;
 use crate::compile::schema::*;
@@ -1592,40 +1590,34 @@ fn coerce_all(
         CoerceOp::Binary(op.clone()),
         arg_types.clone(),
     ));
-    let target = mkcref(MType::Generic(Located::new(generic.clone(), loc.clone())));
-
-    let target_rt = combine_crefs(arg_types.clone())?.then({
-        let loc = loc.clone();
-        move |_: Ref<Vec<Ref<MType>>>| {
-            let target = generic
-                .to_runtime_type()
-                .context(RuntimeSnafu { loc: loc.clone() })?;
-            Ok(mkcref(target))
-        }
-    })?;
+    let target = MType::Generic(Located::new(generic.clone(), loc.clone())).resolve_generics()?;
 
     let mut ret = Vec::new();
     for arg in args.into_iter() {
         ret.push(CTypedSQL {
-            type_: target.clone(),
+            type_: target
+                .clone()
+                .then(|t: Ref<MType>| t.read()?.resolve_generics())?,
             sql: compiler.clone().async_cref({
                 let compiler = compiler.clone();
                 let target = target.clone();
-                let target_rt = target_rt.clone();
                 async move {
-                    let target = target.await?;
-                    let target_rt = target_rt.await?;
+                    let target = target.await?.read()?.clone();
                     let my_type = arg.type_.await?;
+                    let loc = my_type.read()?.location();
+                    let target_rt = target
+                        .to_runtime_type()
+                        .context(RuntimeSnafu { loc: loc.clone() })?;
                     let my_type = my_type.read()?;
 
                     Ok(
                         if !matches!(&*my_type, MType::Name(_))
-                            && *target_rt.read()?
-                                != my_type.to_runtime_type().context(RuntimeSnafu {
-                                    loc: my_type.location(),
-                                })?
+                            && target_rt
+                                != my_type
+                                    .to_runtime_type()
+                                    .context(RuntimeSnafu { loc: loc.clone() })?
                         {
-                            apply_sqlcast(compiler, arg.sql.clone(), target.clone())?
+                            apply_sqlcast(compiler, arg.sql.clone(), mkref(target))?
                         } else {
                             arg.sql
                         },
