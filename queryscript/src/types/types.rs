@@ -188,14 +188,14 @@ pub enum AtomicType {
     /// * scale is the number of digits past the decimal
     ///
     /// For example the number 123.45 has precision 5 and scale 2.
-    Decimal128(u8, u8),
+    Decimal128(u8, i8),
     /// Exact 256-bit width decimal value with precision and scale
     ///
     /// * precision is the total number of digits
     /// * scale is the number of digits past the decimal
     ///
     /// For example the number 123.45 has precision 5 and scale 2.
-    Decimal256(u8, u8),
+    Decimal256(u8, i8),
     //
     // The Arrow DataType struct contains several composite types, which we break out
     // this enum. Several of them we exclude entirely.

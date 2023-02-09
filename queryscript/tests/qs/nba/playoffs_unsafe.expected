@@ -202,7 +202,7 @@
                         ],
                     ),
                 ),
-                value: "| full_name              | total |\n|------------------------|-------|\n| Utah Jazz              | 56    |\n| Portland Trail Blazers | 51    |\n| Phoenix Suns           | 50    |\n| Oklahoma City Thunder  | 50    |\n| Indiana Pacers         | 46    |\n| New York Knicks        | 42    |\n| Atlanta Hawks          | 42    |\n| Denver Nuggets         | 37    |\n| Brooklyn Nets          | 34    |\n| Orlando Magic          | 27    |",
+                value: "| full_name              | total |\n|------------------------|-------|\n| Utah Jazz              | 56    |\n| Portland Trail Blazers | 51    |\n| Phoenix Suns           | 50    |\n| Oklahoma City Thunder  | 50    |\n| Indiana Pacers         | 46    |\n| Atlanta Hawks          | 42    |\n| New York Knicks        | 42    |\n| Denver Nuggets         | 37    |\n| Brooklyn Nets          | 34    |\n| Orlando Magic          | 27    |",
             },
         ),
         Ok(
@@ -227,7 +227,7 @@
                         ],
                     ),
                 ),
-                value: "| full_name              | total |\n|------------------------|-------|\n| Portland Trail Blazers | 2     |\n| Phoenix Suns           | 2     |\n| New York Knicks        | 2     |\n| Orlando Magic          | 2     |\n| Oklahoma City Thunder  | 2     |\n| Utah Jazz              | 2     |\n| Brooklyn Nets          | 2     |\n| Indiana Pacers         | 1     |",
+                value: "| full_name              | total |\n|------------------------|-------|\n| Portland Trail Blazers | 2     |\n| Phoenix Suns           | 2     |\n| Orlando Magic          | 2     |\n| Oklahoma City Thunder  | 2     |\n| Utah Jazz              | 2     |\n| Brooklyn Nets          | 2     |\n| New York Knicks        | 2     |\n| Indiana Pacers         | 1     |",
             },
         ),
         Ok(

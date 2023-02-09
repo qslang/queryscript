@@ -31,15 +31,23 @@ cli = ["clap", "home", "rustyline"]
 
 [dependencies]
 
-arrow = { version = "*", default-features = false, features = [
+# This version is synchronized with duckdb-rs
+arrow = { version = "28", default-features = false, features = [
     "csv",
     "ffi",
     "json",
     "prettyprint",
 ] }
+# We don't import this directly (rather, through "arrow"), but need the serde feature
+# to be propagated through to it.
+arrow-schema = { version = "28" }
+arrow-buffer = { version = "28" }
+parquet = { version = "28" }
+
 async-trait = "0.1"
 chrono = { version = "0.4.22", default-features = false }
 colored = "2"
+cxx = "1.0"
 difference = "2.0"
 dyn-clone = "1.0.9"
 futures = "0.3"
@@ -55,21 +63,14 @@ ts-rs = { version = "6.2", optional = true }
 unicase = "2.6.0"
 url = "2.3.1"
 
-# We don't import this directly (rather, through "arrow"), but need the serde feature
-# to be propagated through to it.
-arrow-schema = { version = "*" }
-arrow-buffer = { version = "*" }
-
-# This comes via arrow, but we need to access it directly.
-parquet = { version = "*" }
 
 # -- ENGINES ---
 # TODO: We should put each database dependency runtime behind a feature flag
 # DuckDB.
-duckdb = { version = "0.6.0", features = ["bundled"] }
-cxx = "1.0"
+duckdb = { version = "0.6.1", features = ["bundled"] }
 # These are duckdb dependencies that we access directly
-hashlink = { version = "*" }
+hashlink = { version = "0.8" }
+
 
 # -- CLI ---
 clap = { version = "4.0", features = ["derive"], optional = true }
