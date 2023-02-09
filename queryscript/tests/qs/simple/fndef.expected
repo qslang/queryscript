@@ -1,44 +1,27 @@
 {
     "compile_errors": [
         (
-            Some(
-                6,
-            ),
-            WrongType {
-                lhs: {
-                	id ?field?,
+            None,
+            RuntimeError {
+                source: StringError {
+                    what: "",
+                    backtrace: None,
                 },
-                rhs: "R",
-                backtrace: None,
+                loc: Unknown,
             },
         ),
         (
-            Some(
-                7,
-            ),
+            None,
             WrongType {
                 lhs: {
                 	foo ?field?,
                 },
-                rhs: "R",
-                backtrace: None,
-            },
-        ),
-        (
-            None,
-            NoSuchEntry {
-                path: [
-                    "R",
-                ],
-                backtrace: None,
-            },
-        ),
-        (
-            None,
-            NoSuchEntry {
-                path: [
-                    "R",
-                ],
+                rhs: {
+                	id Int32,
+                	org_id Int32,
+                	name Utf8,
+                	active Boolean,
+                },
                 backtrace: None,
             },
         ),
@@ -46,145 +29,75 @@
             None,
             RuntimeError {
                 source: StringError {
-                    what: "Unknown type cannot exist at runtime (?slot?)",
+                    what: "",
                     backtrace: None,
                 },
-                loc: Range(
-                    "tests/qs/simple/fndef.qs",
-                    Range {
-                        start: Location {
-                            line: 25,
-                            column: 1,
-                        },
-                        end: Location {
-                            line: 25,
-                            column: 48,
-                        },
-                    },
-                ),
+                loc: Unknown,
             },
         ),
         (
             None,
-            RuntimeError {
-                source: StringError {
-                    what: "Unknown type cannot exist at runtime (?slot?)",
-                    backtrace: None,
+            WrongType {
+                lhs: {
+                	foo ?field?,
                 },
-                loc: Range(
-                    "tests/qs/simple/fndef.qs",
-                    Range {
-                        start: Location {
-                            line: 26,
-                            column: 1,
-                        },
-                        end: Location {
-                            line: 26,
-                            column: 51,
-                        },
-                    },
-                ),
-            },
-        ),
-        (
-            None,
-            RuntimeError {
-                source: StringError {
-                    what: "Unknown type cannot exist at runtime (?slot?)",
-                    backtrace: None,
+                rhs: {
+                	active Boolean,
+                	id Int64,
+                	name Utf8,
+                	org_id Int64,
                 },
-                loc: Range(
-                    "tests/qs/simple/fndef.qs",
-                    Range {
-                        start: Location {
-                            line: 28,
-                            column: 1,
-                        },
-                        end: Location {
-                            line: 28,
-                            column: 49,
-                        },
-                    },
-                ),
-            },
-        ),
-        (
-            None,
-            RuntimeError {
-                source: StringError {
-                    what: "Unknown type cannot exist at runtime (?slot?)",
-                    backtrace: None,
-                },
-                loc: Range(
-                    "tests/qs/simple/fndef.qs",
-                    Range {
-                        start: Location {
-                            line: 29,
-                            column: 1,
-                        },
-                        end: Location {
-                            line: 29,
-                            column: 52,
-                        },
-                    },
-                ),
-            },
-        ),
-        (
-            None,
-            NoSuchEntry {
-                path: [
-                    "R",
-                ],
                 backtrace: None,
             },
         ),
         (
             None,
-            NoSuchEntry {
-                path: [
-                    "users",
-                ],
-                backtrace: None,
+            RuntimeError {
+                source: StringError {
+                    what: "",
+                    backtrace: None,
+                },
+                loc: Unknown,
             },
         ),
     ],
     "decls": {
-        "let bar": ∀ "R" λ {
+        "let bar": ∀ "__Return", "R" λ {
         	a "R",
-        } -> ?async_slot?,
-        "let foo": ∀ "R" λ {
+        } -> "__Return",
+        "let baz": ∀ "__Return", "A", "B", "C" λ {
+        	a "A",
+        	b "B",
+        	c "C",
+        } -> "__Return",
+        "let foo": ∀ "__Return", "R" λ {
         	a "R",
-        } -> ?slot?,
+        } -> "__Return",
         "let identity": ∀ "R" λ {
         	u "R",
         } -> "R",
-        "let rel_foo": ?rel_foo type?,
-        "let rel_id": ?rel_id type?,
+        "let rel_foo": ∀ "__Return", "R" λ {
+        	a "R",
+        } -> "__Return",
+        "let rel_id": ∀ "__Return", "R" λ {
+        	a "R",
+        } -> "__Return",
     },
     "queries": [
-        Err(
-            StringError {
-                what: "Unknown type cannot exist at runtime (?slot?)",
-                backtrace: None,
+        Ok(
+            TypedValue {
+                type_: Atom(
+                    Int64,
+                ),
+                value: "1",
             },
         ),
-        Err(
-            StringError {
-                what: "Unknown type cannot exist at runtime (?slot?)",
-                backtrace: None,
-            },
-        ),
-        Err(
-            StringError {
-                what: "Unknown type cannot exist at runtime (?async_slot?)",
-                backtrace: None,
-            },
-        ),
-        Err(
-            StringError {
-                what: "Unknown type cannot exist at runtime (?async_slot?)",
-                backtrace: None,
+        Ok(
+            TypedValue {
+                type_: Atom(
+                    Float64,
+                ),
+                value: "5.0",
             },
         ),
         Err(
@@ -201,8 +114,105 @@
         ),
         Err(
             StringError {
-                what: "Unknown type cannot exist at runtime (?R?)",
+                what: "Unknown type cannot exist at runtime (?async_slot?)",
                 backtrace: None,
+            },
+        ),
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?async_slot?)",
+                backtrace: None,
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "org_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "name",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "active",
+                                type_: Atom(
+                                    Boolean,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| id | org_id | name | active |\n|----|--------|------|--------|\n| 1  | 1      | Foo  | true   |\n| 2  | 1      | Bar  | false  |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: Atom(
+                    Int64,
+                ),
+                value: "6",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: Atom(
+                    Float64,
+                ),
+                value: "6.5",
+            },
+        ),
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?__Return?)",
+                backtrace: None,
+            },
+        ),
+        Err(
+            TypeMismatch {
+                expected_type: Atom(
+                    Float64,
+                ),
+                actual_type: Atom(
+                    Null,
+                ),
+                backtrace: None,
+            },
+        ),
+        Err(
+            TypeMismatch {
+                expected_type: Atom(
+                    Float64,
+                ),
+                actual_type: Atom(
+                    Null,
+                ),
+                backtrace: None,
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: Atom(
+                    Float64,
+                ),
+                value: "127.0",
             },
         ),
     ],
