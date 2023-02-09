@@ -17,13 +17,14 @@ type TypeRef = schema::Ref<types::Type>;
 // library user to pass in their own runtime.
 pub type Runtime = tokio::runtime::Runtime;
 
+#[cfg(feature = "multi-thread")]
 pub fn build() -> Result<Runtime> {
-    Ok(if cfg!(feature = "multi-thread") {
-        tokio::runtime::Builder::new_multi_thread()
-    } else {
-        tokio::runtime::Builder::new_current_thread()
-    }
-    .build()?)
+    Ok(tokio::runtime::Builder::new_multi_thread().build()?)
+}
+
+#[cfg(not(feature = "multi-thread"))]
+pub fn build() -> Result<Runtime> {
+    Ok(tokio::runtime::Builder::new_current_thread().build()?)
 }
 
 pub fn expensive<F, R>(f: F) -> R
@@ -31,6 +32,7 @@ where
     F: FnOnce() -> R,
 {
     match tokio::runtime::Handle::try_current() {
+        #[cfg(feature = "multi-thread")]
         Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
             tokio::task::block_in_place(f)
         }
