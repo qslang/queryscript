@@ -13,10 +13,10 @@ use tokio::{
     },
     task,
 };
+use tower_lsp::{LspService, Server};
 
 use tower_lsp::jsonrpc::{Error, Result};
-use tower_lsp::{lsp_types, lsp_types::*, LspServiceBuilder};
-use tower_lsp::{Client, LanguageServer};
+use tower_lsp::{lsp_types, lsp_types::*, Client, LanguageServer, LspServiceBuilder};
 
 use queryscript::{
     ast,
@@ -1198,4 +1198,18 @@ impl NormalizePosition<Option<lsp_types::Location>> for SourceLocation {
             None
         }
     }
+}
+
+#[tokio::main]
+async fn main() {
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+
+    let compiler = Backend::build_compiler().await;
+
+    let (service, socket) = Backend::add_custom_methods(LspService::build(|client| {
+        Backend::new(client, compiler).unwrap()
+    }))
+    .finish();
+    Server::new(stdin, stdout, socket).serve(service).await;
 }

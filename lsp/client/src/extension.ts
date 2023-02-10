@@ -19,7 +19,7 @@ import { runExpr } from "./query";
 let client: LanguageClient;
 
 export function activate(context: ExtensionContext) {
-  const command = process.env.SERVER_PATH || "queryscript-lsp";
+  const command = process.env.SERVER_PATH || "qs-lsp";
   const run: Executable = {
     command,
     options: {

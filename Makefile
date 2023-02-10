@@ -5,7 +5,7 @@ all: ${VENV_PRE_COMMIT} lsp qs
 
 .PHONY: qs
 qs: submodules
-	cd cli && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build
+	cd cli && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build --features "cli lsp"
 
 .PHONY: submodules
 submodules: sqlparser-rs/Cargo.toml

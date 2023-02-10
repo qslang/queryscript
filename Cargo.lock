@@ -1860,30 +1860,21 @@ dependencies = [
  "lazy_static",
  "object_store",
  "parquet",
+ "regex",
  "rustyline",
  "serde",
+ "serde_json",
  "snafu",
  "sqllogictest",
  "sqlparser-queryscript",
  "strum",
  "tabled",
  "tokio",
+ "tower-lsp",
  "ts-rs",
  "unicase",
  "url",
  "walkdir",
-]
-
-[[package]]
-name = "queryscript-lsp"
-version = "0.1.0"
-dependencies = [
- "queryscript",
- "regex",
- "serde",
- "serde_json",
- "tokio",
- "tower-lsp",
 ]
 
 [[package]]

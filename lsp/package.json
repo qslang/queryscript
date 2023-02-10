@@ -1,6 +1,6 @@
 {
-	"name": "queryscript-lsp",
-	"description": "LSP for QueryVM",
+	"name": "queryscript",
+	"description": "QueryScript Plugin",
 	"author": "QueryScript Contributors",
 	"license": "MIT",
 	"version": "1.0.0",

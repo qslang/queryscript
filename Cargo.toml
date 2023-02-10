@@ -2,5 +2,4 @@
 
 members = [
     "queryscript",
-    "lsp",
 ]

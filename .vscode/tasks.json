@@ -14,7 +14,11 @@
 			"label": "rust: cargo build",
 			"options": {
 				"cwd": "${workspaceFolder}"
-			}
+			},
+			"args": [
+				"--features",
+				"lsp cli"
+			]
 		},
 		{
 			"type": "cargo",
