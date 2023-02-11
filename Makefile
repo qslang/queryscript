@@ -1,11 +1,12 @@
 ROOT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
 .PHONY: all
-all: ${VENV_PRE_COMMIT} lsp qs
+all: ${VENV_PRE_COMMIT} submodules cli lsp
+	@true
 
-.PHONY: qs
-qs: submodules
-	cd cli && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build --features "cli lsp"
+.PHONY: cli
+cli: ${VENV_PRE_COMMIT} submodules
+	cd queryscript && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build --features "cli"
 
 .PHONY: submodules
 submodules: sqlparser-rs/Cargo.toml
@@ -13,16 +14,19 @@ submodules: sqlparser-rs/Cargo.toml
 sqlparser-rs/Cargo.toml:
 	git submodule update --init --recursive
 
-.PHONY: lsp lsp-rust yarn-deps ts-bindings
-lsp: lsp-rust yarn-deps
-	cd lsp && yarn esbuild
+.PHONY: lsp
+lsp: yarn-deps
+	cd extension && yarn esbuild
 
-lsp-rust: submodules
-	cd lsp && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build
+.PHONY: lsp-rust
+lsp-rust: ${VENV_PRE_COMMIT} submodules
+	cd queryscript && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build --features "lsp"
 
+.PHONY: yarn-deps
 yarn-deps: ts-bindings
-	cd lsp && yarn install
+	cd extension && yarn install
 
+.PHONY: ts-bindings
 ts-bindings:
 	cd queryscript/src && cargo test --features ts export_bindings
 
