@@ -97,6 +97,25 @@
 			"options": {
 				"cwd": "${workspaceFolder}/extension"
 			}
+		},
+		{
+			"type": "npm",
+			"script": "test:compile",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "never"
+			},
+			"problemMatcher": [
+				"$tsc-watch"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/extension"
+			},
+			"label": "npm: test:compile"
 		}
 	]
 }

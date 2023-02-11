@@ -79,6 +79,7 @@
         "watch:plugin": "cd client && yarn run esbuild-watch && cd ..",
         "lint": "eslint ./client/src ./webview/src --ext .ts,.tsx --fix",
         "postinstall": "cd client && yarn install && cd .. && cd webview && yarn install && cd ..",
+        "test:compile": "cd client && yarn run test-compile",
         "test": "sh ./scripts/e2e.sh"
 	},
 	"devDependencies": {

@@ -46,6 +46,7 @@
 			"env": {
 				"SERVER_PATH": "${workspaceRoot}/target/debug/qs-lsp"
 			},
+			"preLaunchTask": "npm: test:compile",
 		}
 	],
 	"inputs": [
