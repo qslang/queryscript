@@ -1,18 +1,16 @@
 # QueryScript
 
-_Do more with SQL!_
+QueryScript is a powerful new language that lets you perform data transformations, ETL, and BI within a single tool,
+all while writing modern SQL that feels like Typescript or Rust.
 
-What happens when you combine the power of a proper programming language like TypeScript with 
-the power of SQL? You get QueryScript: a new language that makes writing SQL feel like actual programming.
+With QueryScript, you get the power of SQL with the flexibility of modern programming abstractions like variables,
+functions, and libraries. Under the hood, the compiler typechecks your queries and transpiles them into vanilla
+ANSI SQL that runs directly against your favorite databases. QueryScript aims to do for SQL what TypeScript did
+for JavaScript.
 
-Queryscript is a SQL-based language that allows you to use higher order abstractions like
-variables, functions, and modules alongside SQL queries. The QueryScript compiler typechecks
-your queries and then compiles away these abstractions into vanilla ANSI SQL that runs
-directly against your favorite databases. QueryScript aims to do for SQL what TypeScript
-did for JavaScript.
-
-Below, we'll walk through some examples and installation instructions. For a more detailed walkthrough
-of the language, check out the [QueryScript website](https://queryscript.com/).
+Below, we'll walk through some examples and installation instructions. You can run QueryScript locally,
+making it simple and fun to develop in tools like [VSCode](https://vscode.dev/). For a more detailed
+walkthrough of the language, check out the [QueryScript website](https://queryscript.com/).
 
 ## Example
 
@@ -94,28 +92,3 @@ Beyond compiling the Rust library and `qs` binary in debug mode, this command wi
 - Download test files via `git-lfs`
 
 Please run `make develop` if you plan on making any contributions. You can run the test suite with `make test`.
-
-## Background
-
-The modern data stack has brought many of the benefits of robust software engineering to data analysis,
-including source control, tests, and collaboration. QueryScript builds on this work by deeply understanding
-SQL and extending the language to add views, functions, and types as first class objects _without_ having to
-install anything in your database. SQL code run by QueryScript is typechecked, a code analysis technique used
-by compilers like Typescript and Rust, that tells you whether your code will break without having to run it.
-This has some obvious benefits — in large SQL or BI projects, you can make changes and know whether or not
-you will break views without having to expensively update your warehouse.
-
-QueryScript's deep understanding of SQL leads to even richer benefits. You can factor the SQL you write into
-views or functions in your source code, which your team can freely reuse through version control. You can run
-SQL queries directly against QueryScript referencing those abstractions, and it will automatically translate
-them to your data warehouse. This means views are disentangled from the warehouse (no `CREATE VIEW`
-statements), and two branches, users, or projects can have their own views over a dataset that without
-conflicts. Your code also becomes warehouse-agnostic. The same queries will work against Snowflake, DuckDB,
-or even just plain CSV files. You can test and develop completely locally, and be confident that the SQL
-queries you write will run against your cloud data warehouse.
-
-If you encode your application's data model in QueryScript, the benefits compound further. Because QueryScript schemas can run against multiple database backends, the same models that
-power your application in Postgres can power your analytics and data science in your warehouse. If you
-come up with an interesting view that would be useful to show in the application, you can even contribute
-that _back into_ the product as a query. Ultimately, we believe in a future where analysts and developers
-can collaborate directly in code.
