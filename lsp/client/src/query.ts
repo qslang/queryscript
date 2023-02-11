@@ -78,7 +78,7 @@ class ReactPanel {
 
         // And restrict the webview to only loading content from our extension's `media` directory.
         localResourceRoots: [
-          vscode.Uri.file(path.join(this._extensionPath, "webview", "out")),
+          vscode.Uri.file(path.join(this._extensionPath, "out")),
         ],
       }
     );
@@ -125,18 +125,8 @@ class ReactPanel {
   }
 
   private _getHtmlForWebview() {
-    const mainScript = path.join(
-      this._extensionPath,
-      "webview",
-      "out",
-      "bundle.js"
-    );
-    const mainStyle = path.join(
-      this._extensionPath,
-      "webview",
-      "out",
-      "bundle.css"
-    );
+    const mainScript = path.join(this._extensionPath, "out", "webview.js");
+    const mainStyle = path.join(this._extensionPath, "out", "webview.css");
 
     const scriptPathOnDisk = vscode.Uri.file(mainScript);
     const scriptUri = this._panel.webview.asWebviewUri(scriptPathOnDisk);

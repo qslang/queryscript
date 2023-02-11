@@ -3,8 +3,7 @@
  * Licensed under the MIT License. See License.txt in the project root for license information.
  * ------------------------------------------------------------------------------------------ */
 
-import * as path from "path";
-import { commands, window, workspace, ExtensionContext } from "vscode";
+import { commands, window, workspace, ExtensionContext, Uri } from "vscode";
 
 import {
   Executable,
@@ -19,7 +18,15 @@ import { runExpr } from "./query";
 let client: LanguageClient;
 
 export function activate(context: ExtensionContext) {
-  const command = process.env.SERVER_PATH || "qs-lsp";
+  const ext = process.platform === "win32" ? ".exe" : "";
+  const binName = `qs-lsp${ext}`;
+
+  // TODO: We should allow the user's global qs-lsp to be an option here too.
+  const command =
+    process.env.SERVER_PATH ||
+    Uri.joinPath(context.extensionUri, "server", binName).fsPath;
+
+  context.extensionUri;
   const run: Executable = {
     command,
     options: {

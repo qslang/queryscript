@@ -42,7 +42,7 @@
 		},
 		{
 			"type": "npm",
-			"script": "compile",
+			"script": "esbuild",
 			"group": "build",
 			"presentation": {
 				"panel": "dedicated",
@@ -62,7 +62,7 @@
 		},
 		{
 			"type": "npm",
-			"script": "watch",
+			"script": "watch:plugin",
 			"isBackground": true,
 			"group": {
 				"kind": "build",
@@ -81,7 +81,7 @@
 		},
 		{
 			"type": "npm",
-			"script": "watch-webview",
+			"script": "watch:webview",
 			"isBackground": true,
 			"group": {
 				"kind": "build",

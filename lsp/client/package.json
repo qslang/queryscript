@@ -19,5 +19,12 @@
 		"@types/vscode": "^1.63.0",
 		"@vscode/test-electron": "^2.1.2",
 		"queryscript": "file:../../queryscript/bindings"
-	}
+	},
+    "scripts": {
+      "vscode:prepublish": "yarn run esbuild-base -- --minify",
+      "esbuild-base": "esbuild ./src/extension.ts --bundle --outfile=../out/extension.js --external:vscode --format=cjs --platform=node",
+      "esbuild": "yarn run esbuild-base -- --sourcemap",
+      "esbuild-watch": "yarn run esbuild-base -- --sourcemap --watch",
+      "test-compile": "tsc -p ./"
+    }
 }

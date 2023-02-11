@@ -16,7 +16,10 @@
     "typescript": "^4.9.4"
   },
   "scripts": {
-    "compile": "esbuild src/app.tsx --bundle --minify --sourcemap --outfile=out/bundle.js",
-    "watch": "esbuild src/app.tsx --bundle --minify --sourcemap --outfile=out/bundle.js --watch"
+    "vscode:prepublish": "yarn run esbuild-base -- --minify",
+    "esbuild-base": "esbuild ./src/app.tsx --bundle --outfile=../out/webview.js",
+    "esbuild": "yarn run esbuild-base -- --sourcemap",
+    "esbuild-watch": "yarn run esbuild-base -- --sourcemap --watch",
+    "test-compile": "tsc -p ./"
   }
 }

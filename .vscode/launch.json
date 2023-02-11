@@ -18,12 +18,12 @@
 				"--extensionDevelopmentPath=${workspaceRoot}/lsp"
 			],
 			"outFiles": [
-				"${workspaceRoot}/client/out/**/*.js"
+				"${workspaceRoot}/lsp/out/**/*.js"
 			],
 			"autoAttachChildProcesses": true,
 			"preLaunchTask": {
 				"type": "npm",
-				"script": "watch"
+				"script": "esbuild"
 			},
 			"env": {
 				"SERVER_PATH": "${workspaceFolder}/target/debug/qs-lsp"

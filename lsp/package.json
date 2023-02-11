@@ -19,7 +19,7 @@
 	"activationEvents": [
 		"onLanguage:plaintext"
 	],
-	"main": "./client/out/extension",
+	"main": "./out/extension",
 	"contributes": {
 		"languages": [
 			{
@@ -70,13 +70,16 @@
 		}
 	},
 	"scripts": {
-		"vscode:prepublish": "yarn run compile",
-		"compile": "tsc -b && cd webview && yarn run compile && cd ..",
-		"watch": "tsc -b -w",
-		"watch-webview": "cd webview && yarn run watch",
-		"lint": "eslint ./client/src ./webview/src --ext .ts,.tsx --fix",
-		"postinstall": "cd client && yarn install && cd .. && cd webview && yarn install && cd ..",
-		"test": "sh ./scripts/e2e.sh"
+        "vscode:prepublish": "cd client && yarn run vscode:prepublish && cd ../webview && yarn run vscode:prepublish && cd .. && yarn run lsp",
+        "lsp": "cd .. && cargo build --release --features lsp && mkdir -p lsp/server && cp target/release/qs-lsp lsp/server && cd lsp",
+        "esbuild": "yarn run esbuild:webview && yarn run esbuild:plugin",
+        "esbuild:webview": "cd webview && yarn run esbuild && cd ..",
+        "esbuild:plugin": "cd client && yarn run esbuild && cd ..",
+        "watch:webview": "cd webview && yarn run esbuild-watch && cd ..",
+        "watch:plugin": "cd client && yarn run esbuild-watch && cd ..",
+        "lint": "eslint ./client/src ./webview/src --ext .ts,.tsx --fix",
+        "postinstall": "cd client && yarn install && cd .. && cd webview && yarn install && cd ..",
+        "test": "sh ./scripts/e2e.sh"
 	},
 	"devDependencies": {
 		"@types/mocha": "^9.1.0",
