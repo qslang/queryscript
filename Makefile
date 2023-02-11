@@ -15,7 +15,7 @@ sqlparser-rs/Cargo.toml:
 
 .PHONY: lsp lsp-rust yarn-deps ts-bindings
 lsp: lsp-rust yarn-deps
-	cd lsp && yarn compile
+	cd lsp && yarn esbuild
 
 lsp-rust: submodules
 	cd lsp && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build

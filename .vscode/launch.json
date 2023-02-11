@@ -15,10 +15,10 @@
 			"name": "Launch VSCode Extension",
 			"runtimeExecutable": "${execPath}",
 			"args": [
-				"--extensionDevelopmentPath=${workspaceRoot}/lsp"
+				"--extensionDevelopmentPath=${workspaceRoot}/extension"
 			],
 			"outFiles": [
-				"${workspaceRoot}/lsp/out/**/*.js"
+				"${workspaceRoot}/extension/out/**/*.js"
 			],
 			"autoAttachChildProcesses": true,
 			"preLaunchTask": {
@@ -35,12 +35,12 @@
 			"request": "launch",
 			"runtimeExecutable": "${execPath}",
 			"args": [
-				"--extensionDevelopmentPath=${workspaceRoot}/lsp",
-				"--extensionTestsPath=${workspaceRoot}/lsp/client/out/test/index",
+				"--extensionDevelopmentPath=${workspaceRoot}/extension",
+				"--extensionTestsPath=${workspaceRoot}/extension/client/out/test/index",
 				"${workspaceRoot}/client/testFixture"
 			],
 			"outFiles": [
-				"${workspaceRoot}/lsp/client/out/test/**/*.js"
+				"${workspaceRoot}/extension/out/test/**/*.js"
 			],
 			"autoAttachChildProcesses": true,
 			"env": {

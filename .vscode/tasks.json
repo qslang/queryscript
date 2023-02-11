@@ -57,7 +57,7 @@
 			],
 			"label": "npm: build extension",
 			"options": {
-				"cwd": "${workspaceFolder}/lsp"
+				"cwd": "${workspaceFolder}/extension"
 			}
 		},
 		{
@@ -76,7 +76,7 @@
 				"$tsc-watch"
 			],
 			"options": {
-				"cwd": "${workspaceFolder}/lsp"
+				"cwd": "${workspaceFolder}/extension"
 			}
 		},
 		{
@@ -95,7 +95,7 @@
 				"$tsc-watch"
 			],
 			"options": {
-				"cwd": "${workspaceFolder}/lsp"
+				"cwd": "${workspaceFolder}/extension"
 			}
 		}
 	]
