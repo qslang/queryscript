@@ -1589,6 +1589,7 @@ fn coerce_all(
 ) -> Result<(CRef<MType>, Vec<CTypedSQL>)> {
     let arg_types = args.iter().map(|ts| ts.type_.clone()).collect::<Vec<_>>();
     let generic = Arc::new(generics::CoerceGeneric::new(
+        loc.clone(),
         CoerceOp::Binary(op.clone()),
         arg_types.clone(),
     ));
