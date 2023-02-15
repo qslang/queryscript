@@ -222,7 +222,7 @@ impl MType {
                 ))))
             }
             MType::Name(n) => Ok(mkcref(MType::Name(n.clone()))),
-            MType::Generic(generic) => Ok(generic.resolve()?),
+            MType::Generic(generic) => Ok(generic.resolve(generic.location())?),
         }
     }
 
