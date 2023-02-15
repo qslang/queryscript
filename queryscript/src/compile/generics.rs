@@ -226,19 +226,23 @@ fn coerce_list(loc: SourceLocation, op: CoerceOp, args: Vec<CRef<MType>>) -> Res
     let resolved_args = args
         .iter()
         .map(|arg| -> Result<MType> {
-            Ok(arg.must().context(RuntimeSnafu { loc })?.read()?.clone())
+            Ok(arg
+                .must()
+                .context(RuntimeSnafu { loc: loc.clone() })?
+                .read()?
+                .clone())
         })
         .collect::<Result<Vec<_>>>()?;
     let runtime_args = resolved_args
         .iter()
         .map(|arg| Ok(arg.to_runtime_type()?))
         .collect::<runtime::error::Result<Vec<_>>>()
-        .context(RuntimeSnafu { loc })?;
+        .context(RuntimeSnafu { loc: loc.clone() })?;
 
     let mut ret = runtime_args[0].clone();
     for arg in &runtime_args[1..] {
         ret = coerce_types(&ret, &op, &arg)
-            .ok_or_else(|| CompileError::coercion(loc, &resolved_args.as_slice()))?;
+            .ok_or_else(|| CompileError::coercion(loc.clone(), &resolved_args.as_slice()))?;
     }
 
     Ok(ret)
