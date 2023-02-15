@@ -13,7 +13,9 @@ use crate::compile::compile::{
 };
 use crate::compile::error::*;
 use crate::compile::generics;
-use crate::compile::generics::{as_generic, ConnectionType, ExternalType, Generic, GenericConstructor};
+use crate::compile::generics::{
+    as_generic, ConnectionType, ExternalType, Generic, GenericConstructor,
+};
 use crate::compile::inference::*;
 use crate::compile::inline::*;
 use crate::compile::schema::*;
@@ -1586,6 +1588,7 @@ fn coerce_all(
 ) -> Result<(CRef<MType>, Vec<CTypedSQL>)> {
     let arg_types = args.iter().map(|ts| ts.type_.clone()).collect::<Vec<_>>();
     let generic = Arc::new(generics::CoerceGeneric::new(
+        loc.clone(),
         CoerceOp::Binary(op.clone()),
         arg_types.clone(),
     ));
@@ -2730,7 +2733,7 @@ pub fn compile_sqlexpr(
                     names.extend(subquery.names);
 
                     Ok(mkcref(Expr::native_sql(Arc::new(SQL {
-                        names: names,
+                        names,
                         body: SQLBody::Expr(sqlast::Expr::InSubquery {
                             expr: Box::new(expr.body.as_expr()),
                             subquery: Box::new(subquery.body),

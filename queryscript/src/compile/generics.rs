@@ -204,13 +204,14 @@ impl Generic for SumGeneric {
 }
 
 pub struct CoerceGeneric {
+    loc: SourceLocation,
     op: CoerceOp,
     args: Vec<CRef<MType>>,
 }
 
 impl CoerceGeneric {
-    pub fn new(op: CoerceOp, args: Vec<CRef<MType>>) -> CoerceGeneric {
-        CoerceGeneric { op, args }
+    pub fn new(loc: SourceLocation, op: CoerceOp, args: Vec<CRef<MType>>) -> CoerceGeneric {
+        CoerceGeneric { loc, op, args }
     }
 
     fn static_name() -> &'static Ident {
@@ -218,18 +219,26 @@ impl CoerceGeneric {
     }
 }
 
-fn coerce_list(op: CoerceOp, args: Vec<CRef<MType>>) -> runtime::error::Result<types::Type> {
+fn coerce_list(loc: SourceLocation, op: CoerceOp, args: Vec<CRef<MType>>) -> Result<types::Type> {
     if args.len() == 0 {
         return Ok(types::Type::Atom(AtomicType::Null));
     }
-    let runtime_args = args
+    let resolved_args = args
         .iter()
-        .map(|arg| Ok(arg.must()?.read()?.to_runtime_type()?))
-        .collect::<runtime::error::Result<Vec<_>>>()?;
+        .map(|arg| -> Result<MType> {
+            Ok(arg.must().context(RuntimeSnafu { loc })?.read()?.clone())
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let runtime_args = resolved_args
+        .iter()
+        .map(|arg| Ok(arg.to_runtime_type()?))
+        .collect::<runtime::error::Result<Vec<_>>>()
+        .context(RuntimeSnafu { loc })?;
 
     let mut ret = runtime_args[0].clone();
     for arg in &runtime_args[1..] {
-        ret = coerce_types(&ret, &op, &arg).ok_or_else(|| runtime::error::RuntimeError::new(""))?;
+        ret = coerce_types(&ret, &op, &arg)
+            .ok_or_else(|| CompileError::coercion(loc, &resolved_args.as_slice()))?;
     }
 
     Ok(ret)
@@ -252,6 +261,7 @@ impl Generic for CoerceGeneric {
 
     fn substitute(&self, variables: &BTreeMap<Ident, CRef<MType>>) -> Result<Arc<dyn Generic>> {
         Ok(Arc::new(Self {
+            loc: self.loc.clone(),
             op: self.op.clone(),
             args: self
                 .args
@@ -262,17 +272,20 @@ impl Generic for CoerceGeneric {
     }
 
     fn to_runtime_type(&self) -> runtime::error::Result<types::Type> {
-        coerce_list(self.op.clone(), self.args.clone())
+        Ok(coerce_list(
+            self.loc.clone(),
+            self.op.clone(),
+            self.args.clone(),
+        )?)
     }
 
     fn unify(&self, other: &MType) -> Result<()> {
+        let loc = self.loc.clone();
         let op = self.op.clone();
         let args = self.args.clone();
         let other = other.clone();
         combine_crefs(self.args.clone())?.constrain(move |_: Ref<Vec<Ref<MType>>>| {
-            let coerced_type = coerce_list(op.clone(), args.clone()).context(RuntimeSnafu {
-                loc: SourceLocation::Unknown,
-            })?;
+            let coerced_type = coerce_list(loc.clone(), op.clone(), args.clone())?;
 
             MType::unify(&other, &MType::from_runtime_type(&coerced_type)?)?;
 
