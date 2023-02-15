@@ -1587,6 +1587,7 @@ fn coerce_all(
 ) -> Result<(CRef<MType>, Vec<CTypedSQL>)> {
     let arg_types = args.iter().map(|ts| ts.type_.clone()).collect::<Vec<_>>();
     let generic = Arc::new(generics::CoerceGeneric::new(
+        loc.clone(),
         CoerceOp::Binary(op.clone()),
         arg_types.clone(),
     ));
@@ -2405,13 +2406,19 @@ pub fn compile_sqlexpr(
                     let func_expr = func.expr.unwrap_schema_entry().await?;
                     let compiled_func_expr = match func_expr {
                         Expr::UncompiledFn(def) => {
-                            let (compiled_body, _) = compile_fn_body(
+                            let (compiled_body, generics) = compile_fn_body(
                                 compiler.clone(),
                                 schema.clone(),
                                 loc.clone(),
                                 &def,
                                 FnContext::Call,
                             )?;
+                            if generics.is_empty() {
+                                return Err(CompileError::internal(
+                                    loc.clone(),
+                                    "Non-generic function should have been compiled ahead of time",
+                                ));
+                            }
                             compiled_body.type_.unify(&func.type_)?;
                             compiled_body.expr.await?.read()?.clone()
                         }

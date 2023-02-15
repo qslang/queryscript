@@ -100,10 +100,9 @@ pub enum CompileError {
         backtrace: Option<Backtrace>,
     },
 
-    #[snafu(display("Types cannot be coerced: {} and {}", lhs.pretty(), rhs.pretty()))]
+    #[snafu(display("Types cannot be coerced: {}", types.iter().map(Pretty::pretty).collect::<Vec<_>>().join(", ")))]
     CoercionError {
-        lhs: MType,
-        rhs: MType,
+        types: Vec<MType>,
         backtrace: Option<Backtrace>,
         loc: ErrorLocation,
     },
@@ -171,11 +170,10 @@ impl CompileError {
         .build();
     }
 
-    pub fn coercion(loc: ErrorLocation, lhs: &MType, rhs: &MType) -> CompileError {
+    pub fn coercion(loc: ErrorLocation, types: &[MType]) -> CompileError {
         return CoercionSnafu {
             loc,
-            lhs: lhs.clone(),
-            rhs: rhs.clone(),
+            types: types.to_vec(),
         }
         .build();
     }

@@ -32,7 +32,7 @@ pub trait Generic: Send + Sync + fmt::Debug {
         Ok(None)
     }
 
-    fn resolve(&self) -> Result<CRef<MType>>;
+    fn resolve(&self, loc: &SourceLocation) -> Result<CRef<MType>>;
 }
 
 pub trait GenericConstructor: Send + Sync {
@@ -114,6 +114,39 @@ lazy_static! {
     .into_iter()
     .map(|builder| (builder.name().clone(), builder))
     .collect::<BTreeMap<Ident, Box<dyn GenericFactory>>>();
+}
+
+fn resolve_to_runtime_type<G: Generic + Clone + 'static>(
+    loc: &SourceLocation,
+    args: Vec<CRef<MType>>,
+    g: &G,
+) -> Result<CRef<MType>> {
+    let loc = loc.clone();
+    let resolved_args = args
+        .clone()
+        .iter()
+        .map(|arg| arg.then(|a: Ref<MType>| a.read()?.resolve_generics()))
+        .collect::<Result<Vec<_>>>()?;
+    let this = g.clone();
+    combine_crefs(resolved_args)?.then(move |args: Ref<Vec<Ref<MType>>>| {
+        for arg in &*args.read()? {
+            // At this point, the arguments are fully known, so if any cannot be converted to
+            // runtime types, then they must contain a reference to a type parameter or some other
+            // static reason the type cannot be fully known.  In such cases, we'll leave ourselves
+            // as a generic.
+            if matches!(arg.read()?.to_runtime_type(), Err(_)) {
+                return Ok(mkcref(MType::Generic(Located::new(
+                    Arc::new(this.clone()),
+                    SourceLocation::Unknown,
+                ))));
+            }
+        }
+        let rt = this
+            .to_runtime_type()
+            .context(RuntimeSnafu { loc: loc.clone() })?;
+
+        Ok(mkcref(MType::from_runtime_type(&rt)?))
+    })
 }
 
 #[derive(Clone)]
@@ -206,35 +239,21 @@ impl Generic for SumGeneric {
         Ok(())
     }
 
-    fn resolve(&self) -> Result<CRef<MType>> {
-        let this = self.clone();
-        this.0.clone().then(move |_: Ref<MType>| {
-            let rt = match this.to_runtime_type().context(RuntimeSnafu {
-                loc: ErrorLocation::Unknown,
-            }) {
-                Ok(rt) => rt,
-                Err(_) => {
-                    return Ok(mkcref(MType::Generic(Located::new(
-                        Arc::new(this.clone()),
-                        SourceLocation::Unknown,
-                    ))))
-                }
-            };
-
-            Ok(mkcref(MType::from_runtime_type(&rt)?))
-        })
+    fn resolve(&self, loc: &SourceLocation) -> Result<CRef<MType>> {
+        resolve_to_runtime_type(loc, vec![self.0.clone()], self)
     }
 }
 
 #[derive(Clone)]
 pub struct CoerceGeneric {
+    loc: SourceLocation,
     op: CoerceOp,
     args: Vec<CRef<MType>>,
 }
 
 impl CoerceGeneric {
-    pub fn new(op: CoerceOp, args: Vec<CRef<MType>>) -> CoerceGeneric {
-        CoerceGeneric { op, args }
+    pub fn new(loc: SourceLocation, op: CoerceOp, args: Vec<CRef<MType>>) -> CoerceGeneric {
+        CoerceGeneric { loc, op, args }
     }
 
     fn static_name() -> &'static Ident {
@@ -242,18 +261,30 @@ impl CoerceGeneric {
     }
 }
 
-fn coerce_list(op: CoerceOp, args: Vec<CRef<MType>>) -> runtime::error::Result<types::Type> {
+fn coerce_list(loc: SourceLocation, op: CoerceOp, args: Vec<CRef<MType>>) -> Result<types::Type> {
     if args.len() == 0 {
         return Ok(types::Type::Atom(AtomicType::Null));
     }
-    let runtime_args = args
+    let resolved_args = args
         .iter()
-        .map(|arg| Ok(arg.must()?.read()?.to_runtime_type()?))
-        .collect::<runtime::error::Result<Vec<_>>>()?;
+        .map(|arg| -> Result<MType> {
+            Ok(arg
+                .must()
+                .context(RuntimeSnafu { loc: loc.clone() })?
+                .read()?
+                .clone())
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let runtime_args = resolved_args
+        .iter()
+        .map(|arg| Ok(arg.to_runtime_type()?))
+        .collect::<runtime::error::Result<Vec<_>>>()
+        .context(RuntimeSnafu { loc: loc.clone() })?;
 
     let mut ret = runtime_args[0].clone();
     for arg in &runtime_args[1..] {
-        ret = coerce_types(&ret, &op, &arg).ok_or_else(|| runtime::error::RuntimeError::new(""))?;
+        ret = coerce_types(&ret, &op, &arg)
+            .ok_or_else(|| CompileError::coercion(loc.clone(), &resolved_args.as_slice()))?;
     }
 
     Ok(ret)
@@ -276,6 +307,7 @@ impl Generic for CoerceGeneric {
 
     fn substitute(&self, variables: &BTreeMap<Ident, CRef<MType>>) -> Result<Arc<dyn Generic>> {
         Ok(Arc::new(Self {
+            loc: self.loc.clone(),
             op: self.op.clone(),
             args: self
                 .args
@@ -286,17 +318,20 @@ impl Generic for CoerceGeneric {
     }
 
     fn to_runtime_type(&self) -> runtime::error::Result<types::Type> {
-        coerce_list(self.op.clone(), self.args.clone())
+        Ok(coerce_list(
+            self.loc.clone(),
+            self.op.clone(),
+            self.args.clone(),
+        )?)
     }
 
     fn unify(&self, other: &MType) -> Result<()> {
+        let loc = self.loc.clone();
         let op = self.op.clone();
         let args = self.args.clone();
         let other = other.clone();
         combine_crefs(self.args.clone())?.constrain(move |_: Ref<Vec<Ref<MType>>>| {
-            let coerced_type = coerce_list(op.clone(), args.clone()).context(RuntimeSnafu {
-                loc: SourceLocation::Unknown,
-            })?;
+            let coerced_type = coerce_list(loc.clone(), op.clone(), args.clone())?;
 
             MType::unify(&other, &MType::from_runtime_type(&coerced_type)?)?;
 
@@ -305,21 +340,8 @@ impl Generic for CoerceGeneric {
         Ok(())
     }
 
-    fn resolve(&self) -> Result<CRef<MType>> {
-        let args = self
-            .args
-            .clone()
-            .iter()
-            .map(|arg| arg.then(|a: Ref<MType>| a.read()?.resolve_generics()))
-            .collect::<Result<Vec<_>>>()?;
-        let op = self.op.clone();
-        combine_crefs(args.clone())?.then(move |_: Ref<Vec<Ref<MType>>>| {
-            let coerced_type = coerce_list(op.clone(), args.clone()).context(RuntimeSnafu {
-                loc: SourceLocation::Unknown,
-            })?;
-
-            Ok(mkcref(MType::from_runtime_type(&coerced_type)?))
-        })
+    fn resolve(&self, loc: &SourceLocation) -> Result<CRef<MType>> {
+        resolve_to_runtime_type(loc, self.args.clone(), self)
     }
 }
 
@@ -388,26 +410,12 @@ impl Generic for ExternalType {
         Ok(Some(get_rowtype(compiler, self.0.clone())?))
     }
 
-    fn resolve(&self) -> Result<CRef<MType>> {
-        let this = self.clone();
-        self.0.clone().then(move |_: Ref<MType>| {
-            let rt = match this.to_runtime_type().context(RuntimeSnafu {
-                loc: ErrorLocation::Unknown,
-            }) {
-                Ok(rt) => rt,
-                Err(_) => {
-                    return Ok(mkcref(MType::Generic(Located::new(
-                        Arc::new(this.clone()),
-                        SourceLocation::Unknown,
-                    ))))
-                }
-            };
-
-            Ok(mkcref(MType::from_runtime_type(&rt)?))
-        })
+    fn resolve(&self, loc: &SourceLocation) -> Result<CRef<MType>> {
+        resolve_to_runtime_type(loc, vec![self.0.clone()], self)
     }
 }
 
+#[derive(Clone)]
 pub struct ConnectionType();
 
 impl GenericConstructor for ConnectionType {
@@ -467,11 +475,7 @@ impl Generic for ConnectionType {
         ))
     }
 
-    fn resolve(&self) -> Result<CRef<MType>> {
-        // This is a bit of a hack -- we only really care whether this type is null or not
-        Ok(mkcref(MType::Atom(Located::new(
-            AtomicType::Utf8,
-            SourceLocation::Unknown,
-        ))))
+    fn resolve(&self, loc: &SourceLocation) -> Result<CRef<MType>> {
+        resolve_to_runtime_type(loc, vec![], self)
     }
 }
