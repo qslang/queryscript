@@ -3,11 +3,46 @@
         (
             None,
             RuntimeError {
-                source: StringError {
-                    what: "",
-                    backtrace: None,
+                source: CompileError {
+                    source: CoercionError {
+                        types: [
+                            {
+                            	id Int32,
+                            	org_id Int32,
+                            	name Utf8,
+                            	active Boolean,
+                            },
+                            Int64,
+                        ],
+                        backtrace: None,
+                        loc: Range(
+                            "tests/qs/simple/fndef.qs",
+                            Range {
+                                start: Location {
+                                    line: 23,
+                                    column: 1,
+                                },
+                                end: Location {
+                                    line: 23,
+                                    column: 48,
+                                },
+                            },
+                        ),
+                    },
                 },
-                loc: Unknown,
+                loc: Range(
+                    "tests/qs/simple/fndef.qs",
+                    Range {
+                        start: Location {
+                            line: 23,
+                            column: 1,
+                        },
+                        end: Location {
+                            line: 23,
+                            column: 48,
+                        },
+                    },
+                ),
             },
         ),
         (
@@ -28,11 +63,41 @@
         (
             None,
             RuntimeError {
-                source: StringError {
-                    what: "",
-                    backtrace: None,
+                source: CompileError {
+                    source: CoercionError {
+                        types: [
+                            Float64,
+                            Utf8,
+                        ],
+                        backtrace: None,
+                        loc: Range(
+                            "tests/qs/simple/fndef.qs",
+                            Range {
+                                start: Location {
+                                    line: 39,
+                                    column: 5,
+                                },
+                                end: Location {
+                                    line: 39,
+                                    column: 13,
+                                },
+                            },
+                        ),
+                    },
                 },
-                loc: Unknown,
+                loc: Range(
+                    "tests/qs/simple/fndef.qs",
+                    Range {
+                        start: Location {
+                            line: 39,
+                            column: 5,
+                        },
+                        end: Location {
+                            line: 39,
+                            column: 13,
+                        },
+                    },
+                ),
             },
         ),
         (
@@ -53,11 +118,46 @@
         (
             None,
             RuntimeError {
-                source: StringError {
-                    what: "",
-                    backtrace: None,
+                source: CompileError {
+                    source: CoercionError {
+                        types: [
+                            {
+                            	active Boolean,
+                            	id Int64,
+                            	name Utf8,
+                            	org_id Int64,
+                            },
+                            Int64,
+                        ],
+                        backtrace: None,
+                        loc: Range(
+                            "tests/qs/simple/fndef.qs",
+                            Range {
+                                start: Location {
+                                    line: 24,
+                                    column: 1,
+                                },
+                                end: Location {
+                                    line: 24,
+                                    column: 51,
+                                },
+                            },
+                        ),
+                    },
                 },
-                loc: Unknown,
+                loc: Range(
+                    "tests/qs/simple/fndef.qs",
+                    Range {
+                        start: Location {
+                            line: 24,
+                            column: 1,
+                        },
+                        end: Location {
+                            line: 24,
+                            column: 51,
+                        },
+                    },
+                ),
             },
         ),
     ],
