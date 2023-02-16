@@ -178,6 +178,54 @@ impl MType {
         }
     }
 
+    pub fn resolve_generics(&self) -> Result<CRef<MType>> {
+        match self {
+            MType::Atom(a) => Ok(mkcref(MType::Atom(a.clone()))),
+            MType::Record(fields) => {
+                let mut resolved_fields = Vec::new();
+                for f in fields.get() {
+                    let field_type = f.type_.then(|t: Ref<MType>| t.read()?.resolve_generics())?;
+                    resolved_fields.push(MField {
+                        name: f.name.clone(),
+                        type_: field_type,
+                        nullable: f.nullable,
+                    });
+                }
+                Ok(mkcref(MType::Record(Located::new(
+                    resolved_fields,
+                    SourceLocation::Unknown,
+                ))))
+            }
+            MType::List(inner) => Ok(mkcref(MType::List(Located::new(
+                inner.then(|t: Ref<MType>| t.read()?.resolve_generics())?,
+                SourceLocation::Unknown,
+            )))),
+            MType::Fn(fn_type) => {
+                let mut resolved_args = Vec::new();
+                for a in &fn_type.args {
+                    let arg_type = a.type_.then(|t: Ref<MType>| t.read()?.resolve_generics())?;
+                    resolved_args.push(MField {
+                        name: a.name.clone(),
+                        type_: arg_type,
+                        nullable: a.nullable,
+                    });
+                }
+                let ret_type = fn_type
+                    .ret
+                    .then(|t: Ref<MType>| t.read()?.resolve_generics())?;
+                Ok(mkcref(MType::Fn(Located::new(
+                    MFnType {
+                        args: resolved_args,
+                        ret: ret_type,
+                    },
+                    SourceLocation::Unknown,
+                ))))
+            }
+            MType::Name(n) => Ok(mkcref(MType::Name(n.clone()))),
+            MType::Generic(generic) => Ok(generic.resolve(generic.location())?),
+        }
+    }
+
     pub fn substitute(&self, variables: &BTreeMap<Ident, CRef<MType>>) -> Result<CRef<MType>> {
         let type_ = match self {
             MType::Atom(a) => mkcref(MType::Atom(a.clone())),
