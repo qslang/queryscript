@@ -220,8 +220,8 @@ impl MType {
             }
             MType::Name(n) => variables
                 .get(n.get())
-                .ok_or_else(|| CompileError::no_such_entry(vec![n.clone()]))?
-                .clone(),
+                .map(Clone::clone)
+                .unwrap_or_else(|| mkcref(MType::Name(n.clone()))),
             MType::Generic(generic) => {
                 let location = generic.location();
                 mkcref(MType::Generic(Located::new(
@@ -819,6 +819,7 @@ where
     ContextRef(Ident),
     Connection(Arc<ConnectionString>),
     Materialize(MaterializeExpr<TypeRef>),
+    UncompiledFn(ast::FnDef),
     Unknown,
 }
 
@@ -875,6 +876,7 @@ impl Expr<CRef<MType>> {
                 decl_name: decl_name.clone(),
                 inlined: inlined.clone(),
             })),
+            Expr::UncompiledFn(def) => Ok(Expr::UncompiledFn(def.clone())),
             Expr::Unknown => Ok(Expr::Unknown),
         }
     }

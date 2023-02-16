@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use crate::compile::coerce::CoerceOp;
 use crate::compile::compile::{
-    lookup_path, resolve_global_atom, typecheck_path, Compiler, SymbolKind,
+    compile_fn_body, lookup_path, resolve_global_atom, typecheck_path, Compiler, FnContext,
+    SymbolKind,
 };
 use crate::compile::error::*;
 use crate::compile::generics;
@@ -2411,8 +2412,28 @@ pub fn compile_sqlexpr(
                     }
 
                     let func_expr = func.expr.unwrap_schema_entry().await?;
+                    let compiled_func_expr = match func_expr {
+                        Expr::UncompiledFn(def) => {
+                            let (compiled_body, generics) = compile_fn_body(
+                                compiler.clone(),
+                                schema.clone(),
+                                loc.clone(),
+                                &def,
+                                FnContext::Call,
+                            )?;
+                            if generics.is_empty() {
+                                return Err(CompileError::internal(
+                                    loc.clone(),
+                                    "Non-generic function should have been compiled ahead of time",
+                                ));
+                            }
+                            compiled_body.type_.unify(&func.type_)?;
+                            compiled_body.expr.await?.read()?.clone()
+                        }
+                        _ => func_expr,
+                    };
 
-                    let (fn_kind, fn_body) = match &func_expr {
+                    let (fn_kind, fn_body) = match compiled_func_expr {
                         Expr::NativeFn(_) => (FnKind::Native, None),
                         Expr::Fn(FnExpr { body, .. }) => match body {
                             FnBody::SQLBuiltin => (FnKind::SQLBuiltin, None),

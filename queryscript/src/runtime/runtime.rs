@@ -65,6 +65,11 @@ pub fn eval<'a>(
             schema::Expr::Unknown => {
                 return Err(RuntimeError::new("unresolved extern"));
             }
+            schema::Expr::UncompiledFn(def) => {
+                return Err(RuntimeError::new(
+                    format!("uncompiled function: {:?}", def).as_str(),
+                ));
+            }
             schema::Expr::SchemaEntry(schema::STypedExpr { .. }) => {
                 return Err(RuntimeError::new("unresolved schema entry"));
             }

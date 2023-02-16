@@ -981,6 +981,7 @@ impl<V: Visitor<schema::CRef<schema::MType>> + Sync> Visit<V, schema::CRef<schem
                 inlined: inlined.clone(),
             }),
             Expr::Unknown => Expr::Unknown,
+            Expr::UncompiledFn(def) => Expr::UncompiledFn(def.clone()),
         })
     }
 }
