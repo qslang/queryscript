@@ -14,7 +14,10 @@ use super::{
     Compiler,
 };
 use crate::ast::SourceLocation;
+use crate::compile::coerce::{coerce_types, CoerceOp};
+use crate::compile::sql::combine_crefs;
 use crate::runtime;
+use crate::types;
 use crate::types::{AtomicType, Type};
 
 pub trait Generic: Send + Sync + fmt::Debug {
@@ -42,10 +45,16 @@ pub fn as_generic<T: Generic + 'static>(g: &dyn Generic) -> Option<&T> {
 fn debug_fmt_generic(
     f: &mut std::fmt::Formatter<'_>,
     name: &Ident,
-    arg: &CRef<MType>,
+    args: Vec<CRef<MType>>,
 ) -> std::fmt::Result {
     write!(f, "{}<", name)?;
-    std::fmt::Debug::fmt(arg, f)?;
+    for (i, arg) in args.into_iter().enumerate() {
+        if i > 0 {
+            write!(f, ", ")?;
+        }
+
+        std::fmt::Debug::fmt(&arg, f)?;
+    }
     write!(f, ">")
 }
 
@@ -94,6 +103,7 @@ lazy_static! {
     pub static ref SUM_GENERIC_NAME: Ident = "SumAgg".into();
     pub static ref EXTERNAL_GENERIC_NAME: Ident = "External".into();
     pub static ref CONNECTION_GENERIC_NAME: Ident = "Connection".into();
+    pub static ref COERCE_GENERIC_NAME: Ident = "Coerce".into();
     pub static ref GLOBAL_GENERICS: BTreeMap<Ident, Box<dyn GenericFactory>> = [
         BuiltinGeneric::<SumGeneric>::constructor(),
         BuiltinGeneric::<ExternalType>::constructor(),
@@ -118,7 +128,7 @@ impl GenericConstructor for SumGeneric {
 
 impl std::fmt::Debug for SumGeneric {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        debug_fmt_generic(f, Self::static_name(), &self.0)
+        debug_fmt_generic(f, Self::static_name(), vec![self.0.clone()])
     }
 }
 
@@ -131,7 +141,7 @@ impl Generic for SumGeneric {
         Self::static_name()
     }
 
-    fn to_runtime_type(&self) -> crate::runtime::error::Result<crate::types::Type> {
+    fn to_runtime_type(&self) -> runtime::error::Result<types::Type> {
         let arg = self.0.must()?.read()?.to_runtime_type()?;
 
         // DuckDB's sum function follows the following rules:
@@ -154,7 +164,7 @@ impl Generic for SumGeneric {
                 AtomicType::Float32 | AtomicType::Float64 => AtomicType::Float64,
                 AtomicType::Decimal128(..) | AtomicType::Decimal256(..) => at.clone(),
                 _ => {
-                    return Err(crate::runtime::error::RuntimeError::new(
+                    return Err(runtime::error::RuntimeError::new(
                         format!(
                             "sum(): expected argument to be a numeric ype, got {:?}",
                             arg
@@ -164,7 +174,7 @@ impl Generic for SumGeneric {
                 }
             })),
             _ => {
-                return Err(crate::runtime::error::RuntimeError::new(
+                return Err(runtime::error::RuntimeError::new(
                     format!(
                         "sum(): expected argument to be an atomic type, got {:?}",
                         arg
@@ -180,15 +190,111 @@ impl Generic for SumGeneric {
     }
 
     fn unify(&self, other: &MType) -> Result<()> {
-        // This is a bit of an approximate implementation, since it only works if the inner
-        // type is known.
-        if self.0.is_known()? {
-            let final_type =
-                MType::from_runtime_type(&self.to_runtime_type().context(RuntimeSnafu {
-                    loc: ErrorLocation::Unknown,
-                })?)?;
-            other.unify(&final_type)?;
-        }
+        let other = other.clone();
+        let arg = self.0.clone();
+        arg.constrain(move |arg: Ref<MType>| {
+            let arg = arg.read()?.to_runtime_type().context(RuntimeSnafu {
+                loc: ErrorLocation::Unknown,
+            })?;
+            let final_type = MType::from_runtime_type(&arg)?;
+            other.unify(&final_type)
+        })?;
+        Ok(())
+    }
+}
+
+pub struct CoerceGeneric {
+    loc: SourceLocation,
+    op: CoerceOp,
+    args: Vec<CRef<MType>>,
+}
+
+impl CoerceGeneric {
+    pub fn new(loc: SourceLocation, op: CoerceOp, args: Vec<CRef<MType>>) -> CoerceGeneric {
+        CoerceGeneric { loc, op, args }
+    }
+
+    fn static_name() -> &'static Ident {
+        &COERCE_GENERIC_NAME
+    }
+}
+
+fn coerce_list(loc: SourceLocation, op: CoerceOp, args: Vec<CRef<MType>>) -> Result<types::Type> {
+    if args.len() == 0 {
+        return Ok(types::Type::Atom(AtomicType::Null));
+    }
+    let resolved_args = args
+        .iter()
+        .map(|arg| -> Result<MType> {
+            Ok(arg
+                .must()
+                .context(RuntimeSnafu { loc: loc.clone() })?
+                .read()?
+                .clone())
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let runtime_args = resolved_args
+        .iter()
+        .map(|arg| Ok(arg.to_runtime_type()?))
+        .collect::<runtime::error::Result<Vec<_>>>()
+        .context(RuntimeSnafu { loc: loc.clone() })?;
+
+    let mut ret = runtime_args[0].clone();
+    for arg in &runtime_args[1..] {
+        ret = coerce_types(&ret, &op, &arg)
+            .ok_or_else(|| CompileError::coercion(loc.clone(), &resolved_args.as_slice()))?;
+    }
+
+    Ok(ret)
+}
+
+impl std::fmt::Debug for CoerceGeneric {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        debug_fmt_generic(f, Self::static_name(), self.args.clone())
+    }
+}
+
+impl Generic for CoerceGeneric {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn name(&self) -> &Ident {
+        Self::static_name()
+    }
+
+    fn substitute(&self, variables: &BTreeMap<Ident, CRef<MType>>) -> Result<Arc<dyn Generic>> {
+        Ok(Arc::new(Self {
+            loc: self.loc.clone(),
+            op: self.op.clone(),
+            args: self
+                .args
+                .iter()
+                .map(|arg| arg.substitute(variables))
+                .collect::<Result<_>>()?,
+        }))
+    }
+
+    fn to_runtime_type(&self) -> runtime::error::Result<types::Type> {
+        Ok(coerce_list(
+            self.loc.clone(),
+            self.op.clone(),
+            self.args.clone(),
+        )?)
+    }
+
+    fn unify(&self, other: &MType) -> Result<()> {
+        let loc = self.loc.clone();
+        let op = self.op.clone();
+        let args = self.args.clone();
+        let other = other.clone();
+        combine_crefs(self.args.clone())?.constrain(move |_: Ref<Vec<Ref<MType>>>| {
+            let coerced_type = coerce_list(loc.clone(), op.clone(), args.clone())?;
+
+            MType::unify(&other, &MType::from_runtime_type(&coerced_type)?)?;
+
+            Ok(())
+        })?;
         Ok(())
     }
 }
@@ -214,7 +320,7 @@ impl GenericConstructor for ExternalType {
 
 impl std::fmt::Debug for ExternalType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        debug_fmt_generic(f, Self::static_name(), &self.0)
+        debug_fmt_generic(f, Self::static_name(), vec![self.0.clone()])
     }
 }
 
