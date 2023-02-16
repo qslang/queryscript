@@ -1,7 +1,6 @@
 use crate::ast::{Pretty, ToIdents};
 pub use arrow::datatypes::DataType as ArrowDataType;
 use colored::*;
-use snafu::prelude::*;
 use sqlparser::ast::{self as sqlast, WildcardAdditionalOptions};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -12,7 +11,6 @@ use crate::ast;
 pub use crate::ast::Located;
 use crate::ast::SourceLocation;
 use crate::compile::{
-    coerce::{coerce_types, CoerceOp},
     compile::SymbolKind,
     connection::{ConnectionSchema, ConnectionString},
     error::*,
@@ -400,34 +398,6 @@ impl Constrainable for MType {
         }
 
         Ok(())
-    }
-
-    fn coerce(op: &CoerceOp, left: &Ref<Self>, right: &Ref<Self>) -> Result<CRef<Self>> {
-        let left_type = left.read()?;
-        let right_type = right.read()?;
-
-        let left_loc = left_type.location();
-        let right_loc = right_type.location();
-
-        let left_rt = left_type.to_runtime_type().context(RuntimeSnafu {
-            loc: left_loc.clone(),
-        })?;
-        let right_rt = right_type.to_runtime_type().context(RuntimeSnafu {
-            loc: right_loc.clone(),
-        })?;
-
-        let coerced_type = match coerce_types(&left_rt, op, &right_rt) {
-            Some(t) => t,
-            None => {
-                return Err(CompileError::coercion(
-                    left_type.location(),
-                    &left_type,
-                    &right_type,
-                ))
-            }
-        };
-
-        Ok(mkcref(MType::from_runtime_type(&coerced_type)?))
     }
 }
 
@@ -923,6 +893,8 @@ impl Expr<CRef<MType>> {
         Expr::SQL(sql, None)
     }
 }
+
+impl Constrainable for Type {}
 
 impl<Ty: Clone + fmt::Debug + Send + Sync> Constrainable for Expr<Ty> {}
 

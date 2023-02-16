@@ -6,7 +6,6 @@ use std::path::Path as FilePath;
 use std::sync::Arc;
 
 use crate::compile::builtin_types::{BUILTIN_LOC, GLOBAL_GENERICS, GLOBAL_SCHEMA};
-use crate::compile::coerce::CoerceOp;
 use crate::compile::connection::{ConnectionSchema, ConnectionString};
 use crate::compile::error::*;
 use crate::compile::inference::*;
@@ -1659,20 +1658,6 @@ pub fn gather_schema_externs(schema: Ref<Schema>) -> Result<()> {
     }
 
     Ok(())
-}
-
-pub fn coerce<T: Constrainable + 'static>(
-    compiler: Compiler,
-    op: CoerceOp,
-    left: CRef<T>,
-    right: CRef<T>,
-) -> Result<CRef<T>> {
-    compiler.async_cref(async move {
-        let left = left.await?;
-        let right = right.await?;
-
-        Constrainable::coerce(&op, &left, &right)
-    })
 }
 
 #[cfg(test)]

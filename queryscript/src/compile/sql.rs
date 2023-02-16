@@ -9,10 +9,13 @@ use std::sync::Arc;
 
 use crate::compile::coerce::CoerceOp;
 use crate::compile::compile::{
-    coerce, lookup_path, resolve_global_atom, typecheck_path, Compiler, SymbolKind,
+    lookup_path, resolve_global_atom, typecheck_path, Compiler, SymbolKind,
 };
 use crate::compile::error::*;
-use crate::compile::generics::{as_generic, ConnectionType, ExternalType, GenericConstructor};
+use crate::compile::generics;
+use crate::compile::generics::{
+    as_generic, ConnectionType, ExternalType, Generic, GenericConstructor,
+};
 use crate::compile::inference::*;
 use crate::compile::inline::*;
 use crate::compile::schema::*;
@@ -1580,51 +1583,54 @@ fn apply_sqlcast(
 fn coerce_all(
     compiler: &Compiler,
     op: &sqlparser::ast::BinaryOperator,
+    loc: &SourceLocation,
     args: Vec<CTypedSQL>,
-    unknown_debug_name: &str,
 ) -> Result<(CRef<MType>, Vec<CTypedSQL>)> {
-    let mut exprs = Vec::new();
-    let mut iter = args.iter();
+    let arg_types = args.iter().map(|ts| ts.type_.clone()).collect::<Vec<_>>();
+    let generic = Arc::new(generics::CoerceGeneric::new(
+        loc.clone(),
+        CoerceOp::Binary(op.clone()),
+        arg_types.clone(),
+    ));
+    let target = mkcref(MType::Generic(Located::new(generic.clone(), loc.clone())));
 
-    let mut target = CRef::new_unknown(unknown_debug_name);
-    if let Some(first) = iter.next() {
-        exprs.push(first.clone());
-        target = first.type_.clone();
-        for next in iter {
-            exprs.push(next.clone());
-            target = coerce(
-                compiler.clone(),
-                CoerceOp::Binary(op.clone()),
-                target,
-                next.type_.clone(),
-            )?;
+    let target_rt = combine_crefs(arg_types.clone())?.then({
+        let loc = loc.clone();
+        move |_: Ref<Vec<Ref<MType>>>| {
+            let target = generic
+                .to_runtime_type()
+                .context(RuntimeSnafu { loc: loc.clone() })?;
+            Ok(mkcref(target))
         }
-    }
+    })?;
 
     let mut ret = Vec::new();
-    for arg in exprs.into_iter() {
-        let target2 = target.clone();
-        let compiler2 = compiler.clone();
-
+    for arg in args.into_iter() {
         ret.push(CTypedSQL {
             type_: target.clone(),
-            sql: compiler.clone().async_cref(async move {
-                let resolved_target = target2.await?;
-                let resolved_arg = arg.type_.await?;
-                let my_type = resolved_arg.read()?;
-                let their_type = resolved_target.read()?;
+            sql: compiler.clone().async_cref({
+                let compiler = compiler.clone();
+                let target = target.clone();
+                let target_rt = target_rt.clone();
+                async move {
+                    let target = target.await?;
+                    let target_rt = target_rt.await?;
+                    let my_type = arg.type_.await?;
+                    let my_type = my_type.read()?;
 
-                Ok(
-                    if their_type.to_runtime_type().context(RuntimeSnafu {
-                        loc: their_type.location(),
-                    })? != my_type.to_runtime_type().context(RuntimeSnafu {
-                        loc: my_type.location(),
-                    })? {
-                        apply_sqlcast(compiler2, arg.sql.clone(), resolved_target.clone())?
-                    } else {
-                        arg.sql
-                    },
-                )
+                    Ok(
+                        if !matches!(&*my_type, MType::Name(_))
+                            && *target_rt.read()?
+                                != my_type.to_runtime_type().context(RuntimeSnafu {
+                                    loc: my_type.location(),
+                                })?
+                        {
+                            apply_sqlcast(compiler, arg.sql.clone(), target.clone())?
+                        } else {
+                            arg.sql
+                        },
+                    )
+                }
             })?,
         })
     }
@@ -2024,22 +2030,13 @@ pub fn compile_sqlexpr(
             use sqlast::BinaryOperator::*;
             let type_ = match op {
                 Plus | Minus | Multiply | Divide => {
-                    let (result_type, casted) = coerce_all(
-                        &compiler,
-                        &op,
-                        vec![cleft, cright],
-                        format!("{:?}", op).as_str(),
-                    )?;
+                    let (result_type, casted) =
+                        coerce_all(&compiler, &op, loc, vec![cleft, cright])?;
                     (cleft, cright) = (casted[0].clone(), casted[1].clone());
                     result_type
                 }
                 Eq | NotEq | Lt | LtEq | Gt | GtEq => {
-                    let (_, casted) = coerce_all(
-                        &compiler,
-                        &op,
-                        vec![cleft, cright],
-                        format!("{:?}", op).as_str(),
-                    )?;
+                    let (_, casted) = coerce_all(&compiler, &op, loc, vec![cleft, cright])?;
                     (cleft, cright) = (casted[0].clone(), casted[1].clone());
                     resolve_global_atom(compiler.clone(), "bool")?
                 }
@@ -2053,12 +2050,8 @@ pub fn compile_sqlexpr(
                             body: SQLBody::Expr(sqlast::Expr::Value(sqlast::Value::Null)),
                         }),
                     };
-                    let (_, casted) = coerce_all(
-                        &compiler,
-                        &op,
-                        vec![cleft, cright, bool_val],
-                        format!("{:?}", op).as_str(),
-                    )?;
+                    let (_, casted) =
+                        coerce_all(&compiler, &op, loc, vec![cleft, cright, bool_val])?;
                     (cleft, cright) = (casted[0].clone(), casted[1].clone());
                     resolve_global_atom(compiler.clone(), "bool")?
                 }
@@ -2164,12 +2157,8 @@ pub fn compile_sqlexpr(
                 c_results.push(ret);
             }
 
-            let (result_type, mut c_results) = coerce_all(
-                &compiler,
-                &sqlast::BinaryOperator::Eq,
-                c_results,
-                "case result",
-            )?;
+            let (result_type, mut c_results) =
+                coerce_all(&compiler, &sqlast::BinaryOperator::Eq, loc, c_results)?;
 
             let c_else_result = match else_result {
                 Some(_) => Some(c_results.pop().unwrap()),
@@ -2744,7 +2733,7 @@ pub fn compile_sqlexpr(
                     names.extend(subquery.names);
 
                     Ok(mkcref(Expr::native_sql(Arc::new(SQL {
-                        names: names,
+                        names,
                         body: SQLBody::Expr(sqlast::Expr::InSubquery {
                             expr: Box::new(expr.body.as_expr()),
                             subquery: Box::new(subquery.body),

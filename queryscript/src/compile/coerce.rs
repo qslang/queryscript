@@ -21,9 +21,12 @@ macro_rules! must_atomic {
     };
 }
 
+#[derive(Clone, Debug)]
 pub enum CoerceOp {
     Binary(BinaryOperator),
+    #[allow(unused)]
     Like,
+    #[allow(unused)]
     IsDistinctFrom,
 }
 
