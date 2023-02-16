@@ -32,8 +32,9 @@ default = ["cli"]
 multi-thread = ["tokio/rt-multi-thread"]
 serde = ["dep:serde", "arrow-schema/serde", "half/serde"]
 ts = ["serde", "dep:ts-rs"]
-cli = ["clap", "home", "rustyline"]
+cli = ["clap", "home", "rustyline", "backtraces"]
 lsp = ["multi-thread", "tokio/io-util", "tokio/io-std", "tokio/macros", "tokio/fs", "regex", "serde_json", "serde", "tower-lsp"]
+backtraces = ["snafu/backtraces"]
 
 [dependencies]
 
