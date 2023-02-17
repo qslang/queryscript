@@ -132,7 +132,7 @@ impl Backend {
         let documents = Arc::new(TokioRwLock::new(BTreeMap::new()));
         compiler
             .lock()
-            .map_err(log_internal_error)?
+            .expect("compiler lock")
             .on_schema(Some(Box::new(SchemaRecorder {
                 tokio_handle: tokio::runtime::Handle::current(),
                 client: client.clone(),
@@ -357,7 +357,7 @@ impl LanguageServer for Backend {
         let (suggestion_pos, suggestions) = task::spawn_blocking({
             let line = line.clone();
             move || -> Result<_> {
-                let compiler = compiler.lock().map_err(log_internal_error)?;
+                let compiler = compiler.lock().expect("lock poisoned");
                 let autocompleter = AutoCompleter::new(
                     compiler.clone(),
                     schema,
@@ -367,7 +367,7 @@ impl LanguageServer for Backend {
             }
         })
         .await
-        .map_err(log_internal_error)?
+        .expect("join error")
         .map_err(log_internal_error)?;
 
         if start_pos + suggestion_pos >= text.len() {
@@ -510,7 +510,7 @@ impl LanguageServer for Backend {
         let mut lenses = Vec::new();
         for (idx, expr) in schema
             .read()
-            .map_err(log_internal_error)?
+            .expect("schema read lock")
             .exprs
             .iter()
             .enumerate()
@@ -533,7 +533,7 @@ impl LanguageServer for Backend {
             });
         }
 
-        for (name, decl) in schema.read().map_err(log_internal_error)?.expr_decls.iter() {
+        for (name, decl) in schema.read().expect("schema read lock").expr_decls.iter() {
             if !is_runnable_decl(&decl.value)? {
                 continue;
             }
@@ -816,7 +816,7 @@ impl Backend {
                 let path = uri.to_file_path().map_err(log_internal_error)?;
                 let file = path.to_str().unwrap().to_string();
 
-                let compiler = compiler.lock().map_err(log_internal_error)?;
+                let compiler = compiler.lock().expect("lock poisoned");
                 compiler
                     .set_file_contents(file, text)
                     .map_err(log_internal_error)?;
@@ -963,7 +963,7 @@ impl Backend {
             .ok_or_else(|| Error::invalid_params("Document has not been compiled".to_string()))?;
 
         let limit = {
-            let settings = self.settings.read().map_err(log_internal_error)?;
+            let settings = self.settings.read().expect("settings lock");
             settings.get(&uri.to_string()).map_or_else(
                 || DEFAULT_SETTINGS.max_number_of_rows,
                 |c| c.max_number_of_rows,
@@ -972,7 +972,7 @@ impl Backend {
 
         let expr = {
             // We have to "stuff" schema into this block, because it cannot be held across an await point.
-            let schema = schema_ref.read().map_err(log_internal_error)?;
+            let schema = schema_ref.read().expect("schema lock");
             match params.expr {
                 RunExprType::Expr(expr) => {
                     let decl = &schema
@@ -1017,11 +1017,7 @@ impl Backend {
         };
 
         let mut ctx = runtime::Context::new(
-            schema_ref
-                .read()
-                .map_err(log_internal_error)?
-                .folder
-                .clone(),
+            schema_ref.read().expect("schema read error").folder.clone(),
             runtime::SQLEngineType::DuckDB,
         );
 
@@ -1189,7 +1185,6 @@ impl NormalizePosition<Option<lsp_types::Location>> for SourceLocation {
     fn normalize(&self) -> Option<lsp_types::Location> {
         let file = self.file();
         let range = self.range();
-        eprintln!("file: {:?}, range: {:?}", &file, range);
         if file.is_some() && range.is_some() {
             let file = file.unwrap();
             let uri = match Url::parse(&file) {
