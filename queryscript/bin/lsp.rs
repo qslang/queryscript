@@ -1189,9 +1189,15 @@ impl NormalizePosition<Option<lsp_types::Location>> for SourceLocation {
     fn normalize(&self) -> Option<lsp_types::Location> {
         let file = self.file();
         let range = self.range();
+        eprintln!("file: {:?}, range: {:?}", &file, range);
         if file.is_some() && range.is_some() {
+            let file = file.unwrap();
+            let uri = match Url::parse(&file) {
+                Ok(uri) => uri,
+                Err(_) => Url::from_file_path(FilePath::new(&file)).unwrap(),
+            };
             Some(lsp_types::Location {
-                uri: Url::from_file_path(FilePath::new(&file.unwrap())).unwrap(),
+                uri,
                 range: range.unwrap().normalize(),
             })
         } else {

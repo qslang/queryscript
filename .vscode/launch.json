@@ -6,7 +6,9 @@
 			"request": "launch",
 			"name": "Run QueryScript",
 			"program": "${workspaceFolder}/target/debug/qs",
-			"args": ["${input:qsfile}"],
+			"args": [
+				"${input:qsfile}"
+			],
 			"cwd": "${workspaceFolder}",
 		},
 		{
@@ -26,7 +28,8 @@
 				"script": "esbuild"
 			},
 			"env": {
-				"SERVER_PATH": "${workspaceFolder}/target/debug/qs-lsp"
+				"SERVER_PATH": "${workspaceFolder}/target/debug/qs-lsp",
+				"RUST_BACKTRACE": "1"
 			},
 		},
 		{
@@ -51,15 +54,14 @@
 	],
 	"inputs": [
 		{
-            "id": "qsfile",
-            "type": "command",
-            "command": "memento.promptString",
-            "args": {
-                "id": "qsfile",
-                "description": "Path to the QS file to run (relative to queryscript root)",
-                "placeholder": "File path"
-            }
-        }
-	  ]
-
+			"id": "qsfile",
+			"type": "command",
+			"command": "memento.promptString",
+			"args": {
+				"id": "qsfile",
+				"description": "Path to the QS file to run (relative to queryscript root)",
+				"placeholder": "File path"
+			}
+		}
+	]
 }
