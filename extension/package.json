@@ -3,7 +3,7 @@
 	"description": "QueryScript Plugin",
 	"author": "QueryScript Contributors",
 	"license": "MIT",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/qscl/queryscript"
@@ -71,7 +71,7 @@
 	},
 	"scripts": {
         "vscode:prepublish": "cd client && yarn run vscode:prepublish && cd ../webview && yarn run vscode:prepublish && cd .. && yarn run lsp",
-        "lsp": "cd .. && cargo build --release --features lsp && mkdir -p lsp/server && cp target/release/qs-lsp lsp/server && cd lsp",
+        "lsp": "cd .. && cargo build --release --features lsp && mkdir -p extension/server && cp target/release/qs-lsp extension/server && cd extension",
         "esbuild": "yarn run esbuild:webview && yarn run esbuild:plugin",
         "esbuild:webview": "cd webview && yarn run esbuild && cd ..",
         "esbuild:plugin": "cd client && yarn run esbuild && cd ..",
