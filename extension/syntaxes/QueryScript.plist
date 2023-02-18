@@ -74,7 +74,7 @@
 				</dict>
 			</dict>
 			<key>match</key>
-			<string>(?i:^\s*((?:export\s+)?(extern|let))\s+(\w+))</string>
+			<string>(?i:^\s*((?:export\s+)?(extern|let|mat))\s+(\w+))</string>
 			<key>name</key>
 			<string>meta.let.sql</string>
 		</dict>
