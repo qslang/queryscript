@@ -1,7 +1,9 @@
 pub use arrow::datatypes::{
     DataType as ArrowDataType, Field as ArrowField, IntervalUnit as ArrowIntervalUnit,
-    Schema as ArrowSchema, TimeUnit as ArrowTimeUnit,
+    Schema as ArrowSchema, TimeUnit as ArrowTimeUnit, DECIMAL128_MAX_PRECISION,
+    DECIMAL128_MAX_SCALE, DECIMAL256_MAX_PRECISION, DECIMAL256_MAX_SCALE,
 };
+
 use sqlparser::ast::{
     DataType as ParserDataType, ExactNumberInfo as ParserNumberInfo, TimezoneInfo as ParserTz,
 };
@@ -517,5 +519,79 @@ impl TryInto<ArrowSchema> for &Type {
             Type::List(dt) => dt.as_ref().try_into(),
             t => ts_fail!("Cannot convert type {:?} to record", t),
         }
+    }
+}
+
+impl TryFrom<&sqlparser::ast::DataType> for Type {
+    type Error = super::error::TypesystemError;
+
+    fn try_from(t: &sqlparser::ast::DataType) -> Result<Self> {
+        use sqlparser::ast::DataType::*;
+        Ok(match t {
+            Character(_)
+            | Char(_)
+            | CharacterVarying(_)
+            | CharVarying(_)
+            | Varchar(_)
+            | Nvarchar(_)
+            | Uuid
+            | CharacterLargeObject(_)
+            | CharLargeObject(_)
+            | Clob(_)
+            | Text
+            | String => Type::Atom(AtomicType::Utf8), // Our / Arrow's typesystem does not support fixed size strings?
+
+            Binary(_) | Varbinary(_) | Blob(_) | Bytea => Type::Atom(AtomicType::Binary),
+
+            Numeric(ni) | Decimal(ni) | Dec(ni) => {
+                use sqlparser::ast::ExactNumberInfo::*;
+                let (p, s) = match ni {
+                    None => (DECIMAL128_MAX_PRECISION, DECIMAL128_MAX_SCALE),
+                    Precision(p) => (*p as u8, DECIMAL128_MAX_SCALE),
+                    PrecisionAndScale(p, s) => (*p as u8, *s as i8),
+                };
+                Type::Atom(AtomicType::Decimal128(p, s))
+            }
+
+            Float(p) => match p {
+                None => Type::Atom(AtomicType::Float64),
+                Some(i) if *i <= 24 => Type::Atom(AtomicType::Float32),
+                Some(i) if *i > 24 && *i <= 53 => Type::Atom(AtomicType::Float64),
+                Some(_) => return ts_fail!("Unsupported float precision"),
+            },
+
+            Real => Type::Atom(AtomicType::Float32),
+            Double | DoublePrecision => Type::Atom(AtomicType::Float64),
+
+            TinyInt(_) => Type::Atom(AtomicType::Int8),
+            UnsignedTinyInt(_) => Type::Atom(AtomicType::UInt8),
+            SmallInt(_) => Type::Atom(AtomicType::Int16),
+            UnsignedSmallInt(_) => Type::Atom(AtomicType::UInt16),
+            MediumInt(_) => Type::Atom(AtomicType::Int32), // We don't support Int24
+            UnsignedMediumInt(_) => Type::Atom(AtomicType::UInt32), // We don't support Int24
+            Int(_) | Integer(_) => Type::Atom(AtomicType::Int32),
+            UnsignedInt(_) | UnsignedInteger(_) => Type::Atom(AtomicType::UInt32),
+            BigInt(_) => Type::Atom(AtomicType::Int64),
+            UnsignedBigInt(_) => Type::Atom(AtomicType::UInt64),
+
+            Boolean => Type::Atom(AtomicType::Boolean),
+
+            // TODO: Match this more closely
+            Time(..) => Type::Atom(AtomicType::Time64(TimeUnit::Microsecond)),
+            Date => Type::Atom(AtomicType::Date32),
+            Timestamp(..) => Type::Atom(AtomicType::Timestamp(TimeUnit::Microsecond, None)),
+            Datetime(..) => Type::Atom(AtomicType::Timestamp(TimeUnit::Second, None)),
+
+            Interval => Type::Atom(AtomicType::Interval(IntervalUnit::YearMonth)), // Unclear what unit is implied from the parser
+            Array(inner_type) => Type::List(Box::new(match inner_type {
+                Some(inner_type) => inner_type.as_ref().try_into()?,
+                None => return ts_unimplemented!("Array of unknown type"),
+            })),
+
+            Regclass => return ts_unimplemented!("Regclass"),
+            Custom(..) => return ts_unimplemented!("Custom types"),
+            Enum(..) => return ts_unimplemented!("Enum types"),
+            Set(..) => return ts_unimplemented!("Set types"),
+        })
     }
 }
