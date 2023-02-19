@@ -173,6 +173,7 @@ impl Visitor<CRef<MType>> for ParamInliner {
                                             None,
                                         )]),
                                         args: None,
+                                        columns_definition: None,
                                         with_hints: vec![],
                                     }),
                                 );

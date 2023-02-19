@@ -156,6 +156,7 @@ impl ConnectionSchema {
                     name: sqlast::ObjectName(vec![ident.to_sqlident()]),
                     alias: None,
                     args: None,
+                    columns_definition: None,
                     with_hints: Vec::new(),
                 });
 

@@ -29,6 +29,7 @@ const BUILTIN_TYPES: &'static [BuiltinType] = &[
     ("string", AtomicType::Utf8),
     ("text", AtomicType::Utf8),
     ("varchar", AtomicType::Utf8),
+    ("blob", AtomicType::Binary),
     //
     // Date/Time:
     // - The parser in rust arrow expects Date32 to be a date (no time) and

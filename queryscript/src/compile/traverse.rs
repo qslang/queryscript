@@ -102,6 +102,7 @@ impl<V: SQLVisitor> VisitSQL<V> for Statement {
                 external,
                 global,
                 if_not_exists,
+                transient,
                 name,
                 columns,
                 constraints,
@@ -126,6 +127,7 @@ impl<V: SQLVisitor> VisitSQL<V> for Statement {
                 external: *external,
                 global: *global,
                 if_not_exists: *if_not_exists,
+                transient: *transient,
                 name: name.visit_sql(visitor),
                 columns: columns.visit_sql(visitor),
                 constraints: constraints.clone(),
@@ -374,6 +376,10 @@ impl<V: SQLVisitor> VisitSQL<V> for Expr {
             },
             Nested(e) => Nested(e.visit_sql(visitor)),
             Value(v) => Value(v.clone()),
+            IntroducedString { introducer, value } => IntroducedString {
+                introducer: introducer.clone(),
+                value: value.clone(),
+            },
             TypedString { data_type, value } => TypedString {
                 data_type: data_type.clone(),
                 value: value.clone(),
@@ -652,13 +658,18 @@ impl<V: SQLVisitor> VisitSQL<V> for TableFactor {
                 name,
                 alias,
                 args,
+                columns_definition,
                 with_hints,
-            } => Table {
-                name: name.visit_sql(visitor),
-                alias: alias.clone(), // Do not visit the alias -- changing it can bork the type
-                args: args.visit_sql(visitor),
-                with_hints: with_hints.visit_sql(visitor),
-            },
+            } => {
+                assert!(columns_definition.is_none());
+                Table {
+                    name: name.visit_sql(visitor),
+                    alias: alias.clone(), // Do not visit the alias -- changing it can bork the type
+                    args: args.visit_sql(visitor),
+                    columns_definition: None, // We do not support columns definition
+                    with_hints: with_hints.visit_sql(visitor),
+                }
+            }
             Derived {
                 lateral,
                 subquery,
