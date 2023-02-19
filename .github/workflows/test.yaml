@@ -1,4 +1,4 @@
-name: Release
+name: Test suite
 on:
   workflow_dispatch:
   pull_request:
@@ -104,9 +104,9 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}-release-${{ github.run_id }}
+          key: ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}-test-${{ github.run_id }}
           restore-keys: |
-            ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}-release-
+            ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}-test-
             ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
 
       - uses: actions/cache@v3
@@ -115,16 +115,18 @@ jobs:
             extension/node_modules
             extension/client/node_modules
             extension/webview/node_modules
-          key: ${{ matrix.target }}-yarn-${{ hashFiles('./extension/yarn.lock', './extension/webview/yarn.lock', './extension/client/yarn.lock') }}-${{ github.run_id }}
+          key: ${{ matrix.target }}-yarn-${{ hashFiles('./extension/yarn.lock', './extension/webview/yarn.lock', './extension/client/yarn.lock') }}-test-${{ github.run_id }}
           restore-keys: |
+            ${{ matrix.target }}-yarn-${{ hashFiles('./extension/yarn.lock', './extension/webview/yarn.lock', './extension/client/yarn.lock') }}-test-
             ${{ matrix.target }}-yarn-${{ hashFiles('./extension/yarn.lock', './extension/webview/yarn.lock', './extension/client/yarn.lock') }}
 
       - uses: actions/cache@v3
         with:
           path: |
             venv
-          key: ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}-${{ github.run_id }}
+          key: ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}-test-${{ github.run_id }}
           restore-keys: |
+            ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}-test-
             ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}
 
       #      # This code allows you to save artifacts even if the job fails. It's useful while debugging!

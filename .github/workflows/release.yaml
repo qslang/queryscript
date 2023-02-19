@@ -119,16 +119,18 @@ jobs:
             extension/node_modules
             extension/client/node_modules
             extension/webview/node_modules
-          key: ${{ matrix.target }}-yarn-${{ hashFiles('./extension/yarn.lock', './extension/webview/yarn.lock', './extension/client/yarn.lock') }}-${{ github.run_id }}
+          key: ${{ matrix.target }}-yarn-${{ hashFiles('./extension/yarn.lock', './extension/webview/yarn.lock', './extension/client/yarn.lock') }}-release-${{ github.run_id }}
           restore-keys: |
+            ${{ matrix.target }}-yarn-${{ hashFiles('./extension/yarn.lock', './extension/webview/yarn.lock', './extension/client/yarn.lock') }}-release-
             ${{ matrix.target }}-yarn-${{ hashFiles('./extension/yarn.lock', './extension/webview/yarn.lock', './extension/client/yarn.lock') }}
 
       - uses: actions/cache@v3
         with:
           path: |
             venv
-          key: ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}-${{ github.run_id }}
+          key: ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}-release-${{ github.run_id }}
           restore-keys: |
+            ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}-release-
             ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}
 
       - name: Make
