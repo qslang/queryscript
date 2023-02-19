@@ -239,6 +239,7 @@ impl SQLEngine for DuckDBEngine {
                 name: sqlast::ObjectName(vec![sqlast::Located::new(param_name.into(), None)]),
                 alias: None,
                 args: None,
+                columns_definition: None,
                 with_hints: vec![],
             }),
             temporary,

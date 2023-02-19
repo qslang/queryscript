@@ -592,6 +592,7 @@ impl TryFrom<&sqlparser::ast::DataType> for Type {
             Custom(..) => return ts_unimplemented!("Custom types"),
             Enum(..) => return ts_unimplemented!("Enum types"),
             Set(..) => return ts_unimplemented!("Set types"),
+            JSON => return ts_unimplemented!("JSON types"),
         })
     }
 }
