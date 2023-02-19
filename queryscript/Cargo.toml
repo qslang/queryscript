@@ -1,6 +1,6 @@
 [package]
 name = "queryscript"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["Ankur Goyal <ankrgyl@gmail.com>", "Michael Andrews <09mandrews@gmail.com>"]
 description = "Queryscript is a SQL-based language that allows you to use higher order abstractions like variables, functions, and modules alongside SQL queries."
