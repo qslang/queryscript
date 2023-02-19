@@ -2772,6 +2772,70 @@ pub fn compile_sqlexpr(
             loc,
             expr.as_ref(),
         )?,
+        sqlast::Expr::Substring {
+            expr,
+            substring_from,
+            substring_for,
+        } => {
+            let expr = c_sqlarg(expr.as_ref())?;
+
+            // This is a bit of a hack, since we won't typecheck these arguments.
+            let substring_from = substring_from.compile_sql(&compiler, &schema, &scope, &loc)?;
+            let substring_for = substring_for.compile_sql(&compiler, &schema, &scope, &loc)?;
+
+            let type_ = resolve_global_atom(compiler.clone(), "string")?;
+            expr.type_.unify(&type_)?;
+
+            CTypedExpr {
+                type_,
+                expr: compiler.async_cref(async move {
+                    let expr = expr.sql.await?;
+                    let substring_from = cunwrap(substring_from.await?)?;
+                    let substring_for = cunwrap(substring_for.await?)?;
+
+                    let SQLSnippet { mut names, body } = (*expr.read()?).clone();
+
+                    names.extend(substring_from.names);
+                    names.extend(substring_for.names);
+
+                    Ok(mkcref(Expr::native_sql(Arc::new(SQL {
+                        names,
+                        body: SQLBody::Expr(sqlast::Expr::Substring {
+                            expr: Box::new(body.as_expr()),
+                            substring_from: substring_from.body,
+                            substring_for: substring_for.body,
+                        }),
+                    }))))
+                })?,
+            }
+        }
+        sqlast::Expr::Cast { expr, data_type } => {
+            let expr = expr.compile_sql(&compiler, &schema, &scope, &loc)?;
+            let type_ = mkcref(MType::from_runtime_type(
+                &data_type
+                    .try_into()
+                    .context(TypesystemSnafu { loc: loc.clone() })?,
+            )?);
+
+            // We could do some validation here to know whether the type can be cast, but currently we assume
+            // that all casts are possible.
+
+            let data_type = data_type.clone();
+            CTypedExpr {
+                type_,
+                expr: compiler.async_cref(async move {
+                    let SQLSnippet { names, body } = cunwrap(expr.await?)?;
+
+                    Ok(mkcref(Expr::native_sql(Arc::new(SQL {
+                        names,
+                        body: SQLBody::Expr(sqlast::Expr::Cast {
+                            expr: body,
+                            data_type,
+                        }),
+                    }))))
+                })?,
+            }
+        }
         _ => {
             return Err(CompileError::unimplemented(
                 loc.clone(),

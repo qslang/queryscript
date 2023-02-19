@@ -58,7 +58,8 @@ fn __native_identity<T>(value T) -> T = native;
 
 -- Functions
 fn abs<R>(value R) -> R = sql;
-fn strptime<R>(value text, fmt string) -> timestamp = sql;
+fn strptime(value text, fmt string) -> timestamp = sql;
+fn date_trunc(unit string, value timestamp) -> timestamp = sql;
 
 -- Aggs
 fn min<R>(value R) -> R = sql;
@@ -69,6 +70,8 @@ fn avg<R>(value R) -> double = sql;
 
 -- Window functions
 fn row_number<R>() -> bigint = sql;
+fn lead<R, N>(expr R, offset N, default R) -> R = sql;
+fn lag<R, N>(expr R, offset N, default R) -> R = sql;
 ";
 
 lazy_static! {
