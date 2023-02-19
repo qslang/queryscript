@@ -3,7 +3,7 @@
 	"description": "QueryScript Plugin",
 	"author": "QueryScript Contributors",
 	"license": "MIT",
-	"version": "0.1.2",
+	"version": "0.5.0",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/qscl/queryscript"
@@ -70,25 +70,27 @@
 		}
 	},
 	"scripts": {
-        "vscode:prepublish": "cd client && yarn run vscode:prepublish && cd ../webview && yarn run vscode:prepublish && cd .. && yarn run lsp",
-        "lsp": "cd .. && cargo build --release --features lsp && mkdir -p extension/server && cp target/release/qs-lsp extension/server && cd extension",
-        "esbuild": "yarn run esbuild:webview && yarn run esbuild:plugin",
-        "esbuild:webview": "cd webview && yarn run esbuild && cd ..",
-        "esbuild:plugin": "cd client && yarn run esbuild && cd ..",
-        "watch:webview": "cd webview && yarn run esbuild-watch && cd ..",
-        "watch:plugin": "cd client && yarn run esbuild-watch && cd ..",
-        "lint": "eslint ./client/src ./webview/src --ext .ts,.tsx --fix",
-        "postinstall": "cd client && yarn install && cd .. && cd webview && yarn install && cd ..",
-        "test:compile": "cd client && yarn run test-compile",
-        "test": "sh ./scripts/e2e.sh"
+		"vscode:prepublish": "cd client && yarn run vscode:prepublish && cd ../webview && yarn run vscode:prepublish && cd .. && yarn run lsp",
+		"lsp": "cd .. && cargo build --release --features lsp && mkdir -p extension/server && cp target/release/qs-lsp extension/server && cd extension",
+		"esbuild": "yarn run esbuild:webview && yarn run esbuild:plugin",
+		"esbuild:webview": "cd webview && yarn run esbuild && cd ..",
+		"esbuild:plugin": "cd client && yarn run esbuild && cd ..",
+		"watch:webview": "cd webview && yarn run esbuild-watch && cd ..",
+		"watch:plugin": "cd client && yarn run esbuild-watch && cd ..",
+		"lint": "eslint ./client/src ./webview/src --ext .ts,.tsx --fix",
+		"postinstall": "cd client && yarn install && cd .. && cd webview && yarn install && cd ..",
+		"test:compile": "cd client && yarn run test-compile",
+		"test": "sh ./scripts/e2e.sh"
 	},
 	"devDependencies": {
 		"@types/mocha": "^9.1.0",
 		"@types/node": "^16.11.7",
 		"@typescript-eslint/eslint-plugin": "^5.42.0",
 		"@typescript-eslint/parser": "^5.42.0",
+		"esbuild": "^0.17.7",
 		"eslint": "^8.26.0",
 		"mocha": "^9.2.1",
-		"typescript": "^4.8.4"
+		"typescript": "^4.8.4",
+		"vsce": "^2.15.0"
 	}
 }

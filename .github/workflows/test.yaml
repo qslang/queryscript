@@ -1,0 +1,163 @@
+name: Test suite
+on:
+  workflow_dispatch:
+  pull_request:
+
+# Inspired by https://github.com/rust-lang/rust-analyzer/blob/master/.github/workflows/release.yaml
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  CARGO_FLAGS: "--release"
+  RUSTFLAGS: "-D warnings"
+  RUSTUP_MAX_RETRIES: 10
+  FETCH_DEPTH: 0 # pull in the tags for the version string
+  MACOSX_DEPLOYMENT_TARGET: 10.15
+  CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+  CARGO_TARGET_ARM_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        include:
+          # TODO: Support windows
+          #          - os: windows-latest
+          #            target: x86_64-pc-windows-msvc
+          #            code-target: win32-x64
+          #          - os: windows-latest
+          #            target: i686-pc-windows-msvc
+          #            code-target: win32-ia32
+          #          - os: windows-latest
+          #            target: aarch64-pc-windows-msvc
+          #            code-target: win32-arm64
+          - os: ubuntu-20.04
+            target: x86_64-unknown-linux-gnu
+            code-target: linux-x64
+    #          - os: ubuntu-20.04
+    #            target: aarch64-unknown-linux-gnu
+    #            code-target: linux-arm64
+    #            arch: aarch64
+    #          - os: ubuntu-20.04
+    #            target: arm-unknown-linux-gnueabihf
+    #            code-target: linux-armhf
+    #          - os: macos-11
+    #            target: x86_64-apple-darwin
+    #            code-target: darwin-x64
+    #          - os: macos-11
+    #            target: aarch64-apple-darwin
+    #            code-target: darwin-arm64
+
+    name: test (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+
+    env:
+      RA_TARGET: ${{ matrix.target }}
+
+    steps:
+      - name: Install toolchain dependencies
+        if: matrix.container == 'ubuntu:18.04'
+        shell: bash
+        run: |
+          apt-get update && apt-get install -y build-essential curl git
+          curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused -fsSL "https://sh.rustup.rs" | sh -s -- --profile minimal --default-toolchain none -y
+          echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> $GITHUB_PATH
+      - name: Install Rust toolchain
+        run: |
+          rustup update --no-self-update stable
+          rustup target add ${{ matrix.target }}
+          rustup component add rust-src
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+
+      - name: Update apt repositories
+        if: matrix.target == 'aarch64-unknown-linux-gnu' || matrix.target == 'arm-unknown-linux-gnueabihf'
+        run: sudo apt-get update
+
+      - name: Install AArch64 target toolchain
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get install gcc-aarch64-linux-gnu
+
+      - name: Install ARM target toolchain
+        if: matrix.target == 'arm-unknown-linux-gnueabihf'
+        run: sudo apt-get install gcc-arm-linux-gnueabihf
+
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: ${{ env.FETCH_DEPTH }}
+          submodules: true
+          lfs: true
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ github.job }}-${{ matrix.target }} # Eg. "some_build-ubuntu-latest"
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}-test-${{ github.run_id }}
+          restore-keys: |
+            ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}-test-
+            ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            extension/node_modules
+            extension/client/node_modules
+            extension/webview/node_modules
+          key: ${{ matrix.target }}-yarn-${{ hashFiles('./extension/yarn.lock', './extension/webview/yarn.lock', './extension/client/yarn.lock') }}-test-${{ github.run_id }}
+          restore-keys: |
+            ${{ matrix.target }}-yarn-${{ hashFiles('./extension/yarn.lock', './extension/webview/yarn.lock', './extension/client/yarn.lock') }}-test-
+            ${{ matrix.target }}-yarn-${{ hashFiles('./extension/yarn.lock', './extension/webview/yarn.lock', './extension/client/yarn.lock') }}
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            venv
+          key: ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}-test-${{ github.run_id }}
+          restore-keys: |
+            ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}-test-
+            ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}
+
+      #      # This code allows you to save artifacts even if the job fails. It's useful while debugging!
+      #      - uses: actions/cache/save@v3
+      #        if: always()
+      #        with:
+      #          path: |
+      #            ~/.cargo/bin/
+      #            ~/.cargo/registry/index/
+      #            ~/.cargo/registry/cache/
+      #            ~/.cargo/git/db/
+      #            target/
+      #          key: ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}-release-${{ github.run_id }}
+      #
+      #      - uses: actions/cache/save@v3
+      #        if: always()
+      #        with:
+      #          path: |
+      #            extension/node_modules
+      #            extension/client/node_modules
+      #            extension/webview/node_modules
+      #          key: ${{ matrix.target }}-yarn-${{ hashFiles('./extension/yarn.lock', './extension/webview/yarn.lock', './extension/client/yarn.lock') }}-${{ github.run_id }}
+      #
+      #      - uses: actions/cache/save@v3
+      #        if: always()
+      #        with:
+      #          path: |
+      #            venv
+      #          key:
+      #            ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}-${{ github.run_id }}
+
+      - name: Run tests
+        run: make test
+        timeout-minutes: 60
