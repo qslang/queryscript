@@ -3013,6 +3013,49 @@ pub fn compile_sqlexpr(
                 })?,
             }
         }
+        sqlast::Expr::GroupingSets(sets) => {
+            let mut compiled_sets = Vec::new();
+            for set in sets {
+                let mut compiled_set = Vec::new();
+                for expr in set {
+                    let expr = compile_gb_ob_expr(
+                        compiler.clone(),
+                        schema.clone(),
+                        scope.clone(),
+                        loc,
+                        expr,
+                    )?;
+                    compiled_set.push(expr);
+                }
+                compiled_sets.push(combine_crefs(compiled_set)?);
+            }
+
+            let compiled_sets = combine_crefs(compiled_sets)?;
+
+            CTypedExpr {
+                type_: resolve_global_atom(compiler.clone(), "null")?,
+                expr: compiler.async_cref(async move {
+                    let compiled_sets = compiled_sets.await?;
+
+                    let mut sets = Vec::new();
+                    let mut names = SQLNames::new();
+                    for compiled_set in compiled_sets.read()?.iter() {
+                        let mut set = Vec::new();
+                        for expr in compiled_set.read()?.iter() {
+                            let expr = expr.read()?;
+                            names.extend(expr.names.clone());
+                            set.push(expr.body.as_expr());
+                        }
+                        sets.push(set);
+                    }
+
+                    Ok(mkcref(Expr::native_sql(Arc::new(SQL {
+                        names,
+                        body: SQLBody::Expr(sqlast::Expr::GroupingSets(sets)),
+                    }))))
+                })?,
+            }
+        }
         _ => {
             return Err(CompileError::unimplemented(
                 loc.clone(),

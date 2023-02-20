@@ -18,8 +18,6 @@ let cte_prep =
         m.activity = 'customer_churn_committed'
 ;
 
--- XXX This query needs the following:
--- * concat
 let cte_grouping_sets =
   select
     date_trunc('month', timestamp)::date as metric_month,

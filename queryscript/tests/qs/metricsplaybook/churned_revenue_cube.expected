@@ -1,26 +1,5 @@
 {
-    "compile_errors": [
-        (
-            None,
-            Unimplemented {
-                what: "Expression: Between { expr: Identifier(Ident { value: \"timestamp\", quote_style: None }), negated: false, low: Value(SingleQuotedString(\"2014-01-01\")), high: BinaryOp { left: Function(Function { name: ObjectName([Ident { value: \"current_date\", quote_style: None }]), args: [], over: None, distinct: false, special: false }), op: Plus, right: Interval { value: Value(Number(\"365\", false)), leading_field: Some(Day), leading_precision: None, last_field: None, fractional_seconds_precision: None } } }",
-                backtrace: None,
-                loc: Range(
-                    "tests/qs/metricsplaybook/churned_revenue_cube.qs",
-                    Range {
-                        start: Location {
-                            line: 24,
-                            column: 3,
-                        },
-                        end: Location {
-                            line: 52,
-                            column: 5,
-                        },
-                    },
-                ),
-            },
-        ),
-    ],
+    "compile_errors": [],
     "decls": {
         "let contract_stream": [{
         	id Int64,
