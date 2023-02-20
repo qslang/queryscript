@@ -186,7 +186,7 @@ fn run_command(
             }
             Ok(RunCommandResult::Done)
         }
-        Err(_) if parser.is_eof() => Ok(RunCommandResult::More),
+        Err(_) if parser.may_have_more() => Ok(RunCommandResult::More),
         Err(e) => Err(e.into()),
     }
 }
