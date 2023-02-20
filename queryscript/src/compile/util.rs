@@ -35,6 +35,14 @@ impl<K, V> InsertionOrderMap<K, V> {
         self.map.get_mut(key)
     }
 
+    pub fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q> + Ord,
+        Q: Ord,
+    {
+        self.map.contains_key(key)
+    }
+
     pub fn insert(&mut self, key: K, value: V) -> Option<V>
     where
         K: Ord + Clone,

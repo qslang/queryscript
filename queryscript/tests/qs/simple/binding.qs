@@ -8,3 +8,6 @@ let unqualified_ts = SELECT ts FROM events;
 let unqualified_ts_alias = SELECT ts FROM events e;
 let qualified_ts = SELECT events.ts FROM events;
 let qualified_ts_alias = SELECT e.ts FROM events e;
+
+select id as a, a + 1 from users;
+select id as a from users where a = 1;

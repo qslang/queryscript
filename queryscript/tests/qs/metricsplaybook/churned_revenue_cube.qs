@@ -19,9 +19,6 @@ let cte_prep =
 ;
 
 -- XXX This query needs the following:
---  * Support for projection aliases. DuckDB's semantics are something like:
---    add the alias into the scope if it's not already a field, and if the alias
---    is already in the scope (because of a prior projection item), overwrite it.
 -- * concat
 let cte_grouping_sets =
   select

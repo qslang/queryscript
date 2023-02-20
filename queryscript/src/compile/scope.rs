@@ -1,20 +1,40 @@
+use sqlparser::ast as sqlast;
+
 use std::collections::{btree_map, BTreeMap};
 use std::sync::Arc;
 
-use crate::ast::SourceLocation;
+use crate::ast::{SourceLocation, ToSqlIdent};
 
 use crate::compile::compile::Compiler;
 use crate::compile::error::*;
 use crate::compile::inference::*;
 use crate::compile::schema::*;
-use crate::compile::sql::{combine_crefs, get_rowtype, CSQLNames};
+use crate::compile::sql::{combine_crefs, get_rowtype, CSQLNames, CTypedSQL};
 use crate::compile::util::InsertionOrderMap;
 
 #[derive(Clone, Debug)]
 pub struct FieldMatch {
-    pub relation: Located<Ident>,
     pub field: Located<Ident>,
     pub type_: Option<CRef<MType>>,
+    pub sql: SQL<CRef<MType>>,
+}
+
+impl FieldMatch {
+    pub fn from_field(
+        relation: Located<Ident>,
+        field: Located<Ident>,
+        type_: CRef<MType>,
+    ) -> FieldMatch {
+        let sqlpath = vec![relation.to_sqlident(), field.to_sqlident()];
+        FieldMatch {
+            field,
+            type_: Some(type_),
+            sql: SQL {
+                names: CSQLNames::from_unbound(&sqlpath),
+                body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath)),
+            },
+        }
+    }
 }
 impl Constrainable for FieldMatch {}
 
@@ -22,6 +42,7 @@ impl Constrainable for FieldMatch {}
 pub struct SQLScope {
     parent: Option<Ref<SQLScope>>,
     relations: BTreeMap<Ident, (CRef<MType>, SourceLocation)>,
+    projection_terms: BTreeMap<Ident, CTypedSQL>,
 }
 
 impl SQLScope {
@@ -29,6 +50,7 @@ impl SQLScope {
         mkref(SQLScope {
             parent,
             relations: BTreeMap::new(),
+            projection_terms: BTreeMap::new(),
         })
     }
 
@@ -67,19 +89,41 @@ impl SQLScope {
                             MType::Record(fields) => Ok(mkcref(
                                 fields
                                     .iter()
-                                    .map(|field| FieldMatch {
-                                        relation: n.clone(),
-                                        field: Ident::without_location(field.name.clone()),
-                                        type_: Some(field.type_.clone()),
+                                    .map(|field| {
+                                        FieldMatch::from_field(
+                                            n.clone(),
+                                            Ident::without_location(field.name.clone()),
+                                            field.type_.clone(),
+                                        )
                                     })
                                     .collect(),
                             )),
-                            _ => Ok(mkcref(vec![FieldMatch {
-                                relation: n.clone(),
-                                field: n.clone(),
-                                type_: Some(mkcref(rowtype)),
-                            }])),
+                            _ => Ok(mkcref(vec![FieldMatch::from_field(
+                                n.clone(),
+                                n.clone(),
+                                mkcref(rowtype),
+                            )])),
                         }
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?,
+        )?;
+
+        let cprojection_terms = combine_crefs(
+            self.projection_terms
+                .iter()
+                .map(|(n, te)| {
+                    let n = Ident::with_location(loc.clone(), n.clone());
+                    let type_ = Some(te.type_.clone());
+                    let sql = te.sql.clone();
+                    compiler.async_cref(async move {
+                        let sql = sql.clone().await?;
+                        let sql = sql.read()?.clone();
+                        Ok(mkcref(FieldMatch {
+                            field: n.clone(),
+                            type_,
+                            sql,
+                        }))
                     })
                 })
                 .collect::<Result<Vec<_>>>()?,
@@ -105,6 +149,7 @@ impl SQLScope {
 
             let mut references = InsertionOrderMap::<Ident, FieldMatch>::new();
             let relations = crelations.await?;
+            let projection_terms = cprojection_terms.await?;
 
             for a in &*relations.read()? {
                 for b in &*a.read()? {
@@ -113,6 +158,14 @@ impl SQLScope {
                     } else {
                         references.insert(b.field.get().clone(), b.clone());
                     }
+                }
+            }
+
+            for a in &*projection_terms.read()? {
+                let a = &*a.read()?;
+                if !references.contains_key(&a.field) {
+                    // Only insert the projection term if it's not a field reference
+                    references.insert(a.field.get().clone(), a.clone());
                 }
             }
 
@@ -168,6 +221,12 @@ impl SQLScope {
                 e.insert((type_, loc.clone()));
             }
         };
+        Ok(())
+    }
+
+    pub fn add_projection_term(&mut self, name: &Ident, sql: &CTypedSQL) -> Result<()> {
+        // Only insert it if it's not already part of a relation
+        self.projection_terms.insert(name.clone(), sql.clone());
         Ok(())
     }
 }

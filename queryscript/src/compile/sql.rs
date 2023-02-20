@@ -262,22 +262,16 @@ pub fn compile_sqlreference(
                     move |available: Ref<AvailableReferences>| {
                         if let Some(fm) = available.read()?.get(&name_ident) {
                             if let Some(type_) = fm.type_.clone() {
-                                let sqlpath = vec![fm.relation.to_sqlident(), name.clone()];
                                 compiler.run_on_symbol::<ExprEntry>(
                                     path[0].clone(),
                                     SymbolKind::Field,
                                     mkcref(type_.clone().into()),
-                                    fm.relation.location().clone(),
+                                    fm.field.location().clone(),
                                     None,
                                 )?;
                                 Ok(mkcref(TypedExpr {
-                                    type_: type_.clone(),
-                                    expr: Arc::new(Expr::native_sql(Arc::new(SQL {
-                                        names: CSQLNames::from_unbound(&sqlpath),
-                                        body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(
-                                            sqlpath,
-                                        )),
-                                    }))),
+                                    type_: type_,
+                                    expr: Arc::new(Expr::native_sql(Arc::new(fm.sql.clone()))),
                                 }))
                             } else {
                                 Err(CompileError::duplicate_entry(vec![Ident::from_sqlident(
@@ -290,7 +284,10 @@ pub fn compile_sqlreference(
                             // compile it as a normal reference.
                             //
                             let te = compile_reference(compiler.clone(), schema.clone(), &path)?;
-                            Ok(mkcref(te))
+                            Ok(mkcref(TypedExpr {
+                                type_: te.type_,
+                                expr: te.expr,
+                            }))
                         }
                     }
                 })?;
@@ -1150,8 +1147,12 @@ pub fn compile_select(
                 sqlast::SelectItem::ExprWithAlias { expr, alias } => {
                     let compiled =
                         compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
+                    let name = Ident::from_sqlident(loc.clone(), alias.get().clone());
+
+                    scope.write()?.add_projection_term(name.get(), &compiled)?;
+
                     mkcref(vec![CTypedNameAndSQL {
-                        name: Ident::from_sqlident(loc.clone(), alias.get().clone()),
+                        name,
                         type_: compiled.type_,
                         sql: compiled.sql,
                     }])
@@ -1201,16 +1202,10 @@ pub fn compile_select(
                                     None => m.field.clone(),
                                 };
 
-                                let sqlpath = vec![m.relation.to_sqlident(), m.field.to_sqlident()];
                                 ret.push(CTypedNameAndSQL {
                                     name,
                                     type_,
-                                    sql: mkcref(SQL {
-                                        names: CSQLNames::from_unbound(&sqlpath),
-                                        body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(
-                                            sqlpath,
-                                        )),
-                                    }),
+                                    sql: mkcref(m.sql.clone()),
                                 });
                             }
                             Ok(mkcref(ret))
