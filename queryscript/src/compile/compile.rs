@@ -102,10 +102,9 @@ pub trait OnSchema {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
     fn on_schema(
         &mut self,
-        path: &FilePath,
-        text: &str,
-        ast: &ast::Schema,
-        schema: Ref<Schema>,
+        path: Option<&FilePath>,
+        ast: Option<&ast::Schema>,
+        schema: Option<Ref<Schema>>,
         errors: &Vec<(Option<usize>, CompileError)>,
     ) -> Result<()>;
 }
@@ -250,17 +249,15 @@ impl Compiler {
 
     pub fn run_on_schema(
         &self,
-        file: String,
-        ast: &ast::Schema,
-        schema: Ref<Schema>,
+        file: Option<&FilePath>,
+        ast: Option<&ast::Schema>,
+        schema: Option<Ref<Schema>>,
         errors: &Vec<(Option<usize>, CompileError)>,
     ) -> Result<()> {
         let mut data = self.data.write()?;
-        let path = FilePath::new(&file);
-        let text = data.files.get(&file).unwrap().clone();
         let on_schema = &mut data.config.on_schema;
         Ok(match on_schema {
-            Some(f) => f.on_schema(path, text.as_str(), ast, schema, errors)?,
+            Some(f) => f.on_schema(file, ast, schema, errors)?,
             None => {}
         })
     }
@@ -281,6 +278,12 @@ impl Compiler {
         runtime.block_on(async move {
             result.replace(compile_schema_ast(self.clone(), schema.clone(), ast));
             result.absorb(self.drive().await);
+
+            c_try!(
+                result,
+                self.run_on_schema(None, Some(ast), Some(schema.clone()), &result.errors)
+            );
+
             result
         })
     }
@@ -296,17 +299,15 @@ impl Compiler {
             result.replace(compile_result);
             result.absorb(self.drive().await);
 
-            if let (Some(schema), Some(parsed_file)) = (result.ok(), parsed_file) {
-                c_try!(
-                    result,
-                    self.run_on_schema(
-                        parsed_file.file,
-                        &parsed_file.ast,
-                        schema.clone(),
-                        &result.errors
-                    )
-                );
-            }
+            c_try!(
+                result,
+                self.run_on_schema(
+                    Some(&file_path),
+                    parsed_file.as_ref().map(|f| &f.ast),
+                    result.result.as_ref().map(|s| s.clone()),
+                    &result.errors
+                )
+            );
 
             result
         })
