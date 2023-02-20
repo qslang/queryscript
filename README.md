@@ -1,12 +1,10 @@
 # QueryScript
 
-QueryScript is a powerful new language that lets you perform data transformations, ETL, and BI within a single tool,
-all while writing modern SQL that feels like Typescript or Rust.
+QueryScript is a strongly typed programming language that builds on SQL. It provides modern tooling, modularity, and integrations with popular relational databases. QueryScript is built for application business logic, transformations, ETL, and visualization.
 
-With QueryScript, you get the power of SQL with the flexibility of modern programming abstractions like variables,
-functions, and libraries. Under the hood, the compiler typechecks your queries and transpiles them into vanilla
-ANSI SQL that runs directly against your favorite databases. QueryScript aims to do for SQL what TypeScript did
-for JavaScript.
+1. **SQL and more**. Queryscript is a powerful programming language with variables, functions, and modules. SQL is a first class concept in the language.
+2. **Write once, run anywhere.** QueryScript typechecks your data model and queries, ensuring your code will run against any database backend without porting.
+3. **Performance always**. QueryScript is built in Rust and can run natively in your Typescript and Python apps. It pushes down as much compute as possible into the underlying relational database.
 
 Below, we'll walk through some examples and installation instructions. You can run QueryScript locally,
 making it simple and fun to develop in tools like [VSCode](https://vscode.dev/). For a more detailed
