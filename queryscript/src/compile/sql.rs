@@ -2017,6 +2017,39 @@ pub fn compile_sqlexpr(
                 })?,
             }
         }
+        sqlast::Expr::Between {
+            expr,
+            negated,
+            low,
+            high,
+        } => {
+            let op = sqlast::BinaryOperator::Lt;
+            let cexpr = c_sqlarg(expr)?;
+            let clow = c_sqlarg(low)?;
+            let chigh = c_sqlarg(high)?;
+
+            let (_, casted) = coerce_all(&compiler, &op, loc, vec![cexpr, clow, chigh])?;
+            let type_ = resolve_global_atom(compiler.clone(), "bool")?;
+            let negated = *negated;
+
+            CTypedExpr {
+                type_,
+                expr: combine_crefs(casted.into_iter().map(|c| c.sql).collect())?.then({
+                    move |args: Ref<Vec<_>>| {
+                        let names = combine_sqlnames(&*args.read()?)?;
+                        Ok(mkcref(Expr::native_sql(Arc::new(SQL {
+                            names,
+                            body: SQLBody::Expr(sqlast::Expr::Between {
+                                expr: Box::new(args.read()?[0].read()?.body.as_expr()),
+                                negated: negated,
+                                low: Box::new(args.read()?[1].read()?.body.as_expr()),
+                                high: Box::new(args.read()?[2].read()?.body.as_expr()),
+                            }),
+                        }))))
+                    }
+                })?,
+            }
+        }
         sqlast::Expr::BinaryOp { left, op, right } => {
             let op = op.clone();
             let mut cleft = compile_sqlarg(
