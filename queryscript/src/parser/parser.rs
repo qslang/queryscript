@@ -127,12 +127,30 @@ impl<'a> Parser<'a> {
             _ => false,
         }
     }
+
     pub fn consume_keyword(&mut self, expected: &str) -> bool {
         if self.peek_keyword(expected) {
             self.next_token();
             return true;
         }
         return false;
+    }
+
+    pub fn consume_ellipse(&mut self) -> bool {
+        match (
+            self.sqlparser.peek_nth_token(0).1.token,
+            self.sqlparser.peek_nth_token(1).1.token,
+            self.sqlparser.peek_nth_token(2).1.token,
+        ) {
+            (Token::Period, Token::Period, Token::Period) => {
+                for _ in 0..3 {
+                    let consumed = self.consume_token(&Token::Period);
+                    assert!(consumed);
+                }
+                true
+            }
+            _ => false,
+        }
     }
 
     pub fn expect_keyword(&mut self, expected: &str) -> Result<()> {
@@ -429,15 +447,33 @@ impl<'a> Parser<'a> {
 
         self.expect_token(&Token::LParen)?;
 
+        let mut variadic_arg = None;
         let args = if self.consume_token(&Token::RParen) {
             Vec::new()
         } else {
             let mut args = Vec::new();
             loop {
                 let name = self.parse_ident()?;
+                let is_variadic = self.consume_ellipse();
                 let type_ = self.parse_type()?;
 
-                args.push(FnArg { name, type_ });
+                if is_variadic {
+                    if variadic_arg.is_some() {
+                        return Err(ParserError::invalid(
+                            SourceLocation::Range(
+                                self.file.clone(),
+                                Range {
+                                    start: type_.start,
+                                    end: type_.end,
+                                },
+                            ),
+                            "Only one variadic argument is allowed",
+                        ));
+                    }
+                    variadic_arg = Some(FnArg { name, type_ });
+                } else {
+                    args.push(FnArg { name, type_ });
+                }
 
                 self.autocomplete_tokens(&[Token::Comma, Token::RParen]);
                 let next_token = self.next_token();
@@ -486,6 +522,7 @@ impl<'a> Parser<'a> {
             name,
             generics,
             args,
+            variadic_arg,
             ret,
             body,
         }))

@@ -85,6 +85,13 @@ pub enum ParserError {
         loc: ErrorLocation,
     },
 
+    #[snafu(display("Invalid syntax: {}", what))]
+    InvalidSyntax {
+        what: String,
+        backtrace: Option<Backtrace>,
+        loc: ErrorLocation,
+    },
+
     #[snafu(display("{}", sources.first().unwrap()))]
     Multiple {
         // This is assumed to be non-empty
@@ -96,6 +103,10 @@ pub enum ParserError {
 impl ParserError {
     pub fn unimplemented(loc: ErrorLocation, what: &str) -> ParserError {
         UnimplementedSnafu { loc, what }.build()
+    }
+
+    pub fn invalid(loc: ErrorLocation, what: &str) -> ParserError {
+        InvalidSyntaxSnafu { loc, what }.build()
     }
 }
 
@@ -114,6 +125,7 @@ impl PrettyError for ParserError {
             ),
             ParserError::SQLParserError { loc, .. } => loc.clone(),
             ParserError::Unimplemented { loc, .. } => loc.clone(),
+            ParserError::InvalidSyntax { loc, .. } => loc.clone(),
             ParserError::Multiple { sources } => sources.first().unwrap().location(),
         }
     }

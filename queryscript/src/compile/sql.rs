@@ -2250,6 +2250,7 @@ pub fn compile_sqlexpr(
                         &MType::Fn(Located::new(
                             MFnType {
                                 args: Vec::new(),
+                                variadic_arg: None,
                                 ret: MType::new_unknown("ret"),
                             },
                             loc.clone(),
@@ -2263,24 +2264,32 @@ pub fn compile_sqlexpr(
                 }
             };
             let mut compiled_args: BTreeMap<Ident, CTypedNameAndExpr> = BTreeMap::new();
+            let mut variadic_args = Vec::new();
             let mut pos: usize = 0;
             for arg in args {
                 let (name, expr) = match arg {
                     sqlast::FunctionArg::Named { name, arg } => {
-                        (Ident::with_location(loc.clone(), name.get()), arg)
+                        (Some(Ident::with_location(loc.clone(), name.get())), arg)
                     }
                     sqlast::FunctionArg::Unnamed(arg) => {
                         if pos >= fn_type.args.len() {
-                            return Err(CompileError::no_such_entry(vec![Ident::with_location(
-                                loc.clone(),
-                                format!("argument {}", pos),
-                            )]));
+                            if fn_type.variadic_arg.is_some() {
+                                (None, arg)
+                            } else {
+                                return Err(CompileError::no_such_entry(vec![
+                                    Ident::with_location(loc.clone(), format!("argument {}", pos)),
+                                ]));
+                            }
+                        } else {
+                            pos += 1;
+                            (
+                                Some(Ident::with_location(
+                                    loc.clone(),
+                                    fn_type.args[pos - 1].name.clone(),
+                                )),
+                                arg,
+                            )
                         }
-                        pos += 1;
-                        (
-                            Ident::with_location(loc.clone(), fn_type.args[pos - 1].name.clone()),
-                            arg,
-                        )
                     }
                 };
 
@@ -2309,20 +2318,28 @@ pub fn compile_sqlexpr(
                     }
                 };
 
-                if compiled_args.get(&name).is_some() {
-                    return Err(CompileError::duplicate_entry(vec![name]));
-                }
-
                 let compiled_arg =
                     compile_sqlexpr(compiler.clone(), schema.clone(), scope.clone(), loc, &expr)?;
-                compiled_args.insert(
-                    name.get().clone(),
-                    CTypedNameAndExpr {
-                        name: name.get().clone(),
-                        type_: compiled_arg.type_,
-                        expr: compiled_arg.expr,
-                    },
-                );
+
+                match name {
+                    Some(name) => {
+                        if compiled_args.get(&name).is_some() {
+                            return Err(CompileError::duplicate_entry(vec![name]));
+                        }
+
+                        compiled_args.insert(
+                            name.get().clone(),
+                            CTypedNameAndExpr {
+                                name: name.get().clone(),
+                                type_: compiled_arg.type_,
+                                expr: compiled_arg.expr,
+                            },
+                        );
+                    }
+                    None => {
+                        variadic_args.push(compiled_arg);
+                    }
+                }
             }
 
             let mut arg_exprs = Vec::new();
@@ -2343,6 +2360,12 @@ pub fn compile_sqlexpr(
                     return Err(CompileError::missing_arg(vec![Ident::without_location(
                         arg.name.clone(),
                     )]));
+                }
+            }
+
+            if let Some(variadic_arg) = &fn_type.variadic_arg {
+                for compiled_arg in &variadic_args {
+                    variadic_arg.type_.unify(&compiled_arg.type_)?;
                 }
             }
 
@@ -2369,9 +2392,28 @@ pub fn compile_sqlexpr(
                         .collect::<Result<Vec<_>>>()?;
                     let arg_exprs = combine_crefs(arg_exprs)?.await?;
 
+                    let variadic_args = variadic_args
+                        .into_iter()
+                        .map(move |cte| {
+                            cte.expr.then(move |expr: Ref<Expr<CRef<MType>>>| {
+                                Ok(mkcref(TypedExpr {
+                                    type_: cte.type_.clone(),
+                                    expr: Arc::new(expr.read()?.clone()),
+                                }))
+                            })
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    let variadic_args = combine_crefs(variadic_args)?.await?;
+
                     let over = cunwrap(over.await?)?;
 
                     let args = arg_exprs
+                        .read()?
+                        .iter()
+                        .map(|e| Ok(e.read()?.clone()))
+                        .collect::<Result<Vec<_>>>()?;
+
+                    let variadic_args = variadic_args
                         .read()?
                         .iter()
                         .map(|e| Ok(e.read()?.clone()))
@@ -2397,6 +2439,13 @@ pub fn compile_sqlexpr(
                                         return Err(CompileError::unimplemented(
                                             loc.clone(),
                                             "external types for non-load functions",
+                                        ));
+                                    }
+
+                                    if variadic_args.len() > 0 {
+                                        return Err(CompileError::unimplemented(
+                                            loc.clone(),
+                                            "variadic arguments for external types",
                                         ));
                                     }
 
@@ -2459,7 +2508,11 @@ pub fn compile_sqlexpr(
                     // can't be pushed down either because of their types or because they must be
                     // run locally (e.g. `load`).
                     //
-                    let can_lift = !args.iter().any(|a| has_unbound_names(a.expr.clone()))
+                    let can_lift = !args
+                        .iter()
+                        .map(|arg| &arg.expr)
+                        .chain(variadic_args.iter().map(|arg| &arg.expr))
+                        .any(|expr| has_unbound_names(expr.clone()))
                         || !over.names.unbound.is_empty();
                     let should_lift = if compiler.allow_inlining()? {
                         matches!(fn_kind, FnKind::Native)
@@ -2473,6 +2526,12 @@ pub fn compile_sqlexpr(
                             .iter()
                             .map(TypedNameAndExpr::to_typed_expr)
                             .collect::<Vec<_>>();
+                        if variadic_args.len() > 0 {
+                            return Err(CompileError::unimplemented(
+                                loc.clone(),
+                                "variadic arguments for native functions",
+                            ));
+                        }
                         Ok(mkcref(Expr::FnCall(FnCallExpr {
                             func: Arc::new(TypedExpr {
                                 type_: mkcref(MType::Fn(fn_type.clone())),
@@ -2506,6 +2565,12 @@ pub fn compile_sqlexpr(
                                 //
                                 let fn_body = inline_params(fn_body.as_ref()).await?;
 
+                                if variadic_args.len() > 0 {
+                                    return Err(CompileError::unimplemented(
+                                        loc.clone(),
+                                        "variadic arguments for inlined functions",
+                                    ));
+                                }
                                 Ok(mkcref(fn_body))
                             }
                             // Otherwise, create a SQL function call.
@@ -2524,6 +2589,14 @@ pub fn compile_sqlexpr(
                                             .to_sqlident(),
                                         arg: sqlast::FunctionArgExpr::Expr(sql.body.as_expr()),
                                     });
+                                    names.extend(sql.names.clone());
+                                }
+
+                                for arg in &variadic_args {
+                                    let sql = intern_placeholder(compiler.clone(), "arg", &arg)?;
+                                    args.push(sqlast::FunctionArg::Unnamed(
+                                        sqlast::FunctionArgExpr::Expr(sql.body.as_expr()),
+                                    ));
                                     names.extend(sql.names.clone());
                                 }
 

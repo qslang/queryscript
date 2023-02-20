@@ -59,8 +59,9 @@ fn __native_identity<T>(value T) -> T = native;
 
 -- Functions
 fn abs<R>(value R) -> R = sql;
-fn strptime(value text, fmt string) -> timestamp = sql;
+fn concat(args ...string) -> string = sql;
 fn date_trunc(unit string, value timestamp) -> timestamp = sql;
+fn strptime(value text, fmt string) -> timestamp = sql;
 
 -- Aggs
 fn min<R>(value R) -> R = sql;

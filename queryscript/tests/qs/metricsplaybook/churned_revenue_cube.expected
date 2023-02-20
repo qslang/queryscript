@@ -1,14 +1,23 @@
 {
     "compile_errors": [
         (
-            Some(
-                2,
-            ),
-            NoSuchEntry {
-                path: [
-                    "concat",
-                ],
+            None,
+            Unimplemented {
+                what: "Expression: Between { expr: Identifier(Ident { value: \"timestamp\", quote_style: None }), negated: false, low: Value(SingleQuotedString(\"2014-01-01\")), high: BinaryOp { left: Function(Function { name: ObjectName([Ident { value: \"current_date\", quote_style: None }]), args: [], over: None, distinct: false, special: false }), op: Plus, right: Interval { value: Value(Number(\"365\", false)), leading_field: Some(Day), leading_precision: None, last_field: None, fractional_seconds_precision: None } } }",
                 backtrace: None,
+                loc: Range(
+                    "tests/qs/metricsplaybook/churned_revenue_cube.qs",
+                    Range {
+                        start: Location {
+                            line: 24,
+                            column: 3,
+                        },
+                        end: Location {
+                            line: 52,
+                            column: 5,
+                        },
+                    },
+                ),
             },
         ),
     ],
@@ -29,7 +38,23 @@
             None,
         ),
         }],
-        "let cte_grouping_sets": ?cte_grouping_sets type?,
+        "let cte_grouping_sets": [{
+        	metric_month Date32,
+        	month_bit Int8,
+        	metric_day Date32,
+        	day_bit Int8,
+        	total_object Utf8,
+        	combination_1 Utf8,
+        	combination_2 Utf8,
+        	combination_3 Utf8,
+        	combination_1_bit Int8,
+        	combination_2_bit Int8,
+        	combination_3_bit Int8,
+        	total_bit Int8,
+        	metric_denominators Null,
+        	metric_calculation Utf8,
+        	metric_value SumAgg<Float64>,
+        }],
         "let cte_prep": [{
         	customer_id Int64,
         	segment Utf8,

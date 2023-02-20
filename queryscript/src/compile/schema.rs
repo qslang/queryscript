@@ -49,6 +49,7 @@ impl Constrainable for MField {
 #[derive(Debug, Clone)]
 pub struct MFnType {
     pub args: Vec<MField>,
+    pub variadic_arg: Option<MField>,
     pub ret: CRef<MType>,
 }
 
@@ -57,13 +58,16 @@ impl Constrainable for MFnType {
         let MFnType {
             args: largs,
             ret: lret,
+            variadic_arg: lvariadic_arg,
         } = self;
         let MFnType {
             args: rargs,
             ret: rret,
+            variadic_arg: rvariadic_arg,
         } = other;
         largs.unify(&rargs)?;
         lret.unify(&rret)?;
+        lvariadic_arg.unify(&rvariadic_arg)?;
         Ok(())
     }
 }
@@ -172,6 +176,7 @@ impl MType {
                         })
                         .collect::<Result<Vec<_>>>()?,
                     ret: mkcref(MType::from_runtime_type(&ret)?),
+                    variadic_arg: None,
                 },
                 SourceLocation::Unknown,
             ))),
@@ -210,12 +215,25 @@ impl MType {
                         nullable: a.nullable,
                     });
                 }
+                let resolved_variadic = match &fn_type.variadic_arg {
+                    Some(a) => {
+                        let arg_type =
+                            a.type_.then(|t: Ref<MType>| t.read()?.resolve_generics())?;
+                        Some(MField {
+                            name: a.name.clone(),
+                            type_: arg_type,
+                            nullable: a.nullable,
+                        })
+                    }
+                    None => None,
+                };
                 let ret_type = fn_type
                     .ret
                     .then(|t: Ref<MType>| t.read()?.resolve_generics())?;
                 Ok(mkcref(MType::Fn(Located::new(
                     MFnType {
                         args: resolved_args,
+                        variadic_arg: resolved_variadic,
                         ret: ret_type,
                     },
                     SourceLocation::Unknown,
@@ -247,7 +265,11 @@ impl MType {
                 inner.location().clone(),
             ))),
             MType::Fn(mfn) => {
-                let MFnType { args, ret } = mfn.get();
+                let MFnType {
+                    args,
+                    variadic_arg,
+                    ret,
+                } = mfn.get();
                 let location = mfn.location();
                 mkcref(MType::Fn(Located::new(
                     MFnType {
@@ -261,6 +283,14 @@ impl MType {
                                 })
                             })
                             .collect::<Result<_>>()?,
+                        variadic_arg: match variadic_arg {
+                            Some(a) => Some(MField {
+                                name: a.name.clone(),
+                                type_: a.type_.substitute(variables)?,
+                                nullable: a.nullable,
+                            }),
+                            None => None,
+                        },
                         ret: ret.substitute(variables)?,
                     },
                     location.clone(),
@@ -351,7 +381,7 @@ pub struct CTypedNameAndExpr {
     pub expr: CRef<Expr<CRef<MType>>>,
 }
 
-struct DebugMFields<'a>(&'a Vec<MField>);
+struct DebugMFields<'a>(&'a Vec<MField>, bool);
 
 impl<'a> fmt::Debug for DebugMFields<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -375,6 +405,9 @@ impl<'a> fmt::Debug for DebugMFields<'a> {
                 f.write_str(", ")?;
             }
         }
+        if self.1 {
+            f.write_str("...")?;
+        }
         f.write_str("}")?;
         Ok(())
     }
@@ -384,16 +417,20 @@ impl fmt::Debug for MType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MType::Atom(atom) => atom.fmt(f)?,
-            MType::Record(fields) => DebugMFields(fields).fmt(f)?,
+            MType::Record(fields) => DebugMFields(fields, false).fmt(f)?,
             MType::List(inner) => {
                 f.write_str("[")?;
                 inner.fmt(f)?;
                 f.write_str("]")?;
             }
             MType::Fn(mfn) => {
-                let MFnType { args, ret } = mfn.get();
+                let MFnType {
+                    args,
+                    ret,
+                    variadic_arg,
+                } = mfn.get();
                 f.write_str("λ ")?;
-                DebugMFields(&args).fmt(f)?;
+                DebugMFields(&args, variadic_arg.is_some()).fmt(f)?;
                 f.write_str(" -> ")?;
                 ret.fmt(f)?;
             }
