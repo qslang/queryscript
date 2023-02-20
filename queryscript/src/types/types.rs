@@ -411,8 +411,6 @@ fn time_unit_precision(tu: &TimeUnit) -> u64 {
     }
 }
 
-// NOTE: Arrow supports the opposite conversion (ArrowDataType -> ParserDataType)
-// in the convert_simple_data_type() function
 impl TryInto<ParserDataType> for &Type {
     type Error = super::error::TypesystemError;
 

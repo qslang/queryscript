@@ -19,18 +19,17 @@
         }],
         "let cte_grouping_sets": [{
         	metric_month Date32,
-        	month_bit Int8,
+        	month_bit Int64,
         	metric_day Date32,
-        	day_bit Int8,
+        	day_bit Int64,
         	total_object Utf8,
         	combination_1 Utf8,
         	combination_2 Utf8,
         	combination_3 Utf8,
-        	combination_1_bit Int8,
-        	combination_2_bit Int8,
-        	combination_3_bit Int8,
-        	total_bit Int8,
-        	metric_denominators Null,
+        	combination_1_bit Int64,
+        	combination_2_bit Int64,
+        	combination_3_bit Int64,
+        	total_bit Int64,
         	metric_calculation Utf8,
         	metric_value SumAgg<Float64>,
         }],
@@ -58,5 +57,24 @@
         	cohort Utf8,
         }],
     },
-    "queries": [],
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "COUNT(*)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| COUNT(*) |\n|----------|\n| 731      |",
+            },
+        ),
+    ],
 }

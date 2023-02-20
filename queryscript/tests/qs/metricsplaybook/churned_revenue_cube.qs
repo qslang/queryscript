@@ -32,7 +32,9 @@ let cte_grouping_sets =
     grouping(combination_2) as combination_2_bit,
     grouping(combination_3) as combination_3_bit,
     grouping(total_object) as total_bit,
-    null as metric_denominators,
+    -- select null returns a strange type in duckdb
+    -- https://github.com/qscl/queryscript/issues/73
+    -- null as metric_denominators,
     'sum(revenue_impact)' as metric_calculation,
     sum(revenue_impact) as metric_value
   from
@@ -49,3 +51,45 @@ let cte_grouping_sets =
       (metric_day, total_object)
     )
 ;
+
+SELECT COUNT(*) FROM cte_grouping_sets;
+
+/*
+let cte_final = select
+        'churned_revenue_cube' as metric_model,
+        False as is_snapshot_reliant_metric,
+        'timestamp' as anchor_date,
+        case
+          when month_bit = 0 then 'month'
+          when day_bit = 0 then 'day'
+          end as date_grain,
+        case
+          when month_bit = 0 then metric_month
+          when day_bit = 0 then metric_day
+          end as metric_date,
+        case
+          when combination_1_bit = 0 then combination_1
+          when combination_2_bit = 0 then combination_2
+          when combination_3_bit = 0 then combination_3
+          when total_bit = 0 then total_object
+          end as slice_object,
+        case
+          when combination_1_bit = 0 then concat(ifnull(json_extract_string(slice_object, '$.dim_name'), 'null'))
+          when combination_2_bit = 0 then concat(ifnull(json_extract_string(slice_object, '$.dim_name'), 'null'))
+          when combination_3_bit = 0 then concat(ifnull(json_extract_string(slice_object, '$.dim_name'), 'null'))
+          when total_bit = 0 then 'total'
+          end as slice_dimension,
+        case
+          when combination_1_bit = 0 then concat(ifnull(json_extract_string(slice_object, '$.dim_value'), 'null'))
+          when combination_2_bit = 0 then concat(ifnull(json_extract_string(slice_object, '$.dim_value'), 'null'))
+          when combination_3_bit = 0 then concat(ifnull(json_extract_string(slice_object, '$.dim_value'), 'null'))
+          when total_bit = 0 then 'Total'
+          end as slice_value,
+        metric_calculation,
+        case
+          when metric_denominators != 0 and metric_value is null then 0
+          else metric_value
+        end as metric_value
+    from
+      cte_grouping_sets;
+*/

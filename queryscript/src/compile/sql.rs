@@ -1561,7 +1561,7 @@ lazy_static! {
 
 fn apply_sqlcast(
     compiler: Compiler,
-    sql: CRef<SQL<CRef<MType>>>,
+    arg: CTypedSQL,
     target_type: Ref<MType>,
 ) -> Result<CRef<SQL<CRef<MType>>>> {
     let target_type = target_type.read()?;
@@ -1573,13 +1573,25 @@ fn apply_sqlcast(
         .context(TypesystemSnafu { loc: loc.clone() })?;
 
     Ok(compiler.async_cref(async move {
-        let final_expr = sql.clone_inner().await?;
-        Ok(mkcref(SQL {
-            names: final_expr.names,
-            body: SQLBody::Expr(sqlast::Expr::Cast {
+        let final_type = arg.type_.await?;
+        let final_expr = arg.sql.clone_inner().await?;
+
+        let inner_expr = if let Type::Atom(AtomicType::Interval(_)) =
+            final_type.read()?.to_runtime_type().context(RuntimeSnafu {
+                loc: SourceLocation::Unknown,
+            })? {
+            // Do not apply casts to INTERVAL types
+            final_expr.body.as_expr()
+        } else {
+            sqlast::Expr::Cast {
                 expr: Box::new(final_expr.body.as_expr()),
                 data_type: dt,
-            }),
+            }
+        };
+
+        Ok(mkcref(SQL {
+            names: final_expr.names,
+            body: SQLBody::Expr(inner_expr),
         }))
     })?)
 }
@@ -1613,7 +1625,7 @@ fn coerce_all(
                 let target = target.clone();
                 async move {
                     let target = target.await?.read()?.clone();
-                    let my_type = arg.type_.await?;
+                    let my_type = arg.type_.clone().await?;
                     let loc = my_type.read()?.location();
                     let target_rt = target
                         .to_runtime_type()
@@ -1627,7 +1639,7 @@ fn coerce_all(
                                     .to_runtime_type()
                                     .context(RuntimeSnafu { loc: loc.clone() })?
                         {
-                            apply_sqlcast(compiler, arg.sql.clone(), mkref(target))?
+                            apply_sqlcast(compiler, arg.clone(), mkref(target))?
                         } else {
                             arg.sql
                         },
@@ -2273,6 +2285,7 @@ pub fn compile_sqlexpr(
             let over = over.compile_sql(&compiler, &schema, &scope, loc)?;
 
             let func_name = name.to_path(file.clone());
+
             let func = compile_reference(compiler.clone(), schema.clone(), &func_name)?;
             let fn_type = match func
                 .type_
@@ -2615,17 +2628,17 @@ pub fn compile_sqlexpr(
                             _ => {
                                 let mut names = CSQLNames::new();
                                 let mut args = Vec::new();
+
+                                // Our SQL builtin functions have arbitrarily named function arguments, so just use Unnamed arguments
                                 for arg in &*arg_exprs.read()? {
                                     let sql = intern_placeholder(
                                         compiler.clone(),
                                         "arg",
                                         &arg.read()?.to_typed_expr(),
                                     )?;
-                                    args.push(sqlast::FunctionArg::Named {
-                                        name: Ident::without_location(arg.read()?.name.clone())
-                                            .to_sqlident(),
-                                        arg: sqlast::FunctionArgExpr::Expr(sql.body.as_expr()),
-                                    });
+                                    args.push(sqlast::FunctionArg::Unnamed(
+                                        sqlast::FunctionArgExpr::Expr(sql.body.as_expr()),
+                                    ));
                                     names.extend(sql.names.clone());
                                 }
 
@@ -3000,10 +3013,16 @@ pub fn compile_sqlexpr(
                     let expr = expr.sql.await?;
                     let SQLSnippet { names, body } = expr.read()?.clone();
 
+                    // SQL parsers don't like the cast we apply here.
+                    let value = match body.as_expr() {
+                        sqlast::Expr::Cast { expr, .. } => expr,
+                        other => Box::new(other),
+                    };
+
                     Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                         names,
                         body: SQLBody::Expr(sqlast::Expr::Interval {
-                            value: Box::new(body.as_expr()),
+                            value,
                             leading_field: Some(leading_field),
                             leading_precision,
                             last_field,
