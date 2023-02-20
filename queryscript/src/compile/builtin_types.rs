@@ -62,6 +62,8 @@ fn abs<R>(value R) -> R = sql;
 fn concat(args ...string) -> string = sql;
 fn current_date() -> timestamp = sql;
 fn date_trunc(unit string, value timestamp) -> timestamp = sql;
+fn ifnull<R>(value R, default R) -> R = sql;
+fn json_extract_string(value string, path string) -> string = sql;
 fn strptime(value text, fmt string) -> timestamp = sql;
 
 -- Aggs

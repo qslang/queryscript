@@ -54,7 +54,6 @@ let cte_grouping_sets =
 
 SELECT COUNT(*) FROM cte_grouping_sets;
 
-/*
 let cte_final = select
         'churned_revenue_cube' as metric_model,
         False as is_snapshot_reliant_metric,
@@ -87,9 +86,10 @@ let cte_final = select
           end as slice_value,
         metric_calculation,
         case
-          when metric_denominators != 0 and metric_value is null then 0
+          when /* metric_denominators != 0 and */ metric_value is null then 0
           else metric_value
         end as metric_value
     from
       cte_grouping_sets;
-*/
+
+select count(*) from cte_final;
