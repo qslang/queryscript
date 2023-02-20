@@ -19,7 +19,7 @@ use crate::compile::inference::*;
 use crate::compile::inline::*;
 use crate::compile::schema::*;
 use crate::compile::scope::{AvailableReferences, SQLScope};
-use crate::types::{number::parse_numeric_type, AtomicType, Type};
+use crate::types::{number::parse_numeric_type, AtomicType, IntervalUnit, Type};
 use crate::{
     ast,
     ast::{SourceLocation, ToPath, ToSqlIdent},
@@ -262,22 +262,16 @@ pub fn compile_sqlreference(
                     move |available: Ref<AvailableReferences>| {
                         if let Some(fm) = available.read()?.get(&name_ident) {
                             if let Some(type_) = fm.type_.clone() {
-                                let sqlpath = vec![fm.relation.to_sqlident(), name.clone()];
                                 compiler.run_on_symbol::<ExprEntry>(
                                     path[0].clone(),
                                     SymbolKind::Field,
                                     mkcref(type_.clone().into()),
-                                    fm.relation.location().clone(),
+                                    fm.field.location().clone(),
                                     None,
                                 )?;
                                 Ok(mkcref(TypedExpr {
-                                    type_: type_.clone(),
-                                    expr: Arc::new(Expr::native_sql(Arc::new(SQL {
-                                        names: CSQLNames::from_unbound(&sqlpath),
-                                        body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(
-                                            sqlpath,
-                                        )),
-                                    }))),
+                                    type_: type_,
+                                    expr: Arc::new(Expr::native_sql(Arc::new(fm.sql.clone()))),
                                 }))
                             } else {
                                 Err(CompileError::duplicate_entry(vec![Ident::from_sqlident(
@@ -290,7 +284,10 @@ pub fn compile_sqlreference(
                             // compile it as a normal reference.
                             //
                             let te = compile_reference(compiler.clone(), schema.clone(), &path)?;
-                            Ok(mkcref(te))
+                            Ok(mkcref(TypedExpr {
+                                type_: te.type_,
+                                expr: te.expr,
+                            }))
                         }
                     }
                 })?;
@@ -1150,8 +1147,12 @@ pub fn compile_select(
                 sqlast::SelectItem::ExprWithAlias { expr, alias } => {
                     let compiled =
                         compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
+                    let name = Ident::from_sqlident(loc.clone(), alias.get().clone());
+
+                    scope.write()?.add_projection_term(name.get(), &compiled)?;
+
                     mkcref(vec![CTypedNameAndSQL {
-                        name: Ident::from_sqlident(loc.clone(), alias.get().clone()),
+                        name,
                         type_: compiled.type_,
                         sql: compiled.sql,
                     }])
@@ -1201,16 +1202,10 @@ pub fn compile_select(
                                     None => m.field.clone(),
                                 };
 
-                                let sqlpath = vec![m.relation.to_sqlident(), m.field.to_sqlident()];
                                 ret.push(CTypedNameAndSQL {
                                     name,
                                     type_,
-                                    sql: mkcref(SQL {
-                                        names: CSQLNames::from_unbound(&sqlpath),
-                                        body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(
-                                            sqlpath,
-                                        )),
-                                    }),
+                                    sql: mkcref(m.sql.clone()),
                                 });
                             }
                             Ok(mkcref(ret))
@@ -1566,7 +1561,7 @@ lazy_static! {
 
 fn apply_sqlcast(
     compiler: Compiler,
-    sql: CRef<SQL<CRef<MType>>>,
+    arg: CTypedSQL,
     target_type: Ref<MType>,
 ) -> Result<CRef<SQL<CRef<MType>>>> {
     let target_type = target_type.read()?;
@@ -1578,13 +1573,25 @@ fn apply_sqlcast(
         .context(TypesystemSnafu { loc: loc.clone() })?;
 
     Ok(compiler.async_cref(async move {
-        let final_expr = sql.clone_inner().await?;
-        Ok(mkcref(SQL {
-            names: final_expr.names,
-            body: SQLBody::Expr(sqlast::Expr::Cast {
+        let final_type = arg.type_.await?;
+        let final_expr = arg.sql.clone_inner().await?;
+
+        let inner_expr = if let Type::Atom(AtomicType::Interval(_)) =
+            final_type.read()?.to_runtime_type().context(RuntimeSnafu {
+                loc: SourceLocation::Unknown,
+            })? {
+            // Do not apply casts to INTERVAL types
+            final_expr.body.as_expr()
+        } else {
+            sqlast::Expr::Cast {
                 expr: Box::new(final_expr.body.as_expr()),
                 data_type: dt,
-            }),
+            }
+        };
+
+        Ok(mkcref(SQL {
+            names: final_expr.names,
+            body: SQLBody::Expr(inner_expr),
         }))
     })?)
 }
@@ -1594,8 +1601,12 @@ fn coerce_all(
     op: &sqlparser::ast::BinaryOperator,
     loc: &SourceLocation,
     args: Vec<CTypedSQL>,
+    target_type: Option<CRef<MType>>,
 ) -> Result<(CRef<MType>, Vec<CTypedSQL>)> {
-    let arg_types = args.iter().map(|ts| ts.type_.clone()).collect::<Vec<_>>();
+    let mut arg_types = args.iter().map(|ts| ts.type_.clone()).collect::<Vec<_>>();
+    if let Some(tt) = target_type {
+        arg_types.push(tt);
+    }
     let generic = Arc::new(generics::CoerceGeneric::new(
         loc.clone(),
         CoerceOp::Binary(op.clone()),
@@ -1614,7 +1625,7 @@ fn coerce_all(
                 let target = target.clone();
                 async move {
                     let target = target.await?.read()?.clone();
-                    let my_type = arg.type_.await?;
+                    let my_type = arg.type_.clone().await?;
                     let loc = my_type.read()?.location();
                     let target_rt = target
                         .to_runtime_type()
@@ -1628,7 +1639,7 @@ fn coerce_all(
                                     .to_runtime_type()
                                     .context(RuntimeSnafu { loc: loc.clone() })?
                         {
-                            apply_sqlcast(compiler, arg.sql.clone(), mkref(target))?
+                            apply_sqlcast(compiler, arg.clone(), mkref(target))?
                         } else {
                             arg.sql
                         },
@@ -2022,6 +2033,39 @@ pub fn compile_sqlexpr(
                 })?,
             }
         }
+        sqlast::Expr::Between {
+            expr,
+            negated,
+            low,
+            high,
+        } => {
+            let op = sqlast::BinaryOperator::Lt;
+            let cexpr = c_sqlarg(expr)?;
+            let clow = c_sqlarg(low)?;
+            let chigh = c_sqlarg(high)?;
+
+            let (_, casted) = coerce_all(&compiler, &op, loc, vec![cexpr, clow, chigh], None)?;
+            let type_ = resolve_global_atom(compiler.clone(), "bool")?;
+            let negated = *negated;
+
+            CTypedExpr {
+                type_,
+                expr: combine_crefs(casted.into_iter().map(|c| c.sql).collect())?.then({
+                    move |args: Ref<Vec<_>>| {
+                        let names = combine_sqlnames(&*args.read()?)?;
+                        Ok(mkcref(Expr::native_sql(Arc::new(SQL {
+                            names,
+                            body: SQLBody::Expr(sqlast::Expr::Between {
+                                expr: Box::new(args.read()?[0].read()?.body.as_expr()),
+                                negated: negated,
+                                low: Box::new(args.read()?[1].read()?.body.as_expr()),
+                                high: Box::new(args.read()?[2].read()?.body.as_expr()),
+                            }),
+                        }))))
+                    }
+                })?,
+            }
+        }
         sqlast::Expr::BinaryOp { left, op, right } => {
             let op = op.clone();
             let mut cleft = compile_sqlarg(
@@ -2042,12 +2086,12 @@ pub fn compile_sqlexpr(
             let type_ = match op {
                 Plus | Minus | Multiply | Divide => {
                     let (result_type, casted) =
-                        coerce_all(&compiler, &op, loc, vec![cleft, cright])?;
+                        coerce_all(&compiler, &op, loc, vec![cleft, cright], None)?;
                     (cleft, cright) = (casted[0].clone(), casted[1].clone());
                     result_type
                 }
                 Eq | NotEq | Lt | LtEq | Gt | GtEq => {
-                    let (_, casted) = coerce_all(&compiler, &op, loc, vec![cleft, cright])?;
+                    let (_, casted) = coerce_all(&compiler, &op, loc, vec![cleft, cright], None)?;
                     (cleft, cright) = (casted[0].clone(), casted[1].clone());
                     resolve_global_atom(compiler.clone(), "bool")?
                 }
@@ -2062,7 +2106,7 @@ pub fn compile_sqlexpr(
                         }),
                     };
                     let (_, casted) =
-                        coerce_all(&compiler, &op, loc, vec![cleft, cright, bool_val])?;
+                        coerce_all(&compiler, &op, loc, vec![cleft, cright, bool_val], None)?;
                     (cleft, cright) = (casted[0].clone(), casted[1].clone());
                     resolve_global_atom(compiler.clone(), "bool")?
                 }
@@ -2169,7 +2213,7 @@ pub fn compile_sqlexpr(
             }
 
             let (result_type, mut c_results) =
-                coerce_all(&compiler, &sqlast::BinaryOperator::Eq, loc, c_results)?;
+                coerce_all(&compiler, &sqlast::BinaryOperator::Eq, loc, c_results, None)?;
 
             let c_else_result = match else_result {
                 Some(_) => Some(c_results.pop().unwrap()),
@@ -2241,6 +2285,7 @@ pub fn compile_sqlexpr(
             let over = over.compile_sql(&compiler, &schema, &scope, loc)?;
 
             let func_name = name.to_path(file.clone());
+
             let func = compile_reference(compiler.clone(), schema.clone(), &func_name)?;
             let fn_type = match func
                 .type_
@@ -2255,6 +2300,7 @@ pub fn compile_sqlexpr(
                         &MType::Fn(Located::new(
                             MFnType {
                                 args: Vec::new(),
+                                variadic_arg: None,
                                 ret: MType::new_unknown("ret"),
                             },
                             loc.clone(),
@@ -2268,24 +2314,32 @@ pub fn compile_sqlexpr(
                 }
             };
             let mut compiled_args: BTreeMap<Ident, CTypedNameAndExpr> = BTreeMap::new();
+            let mut variadic_args = Vec::new();
             let mut pos: usize = 0;
             for arg in args {
                 let (name, expr) = match arg {
                     sqlast::FunctionArg::Named { name, arg } => {
-                        (Ident::with_location(loc.clone(), name.get()), arg)
+                        (Some(Ident::with_location(loc.clone(), name.get())), arg)
                     }
                     sqlast::FunctionArg::Unnamed(arg) => {
                         if pos >= fn_type.args.len() {
-                            return Err(CompileError::no_such_entry(vec![Ident::with_location(
-                                loc.clone(),
-                                format!("argument {}", pos),
-                            )]));
+                            if fn_type.variadic_arg.is_some() {
+                                (None, arg)
+                            } else {
+                                return Err(CompileError::no_such_entry(vec![
+                                    Ident::with_location(loc.clone(), format!("argument {}", pos)),
+                                ]));
+                            }
+                        } else {
+                            pos += 1;
+                            (
+                                Some(Ident::with_location(
+                                    loc.clone(),
+                                    fn_type.args[pos - 1].name.clone(),
+                                )),
+                                arg,
+                            )
                         }
-                        pos += 1;
-                        (
-                            Ident::with_location(loc.clone(), fn_type.args[pos - 1].name.clone()),
-                            arg,
-                        )
                     }
                 };
 
@@ -2314,20 +2368,28 @@ pub fn compile_sqlexpr(
                     }
                 };
 
-                if compiled_args.get(&name).is_some() {
-                    return Err(CompileError::duplicate_entry(vec![name]));
-                }
-
                 let compiled_arg =
                     compile_sqlexpr(compiler.clone(), schema.clone(), scope.clone(), loc, &expr)?;
-                compiled_args.insert(
-                    name.get().clone(),
-                    CTypedNameAndExpr {
-                        name: name.get().clone(),
-                        type_: compiled_arg.type_,
-                        expr: compiled_arg.expr,
-                    },
-                );
+
+                match name {
+                    Some(name) => {
+                        if compiled_args.get(&name).is_some() {
+                            return Err(CompileError::duplicate_entry(vec![name]));
+                        }
+
+                        compiled_args.insert(
+                            name.get().clone(),
+                            CTypedNameAndExpr {
+                                name: name.get().clone(),
+                                type_: compiled_arg.type_,
+                                expr: compiled_arg.expr,
+                            },
+                        );
+                    }
+                    None => {
+                        variadic_args.push(compiled_arg);
+                    }
+                }
             }
 
             let mut arg_exprs = Vec::new();
@@ -2348,6 +2410,12 @@ pub fn compile_sqlexpr(
                     return Err(CompileError::missing_arg(vec![Ident::without_location(
                         arg.name.clone(),
                     )]));
+                }
+            }
+
+            if let Some(variadic_arg) = &fn_type.variadic_arg {
+                for compiled_arg in &variadic_args {
+                    variadic_arg.type_.unify(&compiled_arg.type_)?;
                 }
             }
 
@@ -2374,9 +2442,28 @@ pub fn compile_sqlexpr(
                         .collect::<Result<Vec<_>>>()?;
                     let arg_exprs = combine_crefs(arg_exprs)?.await?;
 
+                    let variadic_args = variadic_args
+                        .into_iter()
+                        .map(move |cte| {
+                            cte.expr.then(move |expr: Ref<Expr<CRef<MType>>>| {
+                                Ok(mkcref(TypedExpr {
+                                    type_: cte.type_.clone(),
+                                    expr: Arc::new(expr.read()?.clone()),
+                                }))
+                            })
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    let variadic_args = combine_crefs(variadic_args)?.await?;
+
                     let over = cunwrap(over.await?)?;
 
                     let args = arg_exprs
+                        .read()?
+                        .iter()
+                        .map(|e| Ok(e.read()?.clone()))
+                        .collect::<Result<Vec<_>>>()?;
+
+                    let variadic_args = variadic_args
                         .read()?
                         .iter()
                         .map(|e| Ok(e.read()?.clone()))
@@ -2402,6 +2489,13 @@ pub fn compile_sqlexpr(
                                         return Err(CompileError::unimplemented(
                                             loc.clone(),
                                             "external types for non-load functions",
+                                        ));
+                                    }
+
+                                    if variadic_args.len() > 0 {
+                                        return Err(CompileError::unimplemented(
+                                            loc.clone(),
+                                            "variadic arguments for external types",
                                         ));
                                     }
 
@@ -2464,7 +2558,11 @@ pub fn compile_sqlexpr(
                     // can't be pushed down either because of their types or because they must be
                     // run locally (e.g. `load`).
                     //
-                    let can_lift = !args.iter().any(|a| has_unbound_names(a.expr.clone()))
+                    let can_lift = !args
+                        .iter()
+                        .map(|arg| &arg.expr)
+                        .chain(variadic_args.iter().map(|arg| &arg.expr))
+                        .any(|expr| has_unbound_names(expr.clone()))
                         || !over.names.unbound.is_empty();
                     let should_lift = if compiler.allow_inlining()? {
                         matches!(fn_kind, FnKind::Native)
@@ -2478,6 +2576,12 @@ pub fn compile_sqlexpr(
                             .iter()
                             .map(TypedNameAndExpr::to_typed_expr)
                             .collect::<Vec<_>>();
+                        if variadic_args.len() > 0 {
+                            return Err(CompileError::unimplemented(
+                                loc.clone(),
+                                "variadic arguments for native functions",
+                            ));
+                        }
                         Ok(mkcref(Expr::FnCall(FnCallExpr {
                             func: Arc::new(TypedExpr {
                                 type_: mkcref(MType::Fn(fn_type.clone())),
@@ -2511,6 +2615,12 @@ pub fn compile_sqlexpr(
                                 //
                                 let fn_body = inline_params(fn_body.as_ref()).await?;
 
+                                if variadic_args.len() > 0 {
+                                    return Err(CompileError::unimplemented(
+                                        loc.clone(),
+                                        "variadic arguments for inlined functions",
+                                    ));
+                                }
                                 Ok(mkcref(fn_body))
                             }
                             // Otherwise, create a SQL function call.
@@ -2518,17 +2628,25 @@ pub fn compile_sqlexpr(
                             _ => {
                                 let mut names = CSQLNames::new();
                                 let mut args = Vec::new();
+
+                                // Our SQL builtin functions have arbitrarily named function arguments, so just use Unnamed arguments
                                 for arg in &*arg_exprs.read()? {
                                     let sql = intern_placeholder(
                                         compiler.clone(),
                                         "arg",
                                         &arg.read()?.to_typed_expr(),
                                     )?;
-                                    args.push(sqlast::FunctionArg::Named {
-                                        name: Ident::without_location(arg.read()?.name.clone())
-                                            .to_sqlident(),
-                                        arg: sqlast::FunctionArgExpr::Expr(sql.body.as_expr()),
-                                    });
+                                    args.push(sqlast::FunctionArg::Unnamed(
+                                        sqlast::FunctionArgExpr::Expr(sql.body.as_expr()),
+                                    ));
+                                    names.extend(sql.names.clone());
+                                }
+
+                                for arg in &variadic_args {
+                                    let sql = intern_placeholder(compiler.clone(), "arg", &arg)?;
+                                    args.push(sqlast::FunctionArg::Unnamed(
+                                        sqlast::FunctionArgExpr::Expr(sql.body.as_expr()),
+                                    ));
                                     names.extend(sql.names.clone());
                                 }
 
@@ -2850,6 +2968,109 @@ pub fn compile_sqlexpr(
                             expr: body,
                             data_type,
                         }),
+                    }))))
+                })?,
+            }
+        }
+        sqlast::Expr::Interval {
+            value,
+            leading_field,
+            leading_precision,
+            last_field,
+            fractional_seconds_precision,
+        } => {
+            let expr = c_sqlarg(value.as_ref())?;
+            let leading_field = leading_field.clone();
+            let leading_precision = leading_precision.clone();
+            let last_field = last_field.clone();
+            let fractional_seconds_precision = fractional_seconds_precision.clone();
+
+            if last_field.is_some() {
+                return Err(CompileError::unimplemented(
+                    loc.clone(),
+                    "Interval last field",
+                ));
+            }
+
+            let leading_field = match leading_field {
+                Some(f) => f,
+                None => {
+                    return Err(CompileError::unimplemented(
+                        loc.clone(),
+                        "Interval without leading field",
+                    ))
+                }
+            };
+
+            let type_ = mkcref(MType::Atom(Located::new(
+                AtomicType::Interval(IntervalUnit::MonthDayNano),
+                SourceLocation::Unknown,
+            )));
+
+            CTypedExpr {
+                type_,
+                expr: compiler.async_cref(async move {
+                    let expr = expr.sql.await?;
+                    let SQLSnippet { names, body } = expr.read()?.clone();
+
+                    // SQL parsers don't like the cast we apply here.
+                    let value = match body.as_expr() {
+                        sqlast::Expr::Cast { expr, .. } => expr,
+                        other => Box::new(other),
+                    };
+
+                    Ok(mkcref(Expr::native_sql(Arc::new(SQL {
+                        names,
+                        body: SQLBody::Expr(sqlast::Expr::Interval {
+                            value,
+                            leading_field: Some(leading_field),
+                            leading_precision,
+                            last_field,
+                            fractional_seconds_precision,
+                        }),
+                    }))))
+                })?,
+            }
+        }
+        sqlast::Expr::GroupingSets(sets) => {
+            let mut compiled_sets = Vec::new();
+            for set in sets {
+                let mut compiled_set = Vec::new();
+                for expr in set {
+                    let expr = compile_gb_ob_expr(
+                        compiler.clone(),
+                        schema.clone(),
+                        scope.clone(),
+                        loc,
+                        expr,
+                    )?;
+                    compiled_set.push(expr);
+                }
+                compiled_sets.push(combine_crefs(compiled_set)?);
+            }
+
+            let compiled_sets = combine_crefs(compiled_sets)?;
+
+            CTypedExpr {
+                type_: resolve_global_atom(compiler.clone(), "null")?,
+                expr: compiler.async_cref(async move {
+                    let compiled_sets = compiled_sets.await?;
+
+                    let mut sets = Vec::new();
+                    let mut names = SQLNames::new();
+                    for compiled_set in compiled_sets.read()?.iter() {
+                        let mut set = Vec::new();
+                        for expr in compiled_set.read()?.iter() {
+                            let expr = expr.read()?;
+                            names.extend(expr.names.clone());
+                            set.push(expr.body.as_expr());
+                        }
+                        sets.push(set);
+                    }
+
+                    Ok(mkcref(Expr::native_sql(Arc::new(SQL {
+                        names,
+                        body: SQLBody::Expr(sqlast::Expr::GroupingSets(sets)),
                     }))))
                 })?,
             }

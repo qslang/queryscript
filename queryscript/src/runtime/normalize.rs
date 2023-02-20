@@ -4,6 +4,12 @@ use std::collections::HashMap;
 
 pub trait Normalizer {
     fn quote_style(&self) -> Option<char>;
+    fn should_quote(&self, ident: &sqlast::Ident) -> bool {
+        match ident.value.as_str() {
+            "grouping" => false, // SQL Parsers (DuckDB and Postgres) expect grouping _not_ to be quoted (it isn't parsed as a function)
+            _ => true,
+        }
+    }
     fn params(&self) -> &HashMap<String, String>;
 
     fn normalize<'s>(&'s self, stmt: &sqlast::Statement) -> sqlast::Statement {
@@ -47,7 +53,11 @@ where
                     Located::new(
                         sqlast::Ident {
                             value: ident.value.clone(),
-                            quote_style: self.normalizer.quote_style(),
+                            quote_style: if self.normalizer.should_quote(&ident) {
+                                self.normalizer.quote_style()
+                            } else {
+                                None
+                            },
                         },
                         ident.location().clone(),
                     )

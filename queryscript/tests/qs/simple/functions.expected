@@ -145,6 +145,60 @@
                 value: "| ARRAY_AGG(id)        |\n|----------------------|\n| [Int64(1), Int64(2)] |",
             },
         ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "concat(CAST(id AS TEXT), 'a')",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| concat(CAST(id AS TEXT), 'a') |\n|-------------------------------|\n| 1a                            |\n| 2a                            |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "concat(CAST(id AS TEXT), 'a', 'b')",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| concat(CAST(id AS TEXT), 'a', 'b') |\n|------------------------------------|\n| 1ab                                |\n| 2ab                                |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "concat(CAST(id AS TEXT), 'a', 'b', 'c')",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| concat(CAST(id AS TEXT), 'a', 'b', 'c') |\n|-----------------------------------------|\n| 1abc                                    |\n| 2abc                                    |",
+            },
+        ),
         Err(
             Unimplemented {
                 what: "Function parameters",

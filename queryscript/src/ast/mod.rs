@@ -276,6 +276,7 @@ pub struct FnDef {
     pub name: Located<Ident>,
     pub generics: Vec<Located<Ident>>,
     pub args: Vec<FnArg>,
+    pub variadic_arg: Option<FnArg>,
     pub ret: Option<Type>,
     pub body: FnBody,
 }

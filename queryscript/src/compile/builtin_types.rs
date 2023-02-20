@@ -59,8 +59,12 @@ fn __native_identity<T>(value T) -> T = native;
 
 -- Functions
 fn abs<R>(value R) -> R = sql;
-fn strptime(value text, fmt string) -> timestamp = sql;
+fn concat(args ...string) -> string = sql;
+fn current_date() -> timestamp = sql;
 fn date_trunc(unit string, value timestamp) -> timestamp = sql;
+fn ifnull<R>(value R, default R) -> R = sql;
+fn json_extract_string(value string, path string) -> string = sql;
+fn strptime(value text, fmt string) -> timestamp = sql;
 
 -- Aggs
 fn min<R>(value R) -> R = sql;
@@ -68,6 +72,7 @@ fn max<R>(value R) -> R = sql;
 fn count<R>(value R) -> bigint = sql;
 fn sum<R>(value R) -> SumAgg<R> = sql;
 fn avg<R>(value R) -> double = sql;
+fn grouping<R>(value R) -> bigint = sql;
 
 -- Window functions
 fn row_number<R>() -> bigint = sql;

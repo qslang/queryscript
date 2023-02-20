@@ -52,6 +52,28 @@ impl Constrainable for () {
         Ok(())
     }
 }
+
+impl<T> Constrainable for Option<T>
+where
+    T: Constrainable,
+{
+    fn unify(&self, other: &Self) -> Result<()> {
+        match (self, other) {
+            (Some(t1), Some(t2)) => t1.unify(t2),
+            (None, None) => Ok(()),
+            _ => Err(CompileError::internal(
+                ErrorLocation::Unknown,
+                format!(
+                    "cannot unify Option<{}>:\n{:#?}\n{:#?}",
+                    std::any::type_name::<T>(),
+                    self,
+                    other
+                )
+                .as_str(),
+            )),
+        }
+    }
+}
 impl<T> Constrainable for Vec<T>
 where
     T: Constrainable,

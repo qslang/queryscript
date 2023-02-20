@@ -355,11 +355,13 @@ impl ConnectionSingleton {
             Some(url) => Connection::open(url.get_url().path()),
             None => Connection::open_in_memory(),
         }?;
-        Ok(Self(ExclusiveConnection::new(conn)))
-    }
 
-    fn into_inner(self) -> ExclusiveConnection {
-        self.0
+        // This allows us to use JSON functions (e.g. json_extract_string). It should only need to be run once
+        // while establishing a new connection.
+        conn.execute("INSTALL JSON", [])?;
+        conn.execute("LOAD JSON", [])?;
+
+        Ok(Self(ExclusiveConnection::new(conn)))
     }
 
     fn try_clone(&mut self) -> Result<ExclusiveConnection> {
@@ -368,32 +370,22 @@ impl ConnectionSingleton {
 }
 
 lazy_static! {
-    static ref DUCKDB_CONNS: Mutex<HashMap<Arc<crate::compile::ConnectionString>, ConnectionSingleton>> =
+    static ref DUCKDB_CONNS: Mutex<HashMap<Option<Arc<crate::compile::ConnectionString>>, ConnectionSingleton>> =
         Mutex::new(HashMap::new());
 }
 
 impl SQLEnginePool for DuckDBEngine {
     fn new(url: Option<Arc<crate::compile::ConnectionString>>) -> Result<Box<dyn SQLEngine>> {
-        let base_conn = match url {
-            None => {
-                // Do not use the pool for in-memory connections, so they can have their own
-                // independent scratch space. I'm not sure this is strictly necessary, and in
-                // fact it could be more performant to share a singleton!
-                ConnectionSingleton::new(None)?.into_inner()
-            }
-            Some(url) => {
-                use std::collections::hash_map::Entry;
-                let mut conns = DUCKDB_CONNS.lock().unwrap();
-                let wrapper = match conns.entry(url) {
-                    Entry::Occupied(e) => e.into_mut(),
-                    Entry::Vacant(e) => {
-                        let conn_wrapper = ConnectionSingleton::new(Some(e.key().clone()))?;
-                        e.insert(conn_wrapper)
-                    }
-                };
-                wrapper.try_clone()?
+        use std::collections::hash_map::Entry;
+        let mut conns = DUCKDB_CONNS.lock().unwrap();
+        let wrapper = match conns.entry(url) {
+            Entry::Occupied(e) => e.into_mut(),
+            Entry::Vacant(e) => {
+                let conn_wrapper = ConnectionSingleton::new(e.key().clone())?;
+                e.insert(conn_wrapper)
             }
         };
+        let base_conn = wrapper.try_clone()?;
         Ok(Box::new(DuckDBEngine::build(base_conn)))
     }
 }

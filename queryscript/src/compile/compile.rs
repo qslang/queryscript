@@ -1463,7 +1463,8 @@ pub fn compile_fn_body(
     }
 
     let mut compiled_args = Vec::new();
-    for arg in &def.args {
+
+    let process_arg = |arg: &ast::FnArg| {
         if inner_schema.read()?.expr_decls.get(&arg.name).is_some() {
             return Err(CompileError::duplicate_entry(vec![arg.name.clone()]));
         }
@@ -1500,8 +1501,21 @@ pub fn compile_fn_body(
             .write()?
             .externs
             .insert(arg.name.get().clone(), type_.clone());
+        Ok(type_)
+    };
+
+    for arg in &def.args {
+        let type_ = process_arg(arg)?;
         compiled_args.push(MField::new_nullable(arg.name.get().clone(), type_.clone()));
     }
+
+    let variadic_arg = match &def.variadic_arg {
+        Some(arg) => {
+            let type_ = process_arg(arg)?;
+            Some(MField::new_nullable(arg.name.get().clone(), type_.clone()))
+        }
+        None => None,
+    };
 
     let mut ret_type = if let Some(ret) = &def.ret {
         resolve_type(compiler.clone(), inner_schema.clone(), ret)?
@@ -1566,6 +1580,7 @@ pub fn compile_fn_body(
     let fn_type = MFnType {
         args: compiled_args,
         ret: ret_type,
+        variadic_arg,
     };
 
     Ok((
