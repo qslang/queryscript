@@ -39,7 +39,7 @@ let cte_grouping_sets =
     sum(revenue_impact) as metric_value
   from
     cte_prep
-  where timestamp between '2014-01-01' and current_date() + interval 365 day
+  where timestamp between '2014-01-01'::timestamp and current_date() + interval 365 day
   group by grouping sets (
     (metric_month, combination_1),
       (metric_month, combination_2),

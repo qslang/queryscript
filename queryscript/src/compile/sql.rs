@@ -19,7 +19,7 @@ use crate::compile::inference::*;
 use crate::compile::inline::*;
 use crate::compile::schema::*;
 use crate::compile::scope::{AvailableReferences, SQLScope};
-use crate::types::{number::parse_numeric_type, AtomicType, Type};
+use crate::types::{number::parse_numeric_type, AtomicType, IntervalUnit, Type};
 use crate::{
     ast,
     ast::{SourceLocation, ToPath, ToSqlIdent},
@@ -1589,8 +1589,12 @@ fn coerce_all(
     op: &sqlparser::ast::BinaryOperator,
     loc: &SourceLocation,
     args: Vec<CTypedSQL>,
+    target_type: Option<CRef<MType>>,
 ) -> Result<(CRef<MType>, Vec<CTypedSQL>)> {
-    let arg_types = args.iter().map(|ts| ts.type_.clone()).collect::<Vec<_>>();
+    let mut arg_types = args.iter().map(|ts| ts.type_.clone()).collect::<Vec<_>>();
+    if let Some(tt) = target_type {
+        arg_types.push(tt);
+    }
     let generic = Arc::new(generics::CoerceGeneric::new(
         loc.clone(),
         CoerceOp::Binary(op.clone()),
@@ -2028,7 +2032,7 @@ pub fn compile_sqlexpr(
             let clow = c_sqlarg(low)?;
             let chigh = c_sqlarg(high)?;
 
-            let (_, casted) = coerce_all(&compiler, &op, loc, vec![cexpr, clow, chigh])?;
+            let (_, casted) = coerce_all(&compiler, &op, loc, vec![cexpr, clow, chigh], None)?;
             let type_ = resolve_global_atom(compiler.clone(), "bool")?;
             let negated = *negated;
 
@@ -2070,12 +2074,12 @@ pub fn compile_sqlexpr(
             let type_ = match op {
                 Plus | Minus | Multiply | Divide => {
                     let (result_type, casted) =
-                        coerce_all(&compiler, &op, loc, vec![cleft, cright])?;
+                        coerce_all(&compiler, &op, loc, vec![cleft, cright], None)?;
                     (cleft, cright) = (casted[0].clone(), casted[1].clone());
                     result_type
                 }
                 Eq | NotEq | Lt | LtEq | Gt | GtEq => {
-                    let (_, casted) = coerce_all(&compiler, &op, loc, vec![cleft, cright])?;
+                    let (_, casted) = coerce_all(&compiler, &op, loc, vec![cleft, cright], None)?;
                     (cleft, cright) = (casted[0].clone(), casted[1].clone());
                     resolve_global_atom(compiler.clone(), "bool")?
                 }
@@ -2090,7 +2094,7 @@ pub fn compile_sqlexpr(
                         }),
                     };
                     let (_, casted) =
-                        coerce_all(&compiler, &op, loc, vec![cleft, cright, bool_val])?;
+                        coerce_all(&compiler, &op, loc, vec![cleft, cright, bool_val], None)?;
                     (cleft, cright) = (casted[0].clone(), casted[1].clone());
                     resolve_global_atom(compiler.clone(), "bool")?
                 }
@@ -2197,7 +2201,7 @@ pub fn compile_sqlexpr(
             }
 
             let (result_type, mut c_results) =
-                coerce_all(&compiler, &sqlast::BinaryOperator::Eq, loc, c_results)?;
+                coerce_all(&compiler, &sqlast::BinaryOperator::Eq, loc, c_results, None)?;
 
             let c_else_result = match else_result {
                 Some(_) => Some(c_results.pop().unwrap()),
@@ -2950,6 +2954,60 @@ pub fn compile_sqlexpr(
                         body: SQLBody::Expr(sqlast::Expr::Cast {
                             expr: body,
                             data_type,
+                        }),
+                    }))))
+                })?,
+            }
+        }
+        sqlast::Expr::Interval {
+            value,
+            leading_field,
+            leading_precision,
+            last_field,
+            fractional_seconds_precision,
+        } => {
+            let expr = c_sqlarg(value.as_ref())?;
+            let leading_field = leading_field.clone();
+            let leading_precision = leading_precision.clone();
+            let last_field = last_field.clone();
+            let fractional_seconds_precision = fractional_seconds_precision.clone();
+
+            if last_field.is_some() {
+                return Err(CompileError::unimplemented(
+                    loc.clone(),
+                    "Interval last field",
+                ));
+            }
+
+            let leading_field = match leading_field {
+                Some(f) => f,
+                None => {
+                    return Err(CompileError::unimplemented(
+                        loc.clone(),
+                        "Interval without leading field",
+                    ))
+                }
+            };
+
+            let type_ = mkcref(MType::Atom(Located::new(
+                AtomicType::Interval(IntervalUnit::MonthDayNano),
+                SourceLocation::Unknown,
+            )));
+
+            CTypedExpr {
+                type_,
+                expr: compiler.async_cref(async move {
+                    let expr = expr.sql.await?;
+                    let SQLSnippet { names, body } = expr.read()?.clone();
+
+                    Ok(mkcref(Expr::native_sql(Arc::new(SQL {
+                        names,
+                        body: SQLBody::Expr(sqlast::Expr::Interval {
+                            value: Box::new(body.as_expr()),
+                            leading_field: Some(leading_field),
+                            leading_precision,
+                            last_field,
+                            fractional_seconds_precision,
                         }),
                     }))))
                 })?,
