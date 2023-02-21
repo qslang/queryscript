@@ -29,10 +29,11 @@ SELECT * EXCLUDE (id, org_id) FROM users ORDER BY name;
 
 SELECT * RENAME (id AS user_id) FROM users ORDER BY id;
 
--- Unsupported
-select u2.* from users join users u2 on users.id = u2.id;
+SELECT
+	id, 1,
+FROM users
+;
 
--- Should error
-select * from users join users on true;
-select count(*) from users, users u2 where users.id = u2.a;
-select description, (select * from users where users.id = events.user_id) from events order by ts;
+SELECT 1, 2, ;
+
+select id, 1 as a, FROM users GROUP BY id, a, ;

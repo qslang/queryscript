@@ -1,0 +1,50 @@
+{
+    "compile_errors": [
+        (
+            Some(
+                0,
+            ),
+            NoSuchEntry {
+                path: [
+                    "users",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            Some(
+                1,
+            ),
+            NoSuchEntry {
+                path: [
+                    "users",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            Some(
+                2,
+            ),
+            NoSuchEntry {
+                path: [
+                    "users",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            Some(
+                3,
+            ),
+            NoSuchEntry {
+                path: [
+                    "events",
+                ],
+                backtrace: None,
+            },
+        ),
+    ],
+    "decls": {},
+    "queries": [],
+}
