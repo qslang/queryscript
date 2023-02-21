@@ -283,9 +283,9 @@ jobs:
       - name: Publish Extension (Code Marketplace, release)
         if: startsWith(github.ref, 'refs/tags/') && github.repository == 'qscl/queryscript'
         working-directory: ./extension
-        run: npx vsce publish --skip-duplicate --pat ${{ secrets.MARKETPLACE_TOKEN }} --packagePath ../dist/queryscript-*.vsix
+        run: npx vsce publish --pat ${{ secrets.MARKETPLACE_TOKEN }} --packagePath ../dist/queryscript-*.vsix
 
       - name: Publish Extension (Code Marketplace, nightly)
         if: "!startsWith(github.ref, 'refs/tags/') && github.repository == 'qscl/queryscript'"
         working-directory: ./extension
-        run: npx vsce publish --skip-duplicate --pat ${{ secrets.MARKETPLACE_TOKEN }} --packagePath ../dist/queryscript-*.vsix
+        run: npx vsce publish --pat ${{ secrets.MARKETPLACE_TOKEN }} --packagePath ../dist/queryscript-*.vsix
