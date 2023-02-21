@@ -1,21 +1,21 @@
-const core = require('@actions/core');
+const core = require("@actions/core");
 const path = require("path");
 const fs = require("fs");
-const github = require('@actions/github');
-const glob = require('glob');
+const github = require("@actions/github");
+const glob = require("glob");
 
 function sleep(milliseconds) {
-  return new Promise(resolve => setTimeout(resolve, milliseconds));
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function runOnce() {
   // Load all our inputs and env vars. Note that `getInput` reads from `INPUT_*`
-  const files = core.getInput('files');
-  const name = core.getInput('name');
-  const token = core.getInput('token');
+  const files = core.getInput("files");
+  const name = core.getInput("name");
+  const token = core.getInput("token");
   const slug = process.env.GITHUB_REPOSITORY;
-  const owner = slug.split('/')[0];
-  const repo = slug.split('/')[1];
+  const owner = slug.split("/")[0];
+  const repo = slug.split("/")[1];
   const sha = process.env.HEAD_SHA;
 
   core.info(`files: ${files}`);
@@ -24,14 +24,17 @@ async function runOnce() {
   const options = {
     request: {
       timeout: 30000,
-    }
+    },
   };
   const octokit = github.getOctokit(token, options);
 
   // Delete the previous release since we can't overwrite one. This may happen
   // due to retrying an upload or it may happen because we're doing the dev
   // release.
-  const releases = await octokit.paginate("GET /repos/:owner/:repo/releases", { owner, repo });
+  const releases = await octokit.paginate("GET /repos/:owner/:repo/releases", {
+    owner,
+    repo,
+  });
   for (const release of releases) {
     if (release.tag_name !== name) {
       continue;
@@ -42,13 +45,13 @@ async function runOnce() {
   }
 
   // We also need to update the `dev` tag while we're at it on the `dev` branch.
-  if (name == 'nightly') {
+  if (name == "nightly") {
     try {
       core.info(`updating nightly tag`);
       await octokit.rest.git.updateRef({
         owner,
         repo,
-        ref: 'tags/nightly',
+        ref: "tags/nightly",
         sha,
         force: true,
       });
@@ -58,10 +61,10 @@ async function runOnce() {
       await octokit.rest.git.createTag({
         owner,
         repo,
-        tag: 'nightly',
-        message: 'nightly release',
+        tag: "nightly",
+        message: "nightly release",
         object: sha,
-        type: 'commit',
+        type: "commit",
       });
     }
   }
@@ -75,7 +78,8 @@ async function runOnce() {
     name,
     tag_name: name,
     target_commitish: sha,
-    prerelease: name === 'nightly',
+    prerelease: name === "nightly",
+    generate_release_notes: true,
   });
   const release_id = release.data.id;
 
@@ -89,18 +93,25 @@ async function runOnce() {
       let assets = await octokit.rest.repos.listReleaseAssets({
         owner,
         repo,
-        release_id
+        release_id,
       });
       for (const asset of assets.data) {
         if (asset.name === name) {
           core.info(`delete asset ${name}`);
           const asset_id = asset.id;
-          await octokit.rest.repos.deleteReleaseAsset({ owner, repo, asset_id });
+          await octokit.rest.repos.deleteReleaseAsset({
+            owner,
+            repo,
+            asset_id,
+          });
         }
       }
 
       core.info(`upload ${file}`);
-      const headers = { 'content-length': size, 'content-type': 'application/octet-stream' };
+      const headers = {
+        "content-length": size,
+        "content-type": "application/octet-stream",
+      };
       const data = fs.createReadStream(file);
       await octokit.rest.repos.uploadReleaseAsset({
         data,
@@ -122,8 +133,7 @@ async function runWithRetry(f) {
       await f();
       break;
     } catch (e) {
-      if (i === retries - 1)
-        throw e;
+      if (i === retries - 1) throw e;
 
       core.error(e);
       const currentDelay = Math.round(Math.random() * delay);
@@ -138,7 +148,7 @@ async function run() {
   await runWithRetry(runOnce);
 }
 
-run().catch(err => {
+run().catch((err) => {
   core.error(err);
   core.setFailed(err.message);
 });
