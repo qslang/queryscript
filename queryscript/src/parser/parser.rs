@@ -67,6 +67,15 @@ impl<'a> Parser<'a> {
         self.peek_token().token == Token::EOF
     }
 
+    pub fn may_have_more(&mut self) -> bool {
+        if !self.is_eof() {
+            return false;
+        }
+
+        self.sqlparser.prev_token();
+        return self.sqlparser.next_token() != Token::SemiColon;
+    }
+
     #[must_use]
     pub fn consume_token(&mut self, expected: &Token) -> bool {
         self.sqlparser.consume_token(expected)

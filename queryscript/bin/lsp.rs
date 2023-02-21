@@ -1067,13 +1067,14 @@ impl compile::OnSchema for SchemaRecorder {
     }
     fn on_schema(
         &mut self,
-        path: &FilePath,
-        _text: &str,
-        ast: &ast::Schema,
-        schema: compile::schema::Ref<Schema>,
+        path: Option<&FilePath>,
+        ast: Option<&ast::Schema>,
+        schema: Option<compile::schema::Ref<Schema>>,
         errors: &Vec<(Option<usize>, CompileError)>,
     ) -> compile::error::Result<()> {
         let documents = self.documents.clone();
+
+        let path = path.ok_or(CompileError::external("compiler ran without path"))?;
         let uri = Url::from_file_path(path).map_err(|_| {
             CompileError::external(format!("bad path: {}", path.display()).as_str())
         })?;
@@ -1082,9 +1083,9 @@ impl compile::OnSchema for SchemaRecorder {
         let mut diagnostics = Vec::new();
 
         for (idx, err) in errors {
-            let loc = match err.location().normalize() {
-                Some(loc) => Some(loc),
-                None => {
+            let loc = match (err.location().normalize(), ast) {
+                (Some(loc), _) => Some(loc),
+                (None, Some(ast)) => {
                     if let Some(idx) = idx {
                         let stmt = &ast.stmts[*idx];
                         let loc = SourceLocation::Range(
@@ -1099,6 +1100,7 @@ impl compile::OnSchema for SchemaRecorder {
                         None
                     }
                 }
+                _ => None,
             };
 
             // If we don't have a range, just use the whole document.
@@ -1125,7 +1127,7 @@ impl compile::OnSchema for SchemaRecorder {
             let mut documents = documents.write().await;
             let mut document = documents.get_mut(&uri).unwrap().lock().await;
 
-            document.schema = Some(schema);
+            document.schema = schema;
             if document.compiling_version.is_some() {
                 document.schema_version = document.compiling_version;
                 document.compiling_version = None;

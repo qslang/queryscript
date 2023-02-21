@@ -102,10 +102,9 @@ pub trait OnSchema {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
     fn on_schema(
         &mut self,
-        path: &FilePath,
-        text: &str,
-        ast: &ast::Schema,
-        schema: Ref<Schema>,
+        path: Option<&FilePath>,
+        ast: Option<&ast::Schema>,
+        schema: Option<Ref<Schema>>,
         errors: &Vec<(Option<usize>, CompileError)>,
     ) -> Result<()>;
 }
@@ -250,17 +249,15 @@ impl Compiler {
 
     pub fn run_on_schema(
         &self,
-        file: String,
-        ast: &ast::Schema,
-        schema: Ref<Schema>,
+        file: Option<&FilePath>,
+        ast: Option<&ast::Schema>,
+        schema: Option<Ref<Schema>>,
         errors: &Vec<(Option<usize>, CompileError)>,
     ) -> Result<()> {
         let mut data = self.data.write()?;
-        let path = FilePath::new(&file);
-        let text = data.files.get(&file).unwrap().clone();
         let on_schema = &mut data.config.on_schema;
         Ok(match on_schema {
-            Some(f) => f.on_schema(path, text.as_str(), ast, schema, errors)?,
+            Some(f) => f.on_schema(file, ast, schema, errors)?,
             None => {}
         })
     }
@@ -281,6 +278,12 @@ impl Compiler {
         runtime.block_on(async move {
             result.replace(compile_schema_ast(self.clone(), schema.clone(), ast));
             result.absorb(self.drive().await);
+
+            c_try!(
+                result,
+                self.run_on_schema(None, Some(ast), Some(schema.clone()), &result.errors)
+            );
+
             result
         })
     }
@@ -296,17 +299,15 @@ impl Compiler {
             result.replace(compile_result);
             result.absorb(self.drive().await);
 
-            if let (Some(schema), Some(parsed_file)) = (result.ok(), parsed_file) {
-                c_try!(
-                    result,
-                    self.run_on_schema(
-                        parsed_file.file,
-                        &parsed_file.ast,
-                        schema.clone(),
-                        &result.errors
-                    )
-                );
-            }
+            c_try!(
+                result,
+                self.run_on_schema(
+                    Some(&file_path),
+                    parsed_file.as_ref().map(|f| &f.ast),
+                    result.result.as_ref().map(|s| s.clone()),
+                    &result.errors
+                )
+            );
 
             result
         })
@@ -1738,7 +1739,8 @@ pub fn gather_schema_externs(schema: Ref<Schema>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{atomic::AtomicUsize, Arc};
+    use super::*;
+    use std::sync::{atomic::AtomicUsize, Arc, Mutex};
 
     #[test]
     fn test_park_no_op() {
@@ -1770,5 +1772,53 @@ mod tests {
         });
 
         assert_eq!(drive_counter.load(std::sync::atomic::Ordering::SeqCst), 10);
+    }
+
+    struct SchemaRecorder {
+        pub calls: Arc<Mutex<u32>>,
+    }
+
+    impl OnSchema for SchemaRecorder {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+            self
+        }
+        fn on_schema(
+            &mut self,
+            _path: Option<&FilePath>,
+            _ast: Option<&ast::Schema>,
+            _schema: Option<Ref<Schema>>,
+            _errors: &Vec<(Option<usize>, CompileError)>,
+        ) -> Result<()> {
+            let mut calls = self.calls.lock().unwrap();
+            *calls += 1;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_on_schema() {
+        // Verify that compile_schema_from_file() and compile_schema_ast() both call on_schema
+        let compiler = Compiler::new().unwrap();
+
+        let calls = Arc::new(Mutex::new(0));
+
+        compiler
+            .on_schema(Some(Box::new(SchemaRecorder {
+                calls: calls.clone(),
+            })))
+            .unwrap();
+
+        assert_eq!(*calls.lock().unwrap(), 0);
+        let result = compiler.compile_schema_from_file(FilePath::new("/dev/thisdoesnotexist"));
+        assert!(result.as_result().is_err());
+        assert_eq!(*calls.lock().unwrap(), 1);
+
+        let schema = Schema::new("nofolder".to_string(), None);
+        let result = compiler.compile_string(schema.clone(), "SELECT 1;");
+        assert!(result.as_result().is_ok());
+        assert_eq!(*calls.lock().unwrap(), 2);
     }
 }
