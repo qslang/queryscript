@@ -1,6 +1,8 @@
 {
     "compile_errors": [],
     "decls": {
+        "let bar": [Int64],
+        "let baz": [Utf8],
         "let foo": Int64,
     },
     "queries": [
@@ -20,6 +22,134 @@
                     ),
                 ),
                 value: "| foo |\n|-----|\n| 1   |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "bar",
+                                type_: List(
+                                    Atom(
+                                        Int64,
+                                    ),
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| bar       |\n|-----------|\n| [1, 2, 3] |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "baz",
+                                type_: List(
+                                    Atom(
+                                        Utf8,
+                                    ),
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| baz       |\n|-----------|\n| [a, b, c] |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "[['a', 'b'], ['c', 'd']]",
+                                type_: List(
+                                    List(
+                                        Atom(
+                                            Utf8,
+                                        ),
+                                    ),
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| [['a', 'b'], ['c', 'd']] |\n|--------------------------|\n| [[a, b], [c, d]]         |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "[['a', 'b'], ['c', 'd']]",
+                                type_: List(
+                                    List(
+                                        Atom(
+                                            Utf8,
+                                        ),
+                                    ),
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| [['a', 'b'], ['c', 'd']] |\n|--------------------------|\n| [[a, b], [c, d]]         |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Atom(
+                        Int64,
+                    ),
+                ),
+                value: "[1, 2, 3]",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Atom(
+                        Utf8,
+                    ),
+                ),
+                value: "[a, b, c]",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    List(
+                        Atom(
+                            Utf8,
+                        ),
+                    ),
+                ),
+                value: "[[a, b], [c, d]]",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    List(
+                        Atom(
+                            Utf8,
+                        ),
+                    ),
+                ),
+                value: "[[a, b], [c, d]]",
             },
         ),
     ],

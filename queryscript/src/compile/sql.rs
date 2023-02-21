@@ -1998,7 +1998,10 @@ pub fn compile_sqlexpr(
             };
 
             CTypedExpr {
-                type_: data_type,
+                type_: mkcref(MType::List(Located::new(
+                    data_type,
+                    SourceLocation::Unknown,
+                ))),
                 expr: combine_crefs(c_elems.iter().map(|s| s.sql.clone()).collect())?.then({
                     let expr = expr.clone();
                     move |args: Ref<Vec<Ref<SQL<CRef<MType>>>>>| {

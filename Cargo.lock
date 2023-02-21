@@ -1882,6 +1882,7 @@ version = "0.1.3"
 dependencies = [
  "arrow",
  "arrow-buffer",
+ "arrow-cast",
  "arrow-schema",
  "async-trait",
  "chrono",

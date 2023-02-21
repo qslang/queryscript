@@ -19,6 +19,7 @@ use std::fmt;
 pub use std::sync::Arc;
 use tabled::builder::Builder as TableBuilder;
 
+use super::error::Result;
 use super::types::*;
 
 #[derive(fmt::Debug, Clone)]
@@ -114,6 +115,8 @@ pub trait Relation: fmt::Debug + Send + Sync {
             .flatten()
             .collect()
     }
+
+    fn try_cast(&self, target_schema: &Vec<Field>) -> Result<Arc<dyn Relation>>;
 }
 
 pub trait RecordBatch: fmt::Debug + Send + Sync {
@@ -342,7 +345,14 @@ impl fmt::Display for Value {
 
             // TODO: Implement list without Debug
             Self::List(l) => {
-                write!(f, "{:?}", l.as_vec())
+                write!(f, "[")?;
+                let mut delim = "";
+                for t in l.as_vec() {
+                    write!(f, "{delim}")?;
+                    delim = ", ";
+                    write!(f, "{t}")?;
+                }
+                write!(f, "]")
             }
 
             // TODO: Implement functions without Debug

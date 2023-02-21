@@ -21,6 +21,12 @@ pub enum TypesystemError {
         val: String,
         backtrace: Option<Backtrace>,
     },
+
+    #[snafu(context(false))]
+    ArrowError {
+        source: arrow::error::ArrowError,
+        backtrace: Option<Backtrace>,
+    },
 }
 
 #[allow(unused_macros)]

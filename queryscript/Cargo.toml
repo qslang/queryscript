@@ -2,16 +2,17 @@
 name = "queryscript"
 version = "0.1.3"
 edition = "2021"
-authors = ["Ankur Goyal <ankrgyl@gmail.com>", "Michael Andrews <09mandrews@gmail.com>"]
+authors = [
+    "Ankur Goyal <ankrgyl@gmail.com>",
+    "Michael Andrews <09mandrews@gmail.com>",
+]
 description = "Queryscript is a SQL-based language that allows you to use higher order abstractions like variables, functions, and modules alongside SQL queries."
 homepage = "https://github.com/qscl/queryscript"
 repository = "https://github.com/qscl/queryscript"
 readme = "../README.md"
 license = "Apache-2.0"
 keywords = ["sql", "bi"]
-exclude = [
-    "tests/**"
-]
+exclude = ["tests/**"]
 
 [lib]
 name = "queryscript"
@@ -33,7 +34,17 @@ multi-thread = ["tokio/rt-multi-thread"]
 serde = ["dep:serde", "arrow-schema/serde", "half/serde"]
 ts = ["serde", "dep:ts-rs"]
 cli = ["clap", "home", "rustyline", "backtraces"]
-lsp = ["multi-thread", "tokio/io-util", "tokio/io-std", "tokio/macros", "tokio/fs", "regex", "serde_json", "serde", "tower-lsp"]
+lsp = [
+    "multi-thread",
+    "tokio/io-util",
+    "tokio/io-std",
+    "tokio/macros",
+    "tokio/fs",
+    "regex",
+    "serde_json",
+    "serde",
+    "tower-lsp",
+]
 backtraces = ["snafu/backtraces"]
 duckdb-bundled = ["duckdb/bundled"]
 
@@ -50,6 +61,7 @@ arrow = { version = "28", default-features = false, features = [
 # to be propagated through to it.
 arrow-schema = { version = "28" }
 arrow-buffer = { version = "28" }
+arrow-cast = { version = "28" }
 parquet = { version = "28" }
 
 async-trait = "0.1"
@@ -62,7 +74,7 @@ futures = "0.3"
 half = { version = "2.1" }
 lazy_static = "1.4.0"
 object_store = "0.5.0"
-regex = { version = "1", optional = true}
+regex = { version = "1", optional = true }
 serde = { version = "1", optional = true }
 serde_json = { version = "1", optional = true }
 snafu = { version = "0.7.3" }

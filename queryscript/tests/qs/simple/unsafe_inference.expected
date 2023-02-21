@@ -194,9 +194,9 @@
                 value: "| 'bogus types' |\n|---------------|\n| bogus types   |",
             },
         ),
-        Err(
-            TypeMismatch {
-                expected_type: List(
+        Ok(
+            TypedValue {
+                type_: List(
                     Record(
                         [
                             Field {
@@ -216,27 +216,7 @@
                         ],
                     ),
                 ),
-                actual_type: List(
-                    Record(
-                        [
-                            Field {
-                                name: "bottom",
-                                type_: Atom(
-                                    Int64,
-                                ),
-                                nullable: true,
-                            },
-                            Field {
-                                name: "top",
-                                type_: Atom(
-                                    Int64,
-                                ),
-                                nullable: true,
-                            },
-                        ],
-                    ),
-                ),
-                backtrace: None,
+                value: "| bottom | top |\n|--------|-----|\n| 1      | 4   |",
             },
         ),
     ],

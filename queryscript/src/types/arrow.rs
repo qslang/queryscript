@@ -6,10 +6,11 @@ use arrow::{
         Time64NanosecondArray, TimestampMicrosecondArray, TimestampMillisecondArray,
         TimestampNanosecondArray, TimestampSecondArray,
     },
-    datatypes::ArrowPrimitiveType,
+    datatypes::{ArrowPrimitiveType, Field as ArrowField},
 };
 use arrow_schema::SchemaRef as ArrowSchemaRef;
 
+use super::error::Result;
 use super::list::VecList;
 use super::record::VecRow;
 use super::types::{try_arrow_fields_to_fields, Field, Type};
@@ -48,6 +49,34 @@ impl Relation for ArrowRecordBatchRelation {
     fn as_any(&self) -> &dyn Any {
         self
     }
+
+    fn try_cast(&self, target_schema: &Vec<Field>) -> Result<Arc<dyn Relation>> {
+        let arrow_schema = Arc::new(arrow_schema::Schema::new(
+            target_schema
+                .iter()
+                .map(|f| Ok(TryInto::<ArrowField>::try_into(f)?))
+                .collect::<Result<Vec<_>>>()?,
+        ));
+
+        let mut batches = Vec::new();
+        for batch in self.batches.iter() {
+            let columns = batch
+                .columns()
+                .iter()
+                .enumerate()
+                .map(|(i, col)| {
+                    Ok(arrow_cast::cast::cast(
+                        &col,
+                        arrow_schema.fields[i].data_type(),
+                    )?)
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            batches.push(ArrowRecordBatch::try_new(arrow_schema.clone(), columns)?);
+        }
+
+        Ok(Self::new(arrow_schema, Arc::new(batches)))
+    }
 }
 
 lazy_static::lazy_static! {
@@ -71,6 +100,10 @@ impl Relation for EmptyRelation {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    fn try_cast(&self, _target_schema: &Vec<Field>) -> Result<Arc<dyn Relation>> {
+        Ok(Arc::new(EmptyRelation()))
     }
 }
 

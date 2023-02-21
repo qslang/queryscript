@@ -285,26 +285,20 @@
                 backtrace: None,
             },
         ),
-        Err(
-            TypeMismatch {
-                expected_type: Atom(
+        Ok(
+            TypedValue {
+                type_: Atom(
                     Float64,
                 ),
-                actual_type: Atom(
-                    Null,
-                ),
-                backtrace: None,
+                value: "null",
             },
         ),
-        Err(
-            TypeMismatch {
-                expected_type: Atom(
+        Ok(
+            TypedValue {
+                type_: Atom(
                     Float64,
                 ),
-                actual_type: Atom(
-                    Null,
-                ),
-                backtrace: None,
+                value: "null",
             },
         ),
         Ok(
