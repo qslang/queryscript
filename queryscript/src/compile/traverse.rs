@@ -1006,6 +1006,7 @@ impl<V: Visitor<schema::CRef<schema::MType>> + Sync> Visit<V, schema::CRef<schem
             }),
             Expr::Unknown => Expr::Unknown,
             Expr::UncompiledFn(def) => Expr::UncompiledFn(def.clone()),
+            Expr::Expanded(items) => Expr::Expanded(items.clone()),
         })
     }
 }

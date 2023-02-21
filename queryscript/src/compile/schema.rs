@@ -905,6 +905,7 @@ where
     Connection(Arc<ConnectionString>),
     Materialize(MaterializeExpr<TypeRef>),
     UncompiledFn(ast::FnDef),
+    Expanded(Vec<CTypedExpr>),
     Unknown,
 }
 
@@ -962,6 +963,7 @@ impl Expr<CRef<MType>> {
                 inlined: inlined.clone(),
             })),
             Expr::UncompiledFn(def) => Ok(Expr::UncompiledFn(def.clone())),
+            Expr::Expanded(items) => Ok(Expr::Expanded(items.clone())),
             Expr::Unknown => Ok(Expr::Unknown),
         }
     }

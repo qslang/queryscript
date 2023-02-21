@@ -500,6 +500,10 @@ pub fn intern_cref_placeholder(
     Ok(CTypedSQL { type_, sql })
 }
 
+// XXX To resume... we need to figure out a way to _not_ inline the foreach list as a parameter here, and
+// instead look at the returned CTypedSQL and handle it.
+// Maybe we need to have an additional arm for the type of SQL Snippet (a list of items), and then barf if
+// we try to consume it as an expr, query, etc.
 pub fn compile_sqlarg(
     compiler: Compiler,
     schema: Ref<Schema>,
@@ -3211,10 +3215,7 @@ pub fn compile_sqlexpr(
                     }
 
                     Ok(mkcref(CTypedExpr {
-                        type_: mkcref(MType::List(Located::new(
-                            data_type,
-                            SourceLocation::Unknown,
-                        ))),
+                        type_: data_type,
                         expr: mkcref(Expr::native_sql(Arc::new(SQL {
                             names,
                             body: SQLBody::Expr(sqlast::Expr::Tuple(exprs)),

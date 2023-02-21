@@ -70,6 +70,11 @@ pub fn eval<'a>(
                     format!("uncompiled function: {:?}", def).as_str(),
                 ));
             }
+            schema::Expr::Expanded(items) => {
+                return Err(RuntimeError::new(
+                    format!("unresolved expanded items: {:?}", items).as_str(),
+                ));
+            }
             schema::Expr::SchemaEntry(schema::STypedExpr { .. }) => {
                 return Err(RuntimeError::new("unresolved schema entry"));
             }
