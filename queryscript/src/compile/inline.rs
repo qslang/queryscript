@@ -43,6 +43,12 @@ pub struct ParamInliner {
     context: BTreeMap<Ident, SQLBody>,
 }
 
+impl ParamInliner {
+    pub fn new(context: BTreeMap<Ident, SQLBody>) -> Self {
+        Self { context }
+    }
+}
+
 impl SQLVisitor for ParamInliner {
     fn visit_sqlexpr(&self, expr: &sqlast::Expr) -> Option<sqlast::Expr> {
         let ident = match expr {

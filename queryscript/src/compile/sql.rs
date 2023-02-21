@@ -26,6 +26,7 @@ use crate::{
 };
 
 use super::compile::ExternalTypeRank;
+use super::traverse::VisitSQL;
 
 const QS_NAMESPACE: &str = "__qs";
 
@@ -1871,6 +1872,30 @@ impl CompileSQL for sqlast::WindowSpec {
     }
 }
 
+impl CompileSQL for sqlast::LoopRange {
+    fn compile_sql(
+        &self,
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        scope: &Ref<SQLScope>,
+        loc: &SourceLocation,
+    ) -> Result<CRefSnippet<Self>> {
+        let sqlast::LoopRange { expr, alias } = self;
+
+        let c_expr = expr.compile_sql(compiler, schema, scope, loc)?;
+
+        let alias = alias.clone();
+        compiler.async_cref(async move {
+            let SQLSnippet { names, body } = cunwrap(c_expr.await?)?;
+
+            Ok(CSQLSnippet::wrap(
+                names,
+                sqlast::LoopRange { expr: body, alias },
+            ))
+        })
+    }
+}
+
 async fn extract_scalar_subselect_field(
     loc: &SourceLocation,
     query_type: &MType,
@@ -1913,6 +1938,50 @@ async fn extract_scalar_subselect_field(
             .as_str(),
         ));
     })
+}
+
+fn apply_foreach(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    scope: &Ref<SQLScope>,
+    loc: &SourceLocation,
+    ranges: &[sqlast::LoopRange],
+    substitutions: BTreeMap<Ident, SQLBody>,
+    expr: &sqlast::Expr,
+) -> Result<Vec<sqlast::Expr>> {
+    if ranges.len() == 0 {
+        let inliner = ParamInliner::new(substitutions);
+        Ok(vec![expr.visit_sql(&inliner)])
+    } else {
+        let mut ret = vec![];
+        let range = &ranges[0];
+        match range.expr.as_ref() {
+            sqlast::Expr::Array(sqlast::Array { elem, .. }) => {
+                for e in elem.iter() {
+                    let mut substitutions = substitutions.clone();
+                    substitutions.insert(range.alias.get().into(), SQLBody::Expr(e.clone()));
+
+                    ret.extend(apply_foreach(
+                        compiler,
+                        schema,
+                        scope,
+                        loc,
+                        &ranges[1..],
+                        substitutions,
+                        expr,
+                    )?);
+                }
+            }
+            _ => {
+                return Err(CompileError::invalid_foreach(
+                    loc.clone(),
+                    "foreach range expected to be a literal array",
+                ));
+            }
+        };
+
+        Ok(ret)
+    }
 }
 
 pub fn compile_sqlexpr(
@@ -3075,6 +3144,100 @@ pub fn compile_sqlexpr(
                         names,
                         body: SQLBody::Expr(sqlast::Expr::GroupingSets(sets)),
                     }))))
+                })?,
+            }
+        }
+        sqlast::Expr::ForEach { ranges, body } => {
+            let ranges = ranges.compile_sql(&compiler, &schema, &scope, &loc)?;
+
+            let inner_expr = compiler.async_cref({
+                let compiler = compiler.clone();
+                let schema = schema.clone();
+                let scope = scope.clone();
+                let loc = loc.clone();
+                let body = body.as_ref().clone();
+                async move {
+                    let SQLSnippet {
+                        names,
+                        body: ranges,
+                    } = cunwrap(ranges.await?)?;
+
+                    if !names.params.is_empty() {
+                        return Err(CompileError::unimplemented(
+                            loc.clone(),
+                            "ForEach with external parameters",
+                        ));
+                    }
+
+                    let substituted = apply_foreach(
+                        &compiler,
+                        &schema,
+                        &scope,
+                        &loc,
+                        &ranges,
+                        BTreeMap::new(),
+                        &body,
+                    )?
+                    .into_iter()
+                    .map(|e| {
+                        compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), &loc, &e)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                    let mut c_elem_iter = substituted.iter();
+                    let (data_type, exprs) = if let Some(first) = c_elem_iter.next() {
+                        let mut exprs = vec![first.sql.clone()];
+                        for next in c_elem_iter {
+                            first.type_.unify(&next.type_)?;
+                            exprs.push(next.sql.clone());
+                        }
+                        (first.type_.clone(), exprs)
+                    } else {
+                        (
+                            mkcref(MType::Atom(Located::new(AtomicType::Null, loc.clone()))),
+                            vec![],
+                        )
+                    };
+
+                    let combined = combine_crefs(exprs)?;
+                    let combined = combined.await?;
+
+                    let mut names = SQLNames::new();
+                    let mut exprs = Vec::new();
+                    for expr in combined.read()?.iter() {
+                        let expr = expr.read()?;
+                        names.extend(expr.names.clone());
+                        exprs.push(expr.body.as_expr());
+                    }
+
+                    Ok(mkcref(CTypedExpr {
+                        type_: mkcref(MType::List(Located::new(
+                            data_type,
+                            SourceLocation::Unknown,
+                        ))),
+                        expr: mkcref(Expr::native_sql(Arc::new(SQL {
+                            names,
+                            body: SQLBody::Expr(sqlast::Expr::Tuple(exprs)),
+                        }))),
+                    }))
+                }
+            })?;
+
+            CTypedExpr {
+                type_: compiler.async_cref({
+                    let inner_expr = inner_expr.clone();
+                    async move {
+                        let inner_expr = inner_expr.await?;
+                        let inner_expr = inner_expr.read()?.clone();
+                        let inner_type = inner_expr.type_.await?.read()?.clone();
+                        Ok(mkcref(inner_type))
+                    }
+                })?,
+                expr: compiler.async_cref(async move {
+                    let inner_expr = inner_expr.await?;
+                    let inner_expr = inner_expr.read()?.clone();
+                    let inner_expr = inner_expr.expr.await?.read()?.clone();
+                    Ok(mkcref(inner_expr))
                 })?,
             }
         }

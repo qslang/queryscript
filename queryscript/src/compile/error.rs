@@ -128,6 +128,13 @@ pub enum CompileError {
         loc: ErrorLocation,
     },
 
+    #[snafu(display("Invalid foreach: {}", what))]
+    InvalidForEachError {
+        what: String,
+        backtrace: Option<Backtrace>,
+        loc: ErrorLocation,
+    },
+
     #[snafu(display("{}", sources.first().unwrap()))]
     Multiple {
         // This is assumed to be non-empty
@@ -196,6 +203,14 @@ impl CompileError {
 
     pub fn invalid_conn(loc: ErrorLocation, what: &str) -> CompileError {
         return InvalidConnectionSnafu {
+            loc,
+            what: what.to_string(),
+        }
+        .build();
+    }
+
+    pub fn invalid_foreach(loc: ErrorLocation, what: &str) -> CompileError {
+        return InvalidForEachSnafu {
             loc,
             what: what.to_string(),
         }
@@ -273,6 +288,7 @@ impl PrettyError for CompileError {
             CompileError::ImportError { path, .. } => path_location(path),
             CompileError::ScalarSubselectError { loc, .. } => loc.clone(),
             CompileError::InvalidConnectionError { loc, .. } => loc.clone(),
+            CompileError::InvalidForEachError { loc, .. } => loc.clone(),
             CompileError::Multiple { sources } => sources.first().unwrap().location(),
         }
     }
