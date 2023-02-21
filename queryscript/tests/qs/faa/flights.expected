@@ -23,25 +23,6 @@
                 },
                 SQLParserError {
                     source: ParserError(
-                        "Expected ;, found: .",
-                    ),
-                    backtrace: None,
-                    loc: Range(
-                        "tests/qs/faa/flights.qs",
-                        Range {
-                            start: Location {
-                                line: 11,
-                                column: 18,
-                            },
-                            end: Location {
-                                line: 11,
-                                column: 18,
-                            },
-                        },
-                    ),
-                },
-                SQLParserError {
-                    source: ParserError(
                         "Expected identifier, found: :",
                     ),
                     backtrace: None,
@@ -150,25 +131,6 @@
                             end: Location {
                                 line: 23,
                                 column: 64,
-                            },
-                        },
-                    ),
-                },
-                SQLParserError {
-                    source: ParserError(
-                        "Expected ;, found: .",
-                    ),
-                    backtrace: None,
-                    loc: Range(
-                        "tests/qs/faa/flights.qs",
-                        Range {
-                            start: Location {
-                                line: 30,
-                                column: 18,
-                            },
-                            end: Location {
-                                line: 30,
-                                column: 18,
                             },
                         },
                     ),
