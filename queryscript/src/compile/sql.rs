@@ -1408,7 +1408,53 @@ fn compile_select_item(
             })?
         }
         sqlast::SelectItem::ForEach(foreach) => {
-            todo!()
+            let items = compile_foreach(
+                compiler,
+                schema,
+                scope,
+                loc,
+                foreach,
+                |compiler, schema, scope, loc, expr| {
+                    let items = compile_select_item(compiler, schema, scope, loc, expr)?;
+
+                    let item_types = items.clone();
+                    // XXX
+                    // We currently require loop item to have the same type. That's probably not correct.
+                    let type_ = compiler.async_cref(async move {
+                        let item_types = item_types.await?;
+                        let item_types = item_types.read()?;
+
+                        let mut item_iter = item_types.iter();
+                        Ok(if let Some(first) = item_iter.next() {
+                            for next_item in item_iter {
+                                first.type_.unify(&next_item.type_)?;
+                            }
+                            first.type_.clone()
+                        } else {
+                            mkcref(MType::Atom(Located::new(AtomicType::Null, loc.clone())))
+                        })
+                    })?;
+
+                    let exprs = compiler.async_cref(async move {
+                        let items = items.await?;
+                        let items = items.read()?;
+
+                        let mut exprs = Vec::new();
+                        for item in items.iter() {
+                            exprs.push(NameAndSQL {
+                                name: item.name.clone(),
+                                sql: Arc::new(item.sql.await?.read()?.clone()),
+                            })
+                        }
+
+                        Ok(cwrap(exprs))
+                    })?;
+
+                    Ok((type_, exprs))
+                },
+            );
+
+            todo!();
         }
     })
 }
