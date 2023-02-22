@@ -76,7 +76,7 @@
         ),
         Err(
             StringError {
-                what: "Unknown type cannot exist at runtime (?async_slot?)",
+                what: "Unknown type cannot exist at runtime (?slot?)",
                 backtrace: None,
             },
         ),
