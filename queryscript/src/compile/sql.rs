@@ -1030,6 +1030,86 @@ pub fn compile_gb_ob_expr(
     })
 }
 
+fn compile_foreach<T>(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    scope: &Ref<SQLScope>,
+    loc: &SourceLocation,
+    foreach: &sqlast::ForEach<T>,
+) -> Result<(CRef<MType>, CRefSnippet<sqlast::ForEach<T>>)>
+where
+    T: Clone + fmt::Debug + Send + Sync + VisitSQL<ParamInliner>,
+{
+    let sqlast::ForEach { ranges, body } = foreach;
+    let ranges = ranges.compile_sql(&compiler, &schema, &scope, &loc)?;
+
+    let inner_expr = compiler.async_cref({
+        let compiler = compiler.clone();
+        let schema = schema.clone();
+        let scope = scope.clone();
+        let loc = loc.clone();
+        let body = body.as_ref().clone();
+        async move {
+            let SQLSnippet {
+                names,
+                body: ranges,
+            } = cunwrap(ranges.await?)?;
+
+            if !names.params.is_empty() {
+                return Err(CompileError::unimplemented(
+                    loc.clone(),
+                    "ForEach with external parameters",
+                ));
+            }
+
+            let substituted = apply_foreach(
+                &compiler,
+                &schema,
+                &scope,
+                &loc,
+                &ranges,
+                BTreeMap::new(),
+                &body,
+            )?
+            .into_iter()
+            .map(|e| compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), &loc, &e))
+            .collect::<Result<Vec<_>, _>>()?;
+
+            let mut c_elem_iter = substituted.iter();
+            let (data_type, exprs) = if let Some(first) = c_elem_iter.next() {
+                let mut exprs = vec![first.sql.clone()];
+                for next in c_elem_iter {
+                    first.type_.unify(&next.type_)?;
+                    exprs.push(next.sql.clone());
+                }
+                (first.type_.clone(), exprs)
+            } else {
+                (
+                    mkcref(MType::Atom(Located::new(AtomicType::Null, loc.clone()))),
+                    vec![],
+                )
+            };
+
+            let combined = combine_crefs(exprs)?;
+            let combined = combined.await?;
+
+            let mut exprs = Vec::new();
+            for expr in combined.read()?.iter() {
+                let expr = expr.read()?;
+                exprs.push(expr.clone());
+            }
+
+            Ok(mkcref(CTypedExpr {
+                type_: data_type,
+                expr: mkcref(Expr::native_sql(Arc::new(SQL {
+                    names,
+                    body: SQLBody::Iterator(exprs),
+                }))),
+            }))
+        }
+    })
+}
+
 fn extract_renamings(
     file: Option<String>,
     o: &sqlast::WildcardAdditionalOptions,
@@ -1096,6 +1176,124 @@ fn expr_to_alias(expr: &sqlast::Expr) -> Ident {
     }
 }
 
+fn compile_select_item(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    scope: &Ref<SQLScope>,
+    loc: &SourceLocation,
+    select_item: &sqlast::SelectItem,
+) -> Result<CRef<Vec<CTypedNameAndSQL>>> {
+    Ok(match select_item {
+        sqlast::SelectItem::UnnamedExpr(expr) => {
+            let compiled =
+                compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
+
+            let name = expr_to_alias(expr);
+            let loc = loc.clone();
+            compiler.async_cref(async move {
+                let sql = compiled.sql.await?;
+                let sql = sql.read()?;
+
+                let mut ret = Vec::new();
+                match &sql.body {
+                    SQLBody::Iterator(items) => {
+                        for item in items.iter() {
+                            ret.push(CTypedNameAndSQL {
+                                name: Ident::with_location(
+                                    loc.clone(),
+                                    expr_to_alias(&item.body.as_expr()?),
+                                ),
+                                type_: compiled.type_.clone(),
+                                sql: mkcref(item.clone()),
+                            });
+                        }
+                    }
+                    _ => {
+                        ret.push(CTypedNameAndSQL {
+                            name: Ident::with_location(loc.clone(), name),
+                            type_: compiled.type_,
+                            sql: mkcref(sql.clone()),
+                        });
+                    }
+                }
+
+                Ok(mkcref(ret))
+            })?
+        }
+        sqlast::SelectItem::ExprWithAlias { expr, alias } => {
+            let compiled =
+                compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
+            let name = Ident::from_sqlident(loc.clone(), alias.get().clone());
+
+            scope.write()?.add_projection_term(name.get(), &compiled)?;
+
+            mkcref(vec![CTypedNameAndSQL {
+                name,
+                type_: compiled.type_,
+                sql: compiled.sql,
+            }])
+        }
+        sqlast::SelectItem::Wildcard(..) | sqlast::SelectItem::QualifiedWildcard { .. } => {
+            let (qualifier, renamings) = match p {
+                sqlast::SelectItem::Wildcard(options) => {
+                    (None, extract_renamings(loc.file(), options))
+                }
+                sqlast::SelectItem::QualifiedWildcard(qualifier, options) => {
+                    if qualifier.0.len() != 1 {
+                        return Err(CompileError::unimplemented(
+                            loc.clone(),
+                            "Wildcard of lenght != 1",
+                        ));
+                    }
+
+                    (
+                        Some(qualifier.0[0].get().into()),
+                        extract_renamings(loc.file(), options),
+                    )
+                }
+                _ => unreachable!(),
+            };
+
+            let available =
+                scope
+                    .read()?
+                    .get_available_references(compiler.clone(), loc, qualifier)?;
+            available.then({
+                let loc = loc.clone();
+                move |available: Ref<AvailableReferences>| {
+                    let mut ret = Vec::new();
+                    for (_, m) in available.read()?.current_level().unwrap().iter() {
+                        let type_ = match &m.type_ {
+                            Some(t) => t.clone(),
+                            None => {
+                                return Err(CompileError::duplicate_entry(vec![m
+                                    .field
+                                    .replace_location(loc.clone())]))
+                            }
+                        };
+
+                        let name = match renamings.get(&m.field) {
+                            Some(Some(n)) => n.clone(),
+                            Some(None) => continue,
+                            None => m.field.clone(),
+                        };
+
+                        ret.push(CTypedNameAndSQL {
+                            name,
+                            type_,
+                            sql: mkcref(m.sql.clone()),
+                        });
+                    }
+                    Ok(mkcref(ret))
+                }
+            })?
+        }
+        sqlast::SelectItem::ForEach(foreach) => {
+            todo!()
+        }
+    })
+}
+
 pub fn compile_select(
     compiler: Compiler,
     schema: Ref<Schema>,
@@ -1144,114 +1342,7 @@ pub fn compile_select(
     let exprs = select
         .projection
         .iter()
-        .map(|p| {
-            Ok(match p {
-                sqlast::SelectItem::UnnamedExpr(expr) => {
-                    let compiled =
-                        compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
-
-                    let name = expr_to_alias(expr);
-                    let loc = loc.clone();
-                    compiler.async_cref(async move {
-                        let sql = compiled.sql.await?;
-                        let sql = sql.read()?;
-
-                        let mut ret = Vec::new();
-                        match &sql.body {
-                            SQLBody::Iterator(items) => {
-                                for item in items.iter() {
-                                    ret.push(CTypedNameAndSQL {
-                                        name: Ident::with_location(
-                                            loc.clone(),
-                                            expr_to_alias(&item.body.as_expr()?),
-                                        ),
-                                        type_: compiled.type_.clone(),
-                                        sql: mkcref(item.clone()),
-                                    });
-                                }
-                            }
-                            _ => {
-                                ret.push(CTypedNameAndSQL {
-                                    name: Ident::with_location(loc.clone(), name),
-                                    type_: compiled.type_,
-                                    sql: mkcref(sql.clone()),
-                                });
-                            }
-                        }
-
-                        Ok(mkcref(ret))
-                    })?
-                }
-                sqlast::SelectItem::ExprWithAlias { expr, alias } => {
-                    let compiled =
-                        compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
-                    let name = Ident::from_sqlident(loc.clone(), alias.get().clone());
-
-                    scope.write()?.add_projection_term(name.get(), &compiled)?;
-
-                    mkcref(vec![CTypedNameAndSQL {
-                        name,
-                        type_: compiled.type_,
-                        sql: compiled.sql,
-                    }])
-                }
-                sqlast::SelectItem::Wildcard(..) | sqlast::SelectItem::QualifiedWildcard { .. } => {
-                    let (qualifier, renamings) = match p {
-                        sqlast::SelectItem::Wildcard(options) => {
-                            (None, extract_renamings(loc.file(), options))
-                        }
-                        sqlast::SelectItem::QualifiedWildcard(qualifier, options) => {
-                            if qualifier.0.len() != 1 {
-                                return Err(CompileError::unimplemented(
-                                    loc.clone(),
-                                    "Wildcard of lenght != 1",
-                                ));
-                            }
-
-                            (
-                                Some(qualifier.0[0].get().into()),
-                                extract_renamings(loc.file(), options),
-                            )
-                        }
-                        _ => unreachable!(),
-                    };
-
-                    let available =
-                        scope
-                            .read()?
-                            .get_available_references(compiler.clone(), loc, qualifier)?;
-                    available.then({
-                        let loc = loc.clone();
-                        move |available: Ref<AvailableReferences>| {
-                            let mut ret = Vec::new();
-                            for (_, m) in available.read()?.current_level().unwrap().iter() {
-                                let type_ = match &m.type_ {
-                                    Some(t) => t.clone(),
-                                    None => {
-                                        return Err(CompileError::duplicate_entry(vec![m
-                                            .field
-                                            .replace_location(loc.clone())]))
-                                    }
-                                };
-
-                                let name = match renamings.get(&m.field) {
-                                    Some(Some(n)) => n.clone(),
-                                    Some(None) => continue,
-                                    None => m.field.clone(),
-                                };
-
-                                ret.push(CTypedNameAndSQL {
-                                    name,
-                                    type_,
-                                    sql: mkcref(m.sql.clone()),
-                                });
-                            }
-                            Ok(mkcref(ret))
-                        }
-                    })?
-                }
-            })
-        })
+        .map(|p| compile_select_item(&compiler, &schema, &scope, loc, p))
         .collect::<Result<Vec<_>>>()?;
 
     let projections = combine_crefs(exprs)?;
@@ -1977,15 +2068,18 @@ async fn extract_scalar_subselect_field(
     })
 }
 
-fn apply_foreach(
+fn apply_foreach<T>(
     compiler: &Compiler,
     schema: &Ref<Schema>,
     scope: &Ref<SQLScope>,
     loc: &SourceLocation,
     ranges: &[sqlast::LoopRange],
     substitutions: BTreeMap<Ident, SQLBody>,
-    expr: &sqlast::Expr,
-) -> Result<Vec<sqlast::Expr>> {
+    expr: &T,
+) -> Result<Vec<T>>
+where
+    T: VisitSQL<ParamInliner>,
+{
     if ranges.len() == 0 {
         let inliner = ParamInliner::new(substitutions);
         Ok(vec![expr.visit_sql(&inliner)])
