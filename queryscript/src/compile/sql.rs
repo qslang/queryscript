@@ -1322,7 +1322,7 @@ fn compile_select_item(
             }])
         }
         sqlast::SelectItem::Wildcard(..) | sqlast::SelectItem::QualifiedWildcard { .. } => {
-            let (qualifier, renamings) = match p {
+            let (qualifier, renamings) = match select_item {
                 sqlast::SelectItem::Wildcard(options) => {
                     (None, extract_renamings(loc.file(), options))
                 }
@@ -3366,76 +3366,31 @@ pub fn compile_sqlexpr(
                 })?,
             }
         }
-        sqlast::Expr::ForEach(sqlast::ForEach { ranges, body }) => {
-            let ranges = ranges.compile_sql(&compiler, &schema, &scope, &loc)?;
+        sqlast::Expr::ForEach(foreach) => {
+            let inner_expr = compile_foreach(
+                &compiler,
+                &schema,
+                &scope,
+                &loc,
+                foreach,
+                |compiler, schema, scope, loc, expr| {
+                    let arg =
+                        compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), &loc, &e)?;
 
-            let inner_expr = compiler.async_cref({
-                let compiler = compiler.clone();
-                let schema = schema.clone();
-                let scope = scope.clone();
-                let loc = loc.clone();
-                let body = body.as_ref().clone();
-                async move {
-                    let SQLSnippet {
-                        names,
-                        body: ranges,
-                    } = cunwrap(ranges.await?)?;
-
-                    if !names.params.is_empty() {
-                        return Err(CompileError::unimplemented(
-                            loc.clone(),
-                            "ForEach with external parameters",
-                        ));
-                    }
-
-                    let substituted = apply_foreach(
-                        &compiler,
-                        &schema,
-                        &scope,
-                        &loc,
-                        &ranges,
-                        BTreeMap::new(),
-                        &body,
-                    )?
-                    .into_iter()
-                    .map(|e| {
-                        compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), &loc, &e)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                    let mut c_elem_iter = substituted.iter();
-                    let (data_type, exprs) = if let Some(first) = c_elem_iter.next() {
-                        let mut exprs = vec![first.sql.clone()];
-                        for next in c_elem_iter {
-                            first.type_.unify(&next.type_)?;
-                            exprs.push(next.sql.clone());
-                        }
-                        (first.type_.clone(), exprs)
-                    } else {
-                        (
-                            mkcref(MType::Atom(Located::new(AtomicType::Null, loc.clone()))),
-                            vec![],
-                        )
-                    };
-
-                    let combined = combine_crefs(exprs)?;
-                    let combined = combined.await?;
-
-                    let mut exprs = Vec::new();
-                    for expr in combined.read()?.iter() {
-                        let expr = expr.read()?;
-                        exprs.push(expr.clone());
-                    }
-
-                    Ok(mkcref(CTypedExpr {
-                        type_: data_type,
-                        expr: mkcref(Expr::native_sql(Arc::new(SQL {
-                            names,
-                            body: SQLBody::Iterator(exprs),
-                        }))),
-                    }))
-                }
-            })?;
+                    let expr = arg.sql.clone();
+                    Ok((
+                        arg.type_,
+                        compiler.async_cref(async move {
+                            let expr = expr.await?;
+                            let expr = expr.read()?;
+                            Ok(cwrap(SQLSnippet {
+                                names: expr.names.clone(),
+                                body: expr.body.as_expr()?,
+                            }))
+                        })?,
+                    ))
+                },
+            )?;
 
             CTypedExpr {
                 type_: compiler.async_cref({
