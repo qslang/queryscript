@@ -68,6 +68,15 @@ pub struct CTypedSQL {
     pub sql: CRef<SQL<CRef<MType>>>,
 }
 
+#[derive(Clone, Debug)]
+pub struct CTypedSQLSnippet<SQLAst>
+where
+    SQLAst: Clone + fmt::Debug + Send + Sync,
+{
+    pub type_: CRef<MType>,
+    pub sql: CRef<SQLSnippet<CRef<MType>, SQLAst>>,
+}
+
 impl<Ty: Clone + fmt::Debug + Send + Sync, SQLAst: Clone + fmt::Debug + Send + Sync> Constrainable
     for SQLSnippet<Ty, SQLAst>
 {
@@ -76,6 +85,7 @@ impl Constrainable for TypedSQL {}
 impl Constrainable for NameAndSQL {}
 impl Constrainable for CTypedNameAndSQL {}
 impl Constrainable for CTypedSQL {}
+impl<T: Clone + fmt::Debug + Send + Sync> Constrainable for CTypedSQLSnippet<T> {}
 impl Constrainable for CTypedExpr {}
 
 pub fn get_rowtype(compiler: Compiler, relation: CRef<MType>) -> Result<CRef<MType>> {
@@ -1121,14 +1131,6 @@ pub fn compile_gb_ob_expr(
     })
 }
 
-#[derive(Debug, Clone)]
-struct CTypedForEach<T> {
-    pub type_: CRef<MType>,
-    pub values: Option<Vec<SQLSnippet<CRef<MType>, T>>>,
-}
-
-impl<T> Constrainable for CTypedForEach<T> where T: Clone + fmt::Debug + Send + Sync {}
-
 fn compile_foreach<T, O, C>(
     compiler: &Compiler,
     schema: &Ref<Schema>,
@@ -1136,24 +1138,18 @@ fn compile_foreach<T, O, C>(
     loc: &SourceLocation,
     foreach: &sqlast::ForEach<T>,
     compile_fn: C,
-) -> Result<(CRef<MType>, CRef<CWrap<Vec<SQLSnippet<CRef<MType>, O>>>>)>
+) -> Result<CRef<Vec<O>>>
 where
     T: Clone + fmt::Debug + Send + Sync + VisitSQL<ParamInliner> + 'static,
-    O: Clone + fmt::Debug + Send + Sync + VisitSQL<ParamInliner> + 'static,
-    C: Fn(
-            &Compiler,
-            &Ref<Schema>,
-            &Ref<SQLScope>,
-            &SourceLocation,
-            &T,
-        ) -> Result<(CRef<MType>, CRef<CWrap<SQLSnippet<CRef<MType>, O>>>)>
+    O: Clone + fmt::Debug + Send + Sync + 'static + Constrainable,
+    C: Fn(&Compiler, &Ref<Schema>, &Ref<SQLScope>, &SourceLocation, &T) -> Result<CRef<Vec<O>>>
         + Send
         + 'static,
 {
     let sqlast::ForEach { ranges, body } = foreach;
     let ranges = ranges.compile_sql(&compiler, &schema, &scope, &loc)?;
 
-    let combined = compiler.async_cref({
+    compiler.async_cref({
         let compiler = compiler.clone();
         let schema = schema.clone();
         let scope = scope.clone();
@@ -1173,7 +1169,6 @@ where
             }
 
             let mut substituted = Vec::new();
-
             for e in apply_foreach(
                 &compiler,
                 &schema,
@@ -1185,55 +1180,41 @@ where
             )?
             .into_iter()
             {
-                let (type_, expr) = compile_fn(&compiler, &schema, &scope, &loc, &e)?;
-                substituted.push((type_, expr));
+                let expr = compile_fn(&compiler, &schema, &scope, &loc, &e)?;
+                substituted.push(expr);
             }
 
-            let mut c_elem_iter = substituted.iter();
-            let (data_type, exprs) = if let Some((first_type, first_sql)) = c_elem_iter.next() {
-                let mut exprs = vec![first_sql.clone()];
-                for (next_type, next_sql) in c_elem_iter {
-                    first_type.unify(&next_type)?;
-                    exprs.push(next_sql.clone());
-                }
-                (first_type.clone(), exprs)
-            } else {
-                (
-                    mkcref(MType::Atom(Located::new(AtomicType::Null, loc.clone()))),
-                    vec![],
-                )
-            };
+            let all_substituted = combine_crefs(substituted)?;
+            let all_substituted = all_substituted.await?;
+            let all_substituted = all_substituted.read()?;
 
             let mut ret = Vec::new();
-            for e in exprs.into_iter() {
-                ret.push(cunwrap(e.await?)?);
+            for group in all_substituted.iter() {
+                for e in group.read()?.iter() {
+                    ret.push(e.clone());
+                }
             }
 
-            Ok(mkcref(CTypedForEach {
-                type_: data_type,
-                values: Some(ret),
-            }))
+            Ok(mkcref(ret))
+
+            /*
+                       let mut c_elem_iter = substituted.iter();
+                       let (data_type, exprs) = if let Some((first_type, first_sql)) = c_elem_iter.next() {
+                           let mut exprs = vec![first_sql.clone()];
+                           for (next_type, next_sql) in c_elem_iter {
+                               first_type.unify(&next_type)?;
+                               exprs.push(next_sql.clone());
+                           }
+                           (first_type.clone(), exprs)
+                       } else {
+                           (
+                               mkcref(MType::Atom(Located::new(AtomicType::Null, loc.clone()))),
+                               vec![],
+                           )
+                       };
+            */
         }
-    })?;
-
-    Ok((
-        compiler.async_cref({
-            let combined = combined.clone();
-            async move {
-                let combined = combined.await?;
-                let combined = combined.read()?;
-                Ok(combined.type_.clone())
-            }
-        })?,
-        compiler.async_cref({
-            let combined = combined.clone();
-            async move {
-                let combined = combined.await?;
-                let mut combined = combined.write()?;
-                Ok(cwrap(combined.values.take().unwrap()))
-            }
-        })?,
-    ))
+    })
 }
 
 fn extract_renamings(
@@ -1415,43 +1396,49 @@ fn compile_select_item(
             })?
         }
         sqlast::SelectItem::ForEach(foreach) => {
-            let items = compile_foreach(
+            compile_foreach(
                 compiler,
                 schema,
                 scope,
                 loc,
                 foreach,
                 |compiler, schema, scope, loc, expr| {
-                    let items = compile_select_item(compiler, schema, scope, loc, expr)?;
+                    compile_select_item(compiler, schema, scope, loc, expr)
 
-                    // XXX
-                    // We currently require loop item to have the same type. That's probably not correct.
+                    /*
                     let type_ = compiler.async_cref({
                         let items = items.clone();
-                        let loc = loc.clone();
-                        async move {
-                            let items = items.await?;
-                            let items = items.read()?;
-
-                            let mut item_iter = items.iter();
-                            Ok(if let Some(first) = item_iter.next() {
-                                for next_item in item_iter {
-                                    first.type_.unify(&next_item.type_)?;
-                                }
-                                first.type_.clone()
-                            } else {
-                                mkcref(MType::Atom(Located::new(AtomicType::Null, loc.clone())))
-                            })
-                        }
-                    })?;
-
-                    let expr = compiler.async_cref({
                         let loc = loc.clone();
                         async move {
                             let items = items.await?;
                             let item = {
                                 let items = items.read()?;
 
+                                // xxx
+                                if items.len() != 1 {
+                                    return err(compileerror::unimplemented(
+                                        loc.clone(),
+                                        "loops must have exactly 1 return value",
+                                    ));
+                                }
+
+                                items[0].clone()
+                            };
+                            ok(item.type_.clone())
+                        }
+                    })?;
+
+                    let expr = compiler.async_cref({
+                        let items = items.clone();
+                        let loc = loc.clone();
+                        async move {
+                            let items = items.await?;
+                            let item = {
+                                let items = items.read()?;
+
+                                // XXX
+                                // I think to solve this, we need to instrument compile_foreach()
+                                // itself to let the compile function return a list
                                 if items.len() != 1 {
                                     return Err(CompileError::unimplemented(
                                         loc.clone(),
@@ -1465,7 +1452,7 @@ fn compile_select_item(
                             let sql = item.sql.await?;
                             let sql = sql.read()?;
 
-                            Ok(cwrap(SQLSnippet {
+                            Ok(mkcref(SQLSnippet {
                                 names: sql.names.clone(),
                                 body: NamedSQLSnippet {
                                     name: item.name,
@@ -1475,11 +1462,10 @@ fn compile_select_item(
                         }
                     })?;
 
-                    Ok((type_, expr))
+                    Ok(CTypedSQLSnippet { type_, sql: expr })
+                    */
                 },
-            )?;
-
-            todo!();
+            )?
         }
     })
 }
@@ -3469,6 +3455,7 @@ pub fn compile_sqlexpr(
             }
         }
         sqlast::Expr::ForEach(foreach) => {
+            /*
             let (type_, expr) = compile_foreach(
                 &compiler,
                 &schema,
@@ -3516,6 +3503,8 @@ pub fn compile_sqlexpr(
                     }))))
                 })?,
             }
+            */
+            todo!("Should probably remove")
         }
         _ => {
             return Err(CompileError::unimplemented(
