@@ -446,10 +446,7 @@ impl<V: SQLVisitor> VisitSQL<V> for Expr {
                 last_field: last_field.clone(),
                 fractional_seconds_precision: fractional_seconds_precision.clone(),
             },
-            Expr::ForEach(sqlast::ForEach { ranges, body }) => Expr::ForEach(sqlast::ForEach {
-                ranges: ranges.visit_sql(visitor),
-                body: body.visit_sql(visitor),
-            }),
+            Expr::ForEach(foreach) => Expr::ForEach(foreach.visit_sql(visitor)),
         }
     }
 }
@@ -757,6 +754,7 @@ impl<V: SQLVisitor> VisitSQL<V> for SelectItem {
                 QualifiedWildcard(name.visit_sql(visitor), options.visit_sql(visitor))
             }
             Wildcard(options) => Wildcard(options.visit_sql(visitor)),
+            ForEach(foreach) => ForEach(foreach.visit_sql(visitor)),
         }
     }
 }
@@ -890,6 +888,15 @@ impl<V: SQLVisitor> VisitSQL<V> for LoopRange {
         LoopRange {
             expr: self.expr.visit_sql(visitor),
             alias: self.alias.clone(), // Do not visit the alias
+        }
+    }
+}
+
+impl<V: SQLVisitor, T: VisitSQL<V>> VisitSQL<V> for ForEach<T> {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        ForEach {
+            ranges: self.ranges.visit_sql(visitor),
+            body: self.body.visit_sql(visitor),
         }
     }
 }
