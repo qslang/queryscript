@@ -1154,7 +1154,7 @@ where
         let schema = schema.clone();
         let scope = scope.clone();
         let loc = loc.clone();
-        let body = body.as_ref().clone();
+        let body = body.clone();
         async move {
             let SQLSnippet {
                 names,
@@ -2251,14 +2251,14 @@ fn apply_foreach<T>(
     loc: &SourceLocation,
     ranges: &[sqlast::LoopRange],
     substitutions: BTreeMap<Ident, SQLBody>,
-    expr: &T,
+    exprs: &Vec<T>,
 ) -> Result<Vec<T>>
 where
     T: VisitSQL<ParamInliner>,
 {
     if ranges.len() == 0 {
         let inliner = ParamInliner::new(substitutions);
-        Ok(vec![expr.visit_sql(&inliner)])
+        Ok(exprs.visit_sql(&inliner))
     } else {
         let mut ret = vec![];
         let range = &ranges[0];
@@ -2275,7 +2275,7 @@ where
                         loc,
                         &ranges[1..],
                         substitutions,
-                        expr,
+                        exprs,
                     )?);
                 }
             }
