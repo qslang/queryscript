@@ -1115,6 +1115,14 @@ pub fn compile_gb_ob_expr(
     })
 }
 
+#[derive(Debug, Clone)]
+struct CTypedForEach<T> {
+    pub type_: CRef<MType>,
+    pub values: Option<Vec<SQLSnippet<CRef<MType>, T>>>,
+}
+
+impl<T> Constrainable for CTypedForEach<T> where T: Clone + fmt::Debug + Send + Sync {}
+
 fn compile_foreach<T, C>(
     compiler: &Compiler,
     schema: &Ref<Schema>,
@@ -1122,9 +1130,9 @@ fn compile_foreach<T, C>(
     loc: &SourceLocation,
     foreach: &sqlast::ForEach<T>,
     compile_fn: C,
-) -> Result<CRef<CWrap<(CRef<MType>, Vec<SQLSnippet<CRef<MType>, T>>)>>>
+) -> Result<(CRef<MType>, CRef<CWrap<Vec<SQLSnippet<CRef<MType>, T>>>>)>
 where
-    T: Clone + fmt::Debug + Send + Sync + VisitSQL<ParamInliner>,
+    T: Clone + fmt::Debug + Send + Sync + VisitSQL<ParamInliner> + 'static,
     C: Fn(
             &Compiler,
             &Ref<Schema>,
@@ -1132,12 +1140,13 @@ where
             &SourceLocation,
             &T,
         ) -> Result<(CRef<MType>, CRef<CWrap<SQLSnippet<CRef<MType>, T>>>)>
-        + Send,
+        + Send
+        + 'static,
 {
     let sqlast::ForEach { ranges, body } = foreach;
     let ranges = ranges.compile_sql(&compiler, &schema, &scope, &loc)?;
 
-    compiler.async_cref({
+    let combined = compiler.async_cref({
         let compiler = compiler.clone();
         let schema = schema.clone();
         let scope = scope.clone();
@@ -1193,9 +1202,31 @@ where
                 ret.push(cunwrap(e.await?)?);
             }
 
-            Ok(cwrap((data_type, ret)))
+            Ok(mkcref(CTypedForEach {
+                type_: data_type,
+                values: Some(ret),
+            }))
         }
-    })
+    })?;
+
+    Ok((
+        compiler.async_cref({
+            let combined = combined.clone();
+            async move {
+                let combined = combined.await?;
+                let combined = combined.read()?;
+                Ok(combined.type_.clone())
+            }
+        })?,
+        compiler.async_cref({
+            let combined = combined.clone();
+            async move {
+                let combined = combined.await?;
+                let mut combined = combined.write()?;
+                Ok(cwrap(combined.values.take().unwrap()))
+            }
+        })?,
+    ))
 }
 
 fn extract_renamings(
@@ -3367,15 +3398,20 @@ pub fn compile_sqlexpr(
             }
         }
         sqlast::Expr::ForEach(foreach) => {
-            let inner_expr = compile_foreach(
+            let (type_, expr) = compile_foreach(
                 &compiler,
                 &schema,
                 &scope,
                 &loc,
                 foreach,
                 |compiler, schema, scope, loc, expr| {
-                    let arg =
-                        compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), &loc, &e)?;
+                    let arg = compile_sqlarg(
+                        compiler.clone(),
+                        schema.clone(),
+                        scope.clone(),
+                        &loc,
+                        &expr,
+                    )?;
 
                     let expr = arg.sql.clone();
                     Ok((
@@ -3393,20 +3429,20 @@ pub fn compile_sqlexpr(
             )?;
 
             CTypedExpr {
-                type_: compiler.async_cref({
-                    let inner_expr = inner_expr.clone();
-                    async move {
-                        let inner_expr = inner_expr.await?;
-                        let inner_expr = inner_expr.read()?.clone();
-                        let inner_type = inner_expr.type_.await?.read()?.clone();
-                        Ok(mkcref(inner_type))
-                    }
-                })?,
+                type_,
                 expr: compiler.async_cref(async move {
-                    let inner_expr = inner_expr.await?;
-                    let inner_expr = inner_expr.read()?.clone();
-                    let inner_expr = inner_expr.expr.await?.read()?.clone();
-                    Ok(mkcref(inner_expr))
+                    let expr = cunwrap(expr.await?)?;
+                    let mut exprs = Vec::new();
+                    for e in expr {
+                        exprs.push(SQLSnippet {
+                            names: e.names,
+                            body: SQLBody::Expr(e.body),
+                        });
+                    }
+                    Ok(mkcref(Expr::native_sql(Arc::new(SQL {
+                        names: SQLNames::new(),
+                        body: SQLBody::Iterator(exprs),
+                    }))))
                 })?,
             }
         }
