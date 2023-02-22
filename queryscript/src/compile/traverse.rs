@@ -919,12 +919,24 @@ impl<V: SQLVisitor, T: VisitSQL<V>> VisitSQL<V> for Located<T> {
     }
 }
 
+impl<V: SQLVisitor> VisitSQL<V>
+    for schema::SQLSnippet<schema::CRef<schema::MType>, schema::SQLBody>
+{
+    fn visit_sql(&self, visitor: &V) -> Self {
+        schema::SQLSnippet {
+            body: self.body.visit_sql(visitor),
+            names: self.names.clone(),
+        }
+    }
+}
+
 impl<V: SQLVisitor> VisitSQL<V> for schema::SQLBody {
     fn visit_sql(&self, visitor: &V) -> Self {
         match self {
             schema::SQLBody::Expr(e) => schema::SQLBody::Expr(e.visit_sql(visitor)),
             schema::SQLBody::Query(q) => schema::SQLBody::Query(q.visit_sql(visitor)),
             schema::SQLBody::Table(t) => schema::SQLBody::Table(t.visit_sql(visitor)),
+            schema::SQLBody::Iterator(t) => schema::SQLBody::Iterator(t.visit_sql(visitor)),
         }
     }
 }
@@ -953,11 +965,7 @@ impl<V: Visitor<schema::CRef<schema::MType>> + Sync> Visit<V, schema::CRef<schem
                             params,
                             unbound: names.unbound.clone(),
                         },
-                        body: match body {
-                            SQLBody::Expr(expr) => SQLBody::Expr(expr.visit_sql(visitor)),
-                            SQLBody::Query(query) => SQLBody::Query(query.visit_sql(visitor)),
-                            SQLBody::Table(table) => SQLBody::Table(table.visit_sql(visitor)),
-                        },
+                        body: body.visit_sql(visitor),
                     }),
                     url.clone(),
                 )

@@ -128,7 +128,7 @@ pub fn eval<'a>(
                         let engine = ctx.sql_engine(sql_url.clone())?;
 
                         if !engine.table_exists(&table_name).await? {
-                            let query = create_table_as(table_name, sql.body.as_query(), true);
+                            let query = create_table_as(table_name, sql.body.as_query()?, true);
                             let sql_params = eval_params(ctx, &sql.names.params).await?;
                             let _ = ctx
                                 .sql_engine(sql_url.clone())?
@@ -173,7 +173,7 @@ pub fn eval<'a>(
             schema::Expr::SQL(e, url) => {
                 let schema::SQL { body, names } = e.as_ref();
                 let sql_params = eval_params(ctx, &names.params).await?;
-                let query = body.as_statement();
+                let query = body.as_statement()?;
 
                 let engine = ctx.sql_engine(url.clone())?;
 
@@ -236,6 +236,9 @@ pub fn eval<'a>(
                         }
 
                         Ok(Value::Relation(rows))
+                    }
+                    schema::SQLBody::Iterator(_) => {
+                        return fail!("Iterator should have been optimized away")
                     }
                 }
             }

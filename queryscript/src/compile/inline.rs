@@ -66,7 +66,7 @@ impl SQLVisitor for ParamInliner {
         .into();
 
         if let Some(e) = self.context.get(&ident) {
-            Some(e.as_expr())
+            e.as_expr().ok()
         } else {
             None
         }
@@ -89,7 +89,7 @@ impl SQLVisitor for ParamInliner {
                             columns: vec![],
                         },
                     };
-                    Some(e.as_table(Some(new_alias)))
+                    e.as_table(Some(new_alias)).ok()
                 } else {
                     None
                 }

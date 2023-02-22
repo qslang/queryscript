@@ -129,13 +129,13 @@ async fn process_view(
     let expr = expr.read()?.to_runtime_type()?;
     match expr {
         Expr::SQL(ref sql, url) => {
-            let query = create_view_as(object_name, sql.body.as_query());
+            let query = create_view_as(object_name, sql.body.as_query()?);
             execute_create_view(ctx_pool, url.clone(), &name, &sql, query, signals, handles)?;
         }
         Expr::Materialize(MaterializeExpr { expr, url, .. }) => {
             match (url, expr.expr.as_ref()) {
                 (Some(url), Expr::SQL(sql, Some(sql_url))) if url.as_ref() == sql_url.as_ref() => {
-                    let query = create_table_as(object_name.into(), sql.body.as_query(), false);
+                    let query = create_table_as(object_name.into(), sql.body.as_query()?, false);
                     execute_create_view(
                         ctx_pool,
                         Some(url.clone()),
