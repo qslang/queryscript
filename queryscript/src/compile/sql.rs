@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use lazy_static::lazy_static;
 use snafu::prelude::*;
 use sqlparser::ast::WildcardAdditionalOptions;
@@ -19,6 +20,7 @@ use crate::compile::inference::*;
 use crate::compile::inline::*;
 use crate::compile::schema::*;
 use crate::compile::scope::{AvailableReferences, SQLScope};
+use crate::compile::traverse::{SQLVisitor, Visit, VisitSQL, Visitor};
 use crate::types::{number::parse_numeric_type, AtomicType, IntervalUnit, Type};
 use crate::{
     ast,
@@ -26,7 +28,6 @@ use crate::{
 };
 
 use super::compile::ExternalTypeRank;
-use super::traverse::VisitSQL;
 
 const QS_NAMESPACE: &str = "__qs";
 
@@ -426,6 +427,29 @@ pub fn compile_reference(
     Ok(r)
 }
 
+/*
+pub fn intern_placeholder_expr(
+    compiler: Compiler,
+    kind: &str,
+    expr: &Expr<CRef<MType>>,
+) -> Result<Arc<SQL<CRef<MType>>>> {
+    match expr {
+        Expr::SQL(sql, url) => {
+            if url.is_some() {
+                return Err(CompileError::internal(
+                    SourceLocation::Unknown,
+                    "Cannot intern a placeholder for a remote SQL expression",
+                ));
+            }
+            Ok(sql.clone())
+        }
+        _ => {
+            let (_, e) = intern_nonsql_placeholder_expr(compiler.clone(), kind, expr)?;
+            Ok(e)
+        }
+    }
+} */
+
 pub fn intern_placeholder(
     compiler: Compiler,
     kind: &str,
@@ -447,6 +471,37 @@ pub fn intern_placeholder(
         }
     }
 }
+
+/*
+pub fn intern_nonsql_placeholder_expr(
+    compiler: Compiler,
+    kind: &str,
+    expr: &Expr<CRef<MType>>,
+) -> Result<(sqlast::Located<sqlast::Ident>, Arc<SQL<CRef<MType>>>)> {
+    match &*expr {
+        Expr::SQL(..) => Err(CompileError::internal(
+            SourceLocation::Unknown,
+            "Cannot call intern_nonsql_placeholder on a SQL expression",
+        )),
+        _ => {
+            let placeholder_name = "@".to_string() + compiler.next_placeholder(kind)?.as_str();
+
+            Ok((
+                param_ident(placeholder_name.clone()),
+                Arc::new(SQL {
+                    names: SQLNames {
+                        params: Params::from([(placeholder_name.clone().into(), expr.clone())]),
+                        unbound: BTreeSet::new(),
+                    },
+                    body: SQLBody::Expr(sqlast::Expr::Identifier(param_ident(
+                        placeholder_name.clone(),
+                    ))),
+                }),
+            ))
+        }
+    }
+}
+*/
 
 pub fn intern_nonsql_placeholder(
     compiler: Compiler,
@@ -477,6 +532,25 @@ pub fn intern_nonsql_placeholder(
     }
 }
 
+/*
+pub fn intern_cref_placeholder_expr(
+    compiler: Compiler,
+    kind: String,
+    expr: CRef<Expr<CRef<MType>>>,
+) -> Result<CRef<SQL<CRef<MType>>>> {
+    expr.clone().then(move |expr: Ref<Expr<CRef<MType>>>| {
+        let sqlexpr: SQL<CRef<MType>> = intern_placeholder_expr(
+            compiler.clone(),
+            kind.as_str(),
+            Arc::new(expr.read()?.clone()),
+        )?
+        .as_ref()
+        .clone();
+        Ok(mkcref(sqlexpr))
+    })
+}
+*/
+
 pub fn intern_cref_placeholder(
     compiler: Compiler,
     kind: String,
@@ -500,10 +574,6 @@ pub fn intern_cref_placeholder(
     Ok(CTypedSQL { type_, sql })
 }
 
-// XXX To resume... we need to figure out a way to _not_ inline the foreach list as a parameter here, and
-// instead look at the returned CTypedSQL and handle it.
-// Maybe we need to have an additional arm for the type of SQL Snippet (a list of items), and then barf if
-// we try to consume it as an expr, query, etc.
 pub fn compile_sqlarg(
     compiler: Compiler,
     schema: Ref<Schema>,
@@ -514,6 +584,21 @@ pub fn compile_sqlarg(
     let compiled = compile_sqlexpr(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
     intern_cref_placeholder(compiler.clone(), "param".to_string(), compiled)
 }
+
+/*
+pub struct PlaceholderInterner {
+    context: BTreeMap<Ident, Arc<Expr<CRef<MType>>>>,
+}
+
+impl SQLVisitor for PlaceholderInterner {}
+
+#[async_trait]
+impl Visitor<CRef<MType>> for PlaceholderInterner {
+    async fn visit_expr(&self, expr: &Expr<CRef<MType>>) -> Result<Option<Expr<CRef<MType>>>> {
+        intern_cref_placeholder();
+    }
+}
+*/
 
 pub type CSQLNames = SQLNames<CRef<MType>>;
 
@@ -1030,20 +1115,29 @@ pub fn compile_gb_ob_expr(
     })
 }
 
-fn compile_foreach<T>(
+fn compile_foreach<T, C>(
     compiler: &Compiler,
     schema: &Ref<Schema>,
     scope: &Ref<SQLScope>,
     loc: &SourceLocation,
     foreach: &sqlast::ForEach<T>,
-) -> Result<(CRef<MType>, CRefSnippet<sqlast::ForEach<T>>)>
+    compile_fn: C,
+) -> Result<CRef<CWrap<(CRef<MType>, Vec<SQLSnippet<CRef<MType>, T>>)>>>
 where
     T: Clone + fmt::Debug + Send + Sync + VisitSQL<ParamInliner>,
+    C: Fn(
+            &Compiler,
+            &Ref<Schema>,
+            &Ref<SQLScope>,
+            &SourceLocation,
+            &T,
+        ) -> Result<(CRef<MType>, CRef<CWrap<SQLSnippet<CRef<MType>, T>>>)>
+        + Send,
 {
     let sqlast::ForEach { ranges, body } = foreach;
     let ranges = ranges.compile_sql(&compiler, &schema, &scope, &loc)?;
 
-    let inner_expr = compiler.async_cref({
+    compiler.async_cref({
         let compiler = compiler.clone();
         let schema = schema.clone();
         let scope = scope.clone();
@@ -1062,7 +1156,9 @@ where
                 ));
             }
 
-            let substituted = apply_foreach(
+            let mut substituted = Vec::new();
+
+            for e in apply_foreach(
                 &compiler,
                 &schema,
                 &scope,
@@ -1072,17 +1168,19 @@ where
                 &body,
             )?
             .into_iter()
-            .map(|e| compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), &loc, &e))
-            .collect::<Result<Vec<_>, _>>()?;
+            {
+                let (type_, expr) = compile_fn(&compiler, &schema, &scope, &loc, &e)?;
+                substituted.push((type_, expr));
+            }
 
             let mut c_elem_iter = substituted.iter();
-            let (data_type, exprs) = if let Some(first) = c_elem_iter.next() {
-                let mut exprs = vec![first.sql.clone()];
-                for next in c_elem_iter {
-                    first.type_.unify(&next.type_)?;
-                    exprs.push(next.sql.clone());
+            let (data_type, exprs) = if let Some((first_type, first_sql)) = c_elem_iter.next() {
+                let mut exprs = vec![first_sql.clone()];
+                for (next_type, next_sql) in c_elem_iter {
+                    first_type.unify(&next_type)?;
+                    exprs.push(next_sql.clone());
                 }
-                (first.type_.clone(), exprs)
+                (first_type.clone(), exprs)
             } else {
                 (
                     mkcref(MType::Atom(Located::new(AtomicType::Null, loc.clone()))),
@@ -1090,22 +1188,12 @@ where
                 )
             };
 
-            let combined = combine_crefs(exprs)?;
-            let combined = combined.await?;
-
-            let mut exprs = Vec::new();
-            for expr in combined.read()?.iter() {
-                let expr = expr.read()?;
-                exprs.push(expr.clone());
+            let mut ret = Vec::new();
+            for e in exprs.into_iter() {
+                ret.push(cunwrap(e.await?)?);
             }
 
-            Ok(mkcref(CTypedExpr {
-                type_: data_type,
-                expr: mkcref(Expr::native_sql(Arc::new(SQL {
-                    names,
-                    body: SQLBody::Iterator(exprs),
-                }))),
-            }))
+            Ok(cwrap((data_type, ret)))
         }
     })
 }
