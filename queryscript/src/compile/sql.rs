@@ -1159,7 +1159,7 @@ pub fn compile_select(
                         let mut ret = Vec::new();
                         match &sql.body {
                             SQLBody::Iterator(items) => {
-                                for (i, item) in items.iter().enumerate() {
+                                for item in items.iter() {
                                     ret.push(CTypedNameAndSQL {
                                         name: Ident::with_location(
                                             loc.clone(),
@@ -3184,7 +3184,7 @@ pub fn compile_sqlexpr(
                 })?,
             }
         }
-        sqlast::Expr::ForEach { ranges, body } => {
+        sqlast::Expr::ForEach(sqlast::ForEach { ranges, body }) => {
             let ranges = ranges.compile_sql(&compiler, &schema, &scope, &loc)?;
 
             let inner_expr = compiler.async_cref({

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use sqlparser::ast::*;
+use sqlparser::{ast as sqlast, ast::*};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
@@ -446,10 +446,10 @@ impl<V: SQLVisitor> VisitSQL<V> for Expr {
                 last_field: last_field.clone(),
                 fractional_seconds_precision: fractional_seconds_precision.clone(),
             },
-            ForEach { ranges, body } => ForEach {
+            Expr::ForEach(sqlast::ForEach { ranges, body }) => Expr::ForEach(sqlast::ForEach {
                 ranges: ranges.visit_sql(visitor),
                 body: body.visit_sql(visitor),
-            },
+            }),
         }
     }
 }
