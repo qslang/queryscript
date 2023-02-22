@@ -53,6 +53,12 @@ pub struct NameAndSQL {
     pub sql: Arc<SQL<CRef<MType>>>,
 }
 
+#[derive(Clone, Debug)]
+pub struct NamedSQLSnippet<T> {
+    pub name: Located<Ident>,
+    pub body: T,
+}
+
 // Here, "C" means constrained.  In general, any structs prefixed with C indicate that there are
 // structures that may be unknown within them.
 //
@@ -1123,23 +1129,24 @@ struct CTypedForEach<T> {
 
 impl<T> Constrainable for CTypedForEach<T> where T: Clone + fmt::Debug + Send + Sync {}
 
-fn compile_foreach<T, C>(
+fn compile_foreach<T, O, C>(
     compiler: &Compiler,
     schema: &Ref<Schema>,
     scope: &Ref<SQLScope>,
     loc: &SourceLocation,
     foreach: &sqlast::ForEach<T>,
     compile_fn: C,
-) -> Result<(CRef<MType>, CRef<CWrap<Vec<SQLSnippet<CRef<MType>, T>>>>)>
+) -> Result<(CRef<MType>, CRef<CWrap<Vec<SQLSnippet<CRef<MType>, O>>>>)>
 where
     T: Clone + fmt::Debug + Send + Sync + VisitSQL<ParamInliner> + 'static,
+    O: Clone + fmt::Debug + Send + Sync + VisitSQL<ParamInliner> + 'static,
     C: Fn(
             &Compiler,
             &Ref<Schema>,
             &Ref<SQLScope>,
             &SourceLocation,
             &T,
-        ) -> Result<(CRef<MType>, CRef<CWrap<SQLSnippet<CRef<MType>, T>>>)>
+        ) -> Result<(CRef<MType>, CRef<CWrap<SQLSnippet<CRef<MType>, O>>>)>
         + Send
         + 'static,
 {
@@ -1417,42 +1424,60 @@ fn compile_select_item(
                 |compiler, schema, scope, loc, expr| {
                     let items = compile_select_item(compiler, schema, scope, loc, expr)?;
 
-                    let item_types = items.clone();
                     // XXX
                     // We currently require loop item to have the same type. That's probably not correct.
-                    let type_ = compiler.async_cref(async move {
-                        let item_types = item_types.await?;
-                        let item_types = item_types.read()?;
+                    let type_ = compiler.async_cref({
+                        let items = items.clone();
+                        let loc = loc.clone();
+                        async move {
+                            let items = items.await?;
+                            let items = items.read()?;
 
-                        let mut item_iter = item_types.iter();
-                        Ok(if let Some(first) = item_iter.next() {
-                            for next_item in item_iter {
-                                first.type_.unify(&next_item.type_)?;
-                            }
-                            first.type_.clone()
-                        } else {
-                            mkcref(MType::Atom(Located::new(AtomicType::Null, loc.clone())))
-                        })
-                    })?;
-
-                    let exprs = compiler.async_cref(async move {
-                        let items = items.await?;
-                        let items = items.read()?;
-
-                        let mut exprs = Vec::new();
-                        for item in items.iter() {
-                            exprs.push(NameAndSQL {
-                                name: item.name.clone(),
-                                sql: Arc::new(item.sql.await?.read()?.clone()),
+                            let mut item_iter = items.iter();
+                            Ok(if let Some(first) = item_iter.next() {
+                                for next_item in item_iter {
+                                    first.type_.unify(&next_item.type_)?;
+                                }
+                                first.type_.clone()
+                            } else {
+                                mkcref(MType::Atom(Located::new(AtomicType::Null, loc.clone())))
                             })
                         }
-
-                        Ok(cwrap(exprs))
                     })?;
 
-                    Ok((type_, exprs))
+                    let expr = compiler.async_cref({
+                        let loc = loc.clone();
+                        async move {
+                            let items = items.await?;
+                            let item = {
+                                let items = items.read()?;
+
+                                if items.len() != 1 {
+                                    return Err(CompileError::unimplemented(
+                                        loc.clone(),
+                                        "loops must have exactly 1 return value",
+                                    ));
+                                }
+
+                                items[0].clone()
+                            };
+
+                            let sql = item.sql.await?;
+                            let sql = sql.read()?;
+
+                            Ok(cwrap(SQLSnippet {
+                                names: sql.names.clone(),
+                                body: NamedSQLSnippet {
+                                    name: item.name,
+                                    body: sql.body.clone(),
+                                },
+                            }))
+                        }
+                    })?;
+
+                    Ok((type_, expr))
                 },
-            );
+            )?;
 
             todo!();
         }

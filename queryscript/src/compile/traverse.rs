@@ -937,6 +937,15 @@ impl<V: SQLVisitor> VisitSQL<V>
     }
 }
 
+impl<V: SQLVisitor, T: VisitSQL<V>> VisitSQL<V> for super::sql::NamedSQLSnippet<T> {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        super::sql::NamedSQLSnippet {
+            name: self.name.clone(),
+            body: self.body.visit_sql(visitor),
+        }
+    }
+}
+
 impl<V: SQLVisitor> VisitSQL<V> for schema::SQLBody {
     fn visit_sql(&self, visitor: &V) -> Self {
         match self {
