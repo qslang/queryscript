@@ -6,6 +6,8 @@ QueryScript is a strongly typed programming language that builds on SQL. It prov
 2. **Write once, run anywhere.** QueryScript typechecks your data model and queries, ensuring your code will run against any database backend without porting.
 3. **Performance always**. QueryScript is built in Rust and can run natively in your Typescript and Python apps. It pushes down as much compute as possible into the underlying relational database.
 
+![QueryScript VSCode Extension](https://res.cloudinary.com/djp21wtxm/image/upload/v1677281349/QSGIF-small_t7vvbg.gif)
+
 Below, we'll walk through some examples and installation instructions. You can run QueryScript locally,
 making it simple and fun to develop in tools like [VSCode](https://vscode.dev/). For a more detailed
 walkthrough of the language, check out the [QueryScript website](https://queryscript.com/).
