@@ -615,8 +615,8 @@ pub enum SQLBody {
 }
 
 impl SQLBody {
-    pub fn as_expr(&self) -> sqlast::Expr {
-        match self {
+    pub fn as_expr(&self) -> Result<sqlast::Expr> {
+        Ok(match self {
             SQLBody::Expr(expr) => expr.clone(),
             SQLBody::Query(_) | SQLBody::Table(_) => {
                 sqlast::Expr::Subquery(Box::new(sqlast::Query {
@@ -643,7 +643,7 @@ impl SQLBody {
                             relation: self.as_table(Some(sqlast::TableAlias {
                                 name: sqlast::Ident::new("subquery"),
                                 columns: Vec::new(),
-                            })),
+                            }))?,
                             joins: Vec::new(),
                         }],
                         lateral_views: Vec::new(),
@@ -662,27 +662,27 @@ impl SQLBody {
                     locks: Vec::new(),
                 }))
             }
-        }
+        })
     }
 
-    pub fn as_statement(&self) -> sqlast::Statement {
-        sqlast::Statement::Query(Box::new(self.as_query()))
+    pub fn as_statement(&self) -> Result<sqlast::Statement> {
+        Ok(sqlast::Statement::Query(Box::new(self.as_query()?)))
     }
 
     // Returns a query that can be run as-is, but violates the array vs. result set invariants.
     //
-    pub fn as_query(&self) -> sqlast::Query {
-        match self {
+    pub fn as_query(&self) -> Result<sqlast::Query> {
+        Ok(match self {
             SQLBody::Expr(expr) => select_no_from(expr.clone(), None),
             SQLBody::Query(query) => query.clone(),
             SQLBody::Table(table) => select_star_from(table.clone()),
-        }
+        })
     }
 
     // Assumes that if the SQL body is an expression, then it's of an array type.
     //
-    pub fn as_table(&self, alias: Option<sqlast::TableAlias>) -> sqlast::TableFactor {
-        match self {
+    pub fn as_table(&self, alias: Option<sqlast::TableAlias>) -> Result<sqlast::TableFactor> {
+        Ok(match self {
             SQLBody::Expr(expr) => SQLBody::Query(select_from(
                 // The result of the inner subquery is a relation of rows, each with a record field
                 // called "value".  This extra subquery splats the fields of "value" onto the top
@@ -717,18 +717,18 @@ impl SQLBody {
                     .as_table(Some(sqlast::TableAlias {
                         name: sqlast::Ident::new("unnest".to_string()),
                         columns: Vec::new(),
-                    })),
+                    }))?,
                     joins: Vec::new(),
                 }],
             ))
-            .as_table(alias),
+            .as_table(alias)?,
             SQLBody::Query(query) => sqlast::TableFactor::Derived {
                 lateral: false,
                 subquery: Box::new(query.clone()),
                 alias,
             },
             SQLBody::Table(table) => with_table_alias(table, alias),
-        }
+        })
     }
 }
 

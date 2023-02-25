@@ -753,6 +753,7 @@ impl<V: SQLVisitor> VisitSQL<V> for SelectItem {
                 QualifiedWildcard(name.visit_sql(visitor), options.visit_sql(visitor))
             }
             Wildcard(options) => Wildcard(options.visit_sql(visitor)),
+            ForEach(foreach) => ForEach(foreach.visit_sql(visitor)),
         }
     }
 }
@@ -881,6 +882,24 @@ impl<V: SQLVisitor> VisitSQL<V> for ColumnOptionDef {
     }
 }
 
+impl<V: SQLVisitor> VisitSQL<V> for LoopRange {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        LoopRange {
+            item: self.item.clone(), // Do not visit the item (it's essentially an alias)
+            range: self.range.visit_sql(visitor),
+        }
+    }
+}
+
+impl<V: SQLVisitor, T: VisitSQL<V>> VisitSQL<V> for ForEach<T> {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        ForEach {
+            ranges: self.ranges.visit_sql(visitor),
+            body: self.body.visit_sql(visitor),
+        }
+    }
+}
+
 impl<V: SQLVisitor, T: VisitSQL<V>> VisitSQL<V> for Vec<T> {
     fn visit_sql(&self, visitor: &V) -> Self {
         self.iter().map(|o| o.visit_sql(visitor)).collect()
@@ -903,6 +922,26 @@ impl<V: SQLVisitor, T: VisitSQL<V>> VisitSQL<V> for Located<T> {
     fn visit_sql(&self, visitor: &V) -> Self {
         let range = self.location().clone();
         Located::new(self.get().visit_sql(visitor), range)
+    }
+}
+
+impl<V: SQLVisitor> VisitSQL<V>
+    for schema::SQLSnippet<schema::CRef<schema::MType>, schema::SQLBody>
+{
+    fn visit_sql(&self, visitor: &V) -> Self {
+        schema::SQLSnippet {
+            body: self.body.visit_sql(visitor),
+            names: self.names.clone(),
+        }
+    }
+}
+
+impl<V: SQLVisitor, T: VisitSQL<V>> VisitSQL<V> for super::sql::NamedSQLSnippet<T> {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        super::sql::NamedSQLSnippet {
+            name: self.name.clone(),
+            body: self.body.visit_sql(visitor),
+        }
     }
 }
 
@@ -940,11 +979,7 @@ impl<V: Visitor<schema::CRef<schema::MType>> + Sync> Visit<V, schema::CRef<schem
                             params,
                             unbound: names.unbound.clone(),
                         },
-                        body: match body {
-                            SQLBody::Expr(expr) => SQLBody::Expr(expr.visit_sql(visitor)),
-                            SQLBody::Query(query) => SQLBody::Query(query.visit_sql(visitor)),
-                            SQLBody::Table(table) => SQLBody::Table(table.visit_sql(visitor)),
-                        },
+                        body: body.visit_sql(visitor),
                     }),
                     url.clone(),
                 )

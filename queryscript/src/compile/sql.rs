@@ -19,6 +19,7 @@ use crate::compile::inference::*;
 use crate::compile::inline::*;
 use crate::compile::schema::*;
 use crate::compile::scope::{AvailableReferences, SQLScope};
+use crate::compile::traverse::VisitSQL;
 use crate::types::{number::parse_numeric_type, AtomicType, IntervalUnit, Type};
 use crate::{
     ast,
@@ -51,6 +52,12 @@ pub struct NameAndSQL {
     pub sql: Arc<SQL<CRef<MType>>>,
 }
 
+#[derive(Clone, Debug)]
+pub struct NamedSQLSnippet<T> {
+    pub name: Located<Ident>,
+    pub body: T,
+}
+
 // Here, "C" means constrained.  In general, any structs prefixed with C indicate that there are
 // structures that may be unknown within them.
 //
@@ -58,6 +65,15 @@ pub struct NameAndSQL {
 pub struct CTypedSQL {
     pub type_: CRef<MType>,
     pub sql: CRef<SQL<CRef<MType>>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CTypedSQLSnippet<SQLAst>
+where
+    SQLAst: Clone + fmt::Debug + Send + Sync,
+{
+    pub type_: CRef<MType>,
+    pub sql: CRef<SQLSnippet<CRef<MType>, SQLAst>>,
 }
 
 impl<Ty: Clone + fmt::Debug + Send + Sync, SQLAst: Clone + fmt::Debug + Send + Sync> Constrainable
@@ -68,6 +84,7 @@ impl Constrainable for TypedSQL {}
 impl Constrainable for NameAndSQL {}
 impl Constrainable for CTypedNameAndSQL {}
 impl Constrainable for CTypedSQL {}
+impl<T: Clone + fmt::Debug + Send + Sync> Constrainable for CTypedSQLSnippet<T> {}
 impl Constrainable for CTypedExpr {}
 
 pub fn get_rowtype(compiler: Compiler, relation: CRef<MType>) -> Result<CRef<MType>> {
@@ -640,7 +657,7 @@ impl CompileSQL for sqlast::Expr {
             let compiled = compiled.read()?;
             Ok(CSQLSnippet::wrap(
                 compiled.names.clone(),
-                compiled.body.as_expr(),
+                compiled.body.as_expr()?,
             ))
         })
     }
@@ -827,7 +844,10 @@ impl CompileSQL for sqlast::JoinConstraint {
                 compiler.async_cref(async move {
                     let sql = sql.sql.await?;
                     let sql = sql.read()?;
-                    Ok(CSQLSnippet::wrap(sql.names.clone(), On(sql.body.as_expr())))
+                    Ok(CSQLSnippet::wrap(
+                        sql.names.clone(),
+                        On(sql.body.as_expr()?),
+                    ))
                 })?
             }
 
@@ -986,7 +1006,7 @@ pub fn compile_order_by(
                 let resolved_expr = resolved_expr.read()?;
                 names.extend(resolved_expr.names.clone());
                 resolved_order_by.push(sqlast::OrderByExpr {
-                    expr: resolved_expr.body.as_expr(),
+                    expr: resolved_expr.body.as_expr()?,
                     asc,
                     nulls_first,
                 });
@@ -1018,6 +1038,75 @@ pub fn compile_gb_ob_expr(
             let compiled =
                 compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), &loc, expr)?;
             compiled.sql
+        }
+    })
+}
+
+fn compile_foreach<T, O, C>(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    scope: &Ref<SQLScope>,
+    loc: &SourceLocation,
+    foreach: &sqlast::ForEach<T>,
+    compile_fn: C,
+) -> Result<CRef<Vec<O>>>
+where
+    T: Clone + fmt::Debug + Send + Sync + VisitSQL<ParamInliner> + 'static,
+    O: Clone + fmt::Debug + Send + Sync + 'static + Constrainable,
+    C: Fn(&Compiler, &Ref<Schema>, &Ref<SQLScope>, &SourceLocation, &T) -> Result<CRef<Vec<O>>>
+        + Send
+        + 'static,
+{
+    let sqlast::ForEach { ranges, body } = foreach;
+    let ranges = ranges.compile_sql(&compiler, &schema, &scope, &loc)?;
+
+    compiler.async_cref({
+        let compiler = compiler.clone();
+        let schema = schema.clone();
+        let scope = scope.clone();
+        let loc = loc.clone();
+        let body = body.clone();
+        async move {
+            let SQLSnippet {
+                names,
+                body: ranges,
+            } = cunwrap(ranges.await?)?;
+
+            if !names.params.is_empty() {
+                return Err(CompileError::unimplemented(
+                    loc.clone(),
+                    "ForEach with external parameters",
+                ));
+            }
+
+            let mut substituted = Vec::new();
+            for e in apply_foreach(
+                &compiler,
+                &schema,
+                &scope,
+                &loc,
+                &ranges,
+                BTreeMap::new(),
+                &body,
+            )?
+            .into_iter()
+            {
+                let expr = compile_fn(&compiler, &schema, &scope, &loc, &e)?;
+                substituted.push(expr);
+            }
+
+            let all_substituted = combine_crefs(substituted)?;
+            let all_substituted = all_substituted.await?;
+            let all_substituted = all_substituted.read()?;
+
+            let mut ret = Vec::new();
+            for group in all_substituted.iter() {
+                for e in group.read()?.iter() {
+                    ret.push(e.clone());
+                }
+            }
+
+            Ok(mkcref(ret))
         }
     })
 }
@@ -1073,6 +1162,130 @@ fn extract_renamings(
     ret
 }
 
+// If the expression is an identifier, then simply forward it along. In the case of a
+// compound identifier (e.g. table.foo), SQL semantics are to pick the last element (i.e.
+// foo) as the new name.
+fn expr_to_alias(expr: &sqlast::Expr) -> Ident {
+    match expr {
+        sqlast::Expr::Identifier(i) => i.get().into(),
+        sqlast::Expr::CompoundIdentifier(c) => c
+            .last()
+            .expect("Compound identifiers should have at least one element")
+            .get()
+            .into(),
+        _ => format!("{}", expr).into(),
+    }
+}
+
+fn compile_select_item(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    scope: &Ref<SQLScope>,
+    loc: &SourceLocation,
+    select_item: &sqlast::SelectItem,
+) -> Result<CRef<Vec<CTypedNameAndSQL>>> {
+    Ok(match select_item {
+        sqlast::SelectItem::UnnamedExpr(expr) => {
+            let compiled =
+                compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
+
+            let name = expr_to_alias(expr);
+            let loc = loc.clone();
+            compiler.async_cref(async move {
+                let sql = compiled.sql.await?;
+                let sql = sql.read()?;
+
+                let mut ret = Vec::new();
+                ret.push(CTypedNameAndSQL {
+                    name: Ident::with_location(loc.clone(), name),
+                    type_: compiled.type_,
+                    sql: mkcref(sql.clone()),
+                });
+
+                Ok(mkcref(ret))
+            })?
+        }
+        sqlast::SelectItem::ExprWithAlias { expr, alias } => {
+            let compiled =
+                compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
+            let name = Ident::from_sqlident(loc.clone(), alias.get().clone());
+
+            scope.write()?.add_projection_term(name.get(), &compiled)?;
+
+            mkcref(vec![CTypedNameAndSQL {
+                name,
+                type_: compiled.type_,
+                sql: compiled.sql,
+            }])
+        }
+        sqlast::SelectItem::Wildcard(..) | sqlast::SelectItem::QualifiedWildcard { .. } => {
+            let (qualifier, renamings) = match select_item {
+                sqlast::SelectItem::Wildcard(options) => {
+                    (None, extract_renamings(loc.file(), options))
+                }
+                sqlast::SelectItem::QualifiedWildcard(qualifier, options) => {
+                    if qualifier.0.len() != 1 {
+                        return Err(CompileError::unimplemented(
+                            loc.clone(),
+                            "Wildcard of lenght != 1",
+                        ));
+                    }
+
+                    (
+                        Some(qualifier.0[0].get().into()),
+                        extract_renamings(loc.file(), options),
+                    )
+                }
+                _ => unreachable!(),
+            };
+
+            let available =
+                scope
+                    .read()?
+                    .get_available_references(compiler.clone(), loc, qualifier)?;
+            available.then({
+                let loc = loc.clone();
+                move |available: Ref<AvailableReferences>| {
+                    let mut ret = Vec::new();
+                    for (_, m) in available.read()?.current_level().unwrap().iter() {
+                        let type_ = match &m.type_ {
+                            Some(t) => t.clone(),
+                            None => {
+                                return Err(CompileError::duplicate_entry(vec![m
+                                    .field
+                                    .replace_location(loc.clone())]))
+                            }
+                        };
+
+                        let name = match renamings.get(&m.field) {
+                            Some(Some(n)) => n.clone(),
+                            Some(None) => continue,
+                            None => m.field.clone(),
+                        };
+
+                        ret.push(CTypedNameAndSQL {
+                            name,
+                            type_,
+                            sql: mkcref(m.sql.clone()),
+                        });
+                    }
+                    Ok(mkcref(ret))
+                }
+            })?
+        }
+        sqlast::SelectItem::ForEach(foreach) => compile_foreach(
+            compiler,
+            schema,
+            scope,
+            loc,
+            foreach,
+            |compiler, schema, scope, loc, expr| {
+                compile_select_item(compiler, schema, scope, loc, expr)
+            },
+        )?,
+    })
+}
+
 pub fn compile_select(
     compiler: Compiler,
     schema: Ref<Schema>,
@@ -1121,99 +1334,7 @@ pub fn compile_select(
     let exprs = select
         .projection
         .iter()
-        .map(|p| {
-            Ok(match p {
-                sqlast::SelectItem::UnnamedExpr(expr) => {
-                    // If the expression is an identifier, then simply forward it along. In the case of a
-                    // compound identifier (e.g. table.foo), SQL semantics are to pick the last element (i.e.
-                    // foo) as the new name.
-                    let name: Ident = match expr {
-                        sqlast::Expr::Identifier(i) => i.get().into(),
-                        sqlast::Expr::CompoundIdentifier(c) => c
-                            .last()
-                            .expect("Compound identifiers should have at least one element")
-                            .get()
-                            .into(),
-                        _ => format!("{}", expr).into(),
-                    };
-                    let compiled =
-                        compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
-                    mkcref(vec![CTypedNameAndSQL {
-                        name: Ident::with_location(loc.clone(), name),
-                        type_: compiled.type_,
-                        sql: compiled.sql,
-                    }])
-                }
-                sqlast::SelectItem::ExprWithAlias { expr, alias } => {
-                    let compiled =
-                        compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
-                    let name = Ident::from_sqlident(loc.clone(), alias.get().clone());
-
-                    scope.write()?.add_projection_term(name.get(), &compiled)?;
-
-                    mkcref(vec![CTypedNameAndSQL {
-                        name,
-                        type_: compiled.type_,
-                        sql: compiled.sql,
-                    }])
-                }
-                sqlast::SelectItem::Wildcard(..) | sqlast::SelectItem::QualifiedWildcard { .. } => {
-                    let (qualifier, renamings) = match p {
-                        sqlast::SelectItem::Wildcard(options) => {
-                            (None, extract_renamings(loc.file(), options))
-                        }
-                        sqlast::SelectItem::QualifiedWildcard(qualifier, options) => {
-                            if qualifier.0.len() != 1 {
-                                return Err(CompileError::unimplemented(
-                                    loc.clone(),
-                                    "Wildcard of lenght != 1",
-                                ));
-                            }
-
-                            (
-                                Some(qualifier.0[0].get().into()),
-                                extract_renamings(loc.file(), options),
-                            )
-                        }
-                        _ => unreachable!(),
-                    };
-
-                    let available =
-                        scope
-                            .read()?
-                            .get_available_references(compiler.clone(), loc, qualifier)?;
-                    available.then({
-                        let loc = loc.clone();
-                        move |available: Ref<AvailableReferences>| {
-                            let mut ret = Vec::new();
-                            for (_, m) in available.read()?.current_level().unwrap().iter() {
-                                let type_ = match &m.type_ {
-                                    Some(t) => t.clone(),
-                                    None => {
-                                        return Err(CompileError::duplicate_entry(vec![m
-                                            .field
-                                            .replace_location(loc.clone())]))
-                                    }
-                                };
-
-                                let name = match renamings.get(&m.field) {
-                                    Some(Some(n)) => n.clone(),
-                                    Some(None) => continue,
-                                    None => m.field.clone(),
-                                };
-
-                                ret.push(CTypedNameAndSQL {
-                                    name,
-                                    type_,
-                                    sql: mkcref(m.sql.clone()),
-                                });
-                            }
-                            Ok(mkcref(ret))
-                        }
-                    })?
-                }
-            })
-        })
+        .map(|p| compile_select_item(&compiler, &schema, &scope, loc, p))
         .collect::<Result<Vec<_>>>()?;
 
     let projections = combine_crefs(exprs)?;
@@ -1268,7 +1389,7 @@ pub fn compile_select(
                 names.extend(sqlexpr.sql.names.clone());
                 projection.push(sqlast::SelectItem::ExprWithAlias {
                     alias: sqlexpr.name.to_sqlident(),
-                    expr: sqlexpr.sql.body.as_expr(),
+                    expr: sqlexpr.sql.body.as_expr()?,
                 });
             }
             names.extend(from.names);
@@ -1287,7 +1408,7 @@ pub fn compile_select(
                         .unify(&resolve_global_atom(compiler.clone(), "bool")?)?;
                     let sql = compiled.sql.await?.read()?.clone();
                     names.extend(sql.names.clone());
-                    Some(sql.body.as_expr())
+                    Some(sql.body.as_expr()?)
                 }
                 None => None,
             };
@@ -1299,7 +1420,7 @@ pub fn compile_select(
                         .await?;
                 let sql = sql.read()?;
                 names.extend(sql.names.clone());
-                group_by.push(sql.body.as_expr());
+                group_by.push(sql.body.as_expr()?);
             }
 
             let mut ret = select.clone();
@@ -1335,7 +1456,7 @@ pub async fn finish_sqlexpr(
                 ));
             }
             names.extend(s.names.clone());
-            s.body.as_expr()
+            s.body.as_expr()?
         }
         _ => {
             return Err(CompileError::unimplemented(
@@ -1581,10 +1702,10 @@ fn apply_sqlcast(
                 loc: SourceLocation::Unknown,
             })? {
             // Do not apply casts to INTERVAL types
-            final_expr.body.as_expr()
+            final_expr.body.as_expr()?
         } else {
             sqlast::Expr::Cast {
-                expr: Box::new(final_expr.body.as_expr()),
+                expr: Box::new(final_expr.body.as_expr()?),
                 data_type: dt,
             }
         };
@@ -1675,7 +1796,7 @@ where
     iter.map(|c| {
         let c = c.read()?;
         names.extend(c.names.clone());
-        Ok(c.body.as_expr())
+        Ok(c.body.as_expr()?)
     })
     .collect::<Result<Vec<_>>>()
 }
@@ -1871,6 +1992,30 @@ impl CompileSQL for sqlast::WindowSpec {
     }
 }
 
+impl CompileSQL for sqlast::LoopRange {
+    fn compile_sql(
+        &self,
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        scope: &Ref<SQLScope>,
+        loc: &SourceLocation,
+    ) -> Result<CRefSnippet<Self>> {
+        let sqlast::LoopRange { item, range } = self;
+
+        let item = item.clone();
+        let c_range = range.compile_sql(compiler, schema, scope, loc)?;
+
+        compiler.async_cref(async move {
+            let SQLSnippet { names, body } = cunwrap(c_range.await?)?;
+
+            Ok(CSQLSnippet::wrap(
+                names,
+                sqlast::LoopRange { item, range: body },
+            ))
+        })
+    }
+}
+
 async fn extract_scalar_subselect_field(
     loc: &SourceLocation,
     query_type: &MType,
@@ -1913,6 +2058,53 @@ async fn extract_scalar_subselect_field(
             .as_str(),
         ));
     })
+}
+
+fn apply_foreach<T>(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    scope: &Ref<SQLScope>,
+    loc: &SourceLocation,
+    ranges: &[sqlast::LoopRange],
+    substitutions: BTreeMap<Ident, SQLBody>,
+    exprs: &Vec<T>,
+) -> Result<Vec<T>>
+where
+    T: VisitSQL<ParamInliner>,
+{
+    if ranges.len() == 0 {
+        let inliner = ParamInliner::new(substitutions);
+        Ok(exprs.visit_sql(&inliner))
+    } else {
+        let mut ret = vec![];
+        let range = &ranges[0];
+        match range.range.as_ref() {
+            sqlast::Expr::Array(sqlast::Array { elem, .. }) => {
+                for e in elem.iter() {
+                    let mut substitutions = substitutions.clone();
+                    substitutions.insert(range.item.get().into(), SQLBody::Expr(e.clone()));
+
+                    ret.extend(apply_foreach(
+                        compiler,
+                        schema,
+                        scope,
+                        loc,
+                        &ranges[1..],
+                        substitutions,
+                        exprs,
+                    )?);
+                }
+            }
+            _ => {
+                return Err(CompileError::invalid_foreach(
+                    loc.clone(),
+                    "foreach range expected to be a literal array",
+                ));
+            }
+        };
+
+        Ok(ret)
+    }
 }
 
 pub fn compile_sqlexpr(
@@ -1998,7 +2190,10 @@ pub fn compile_sqlexpr(
             };
 
             CTypedExpr {
-                type_: data_type,
+                type_: mkcref(MType::List(Located::new(
+                    data_type,
+                    SourceLocation::Unknown,
+                ))),
                 expr: combine_crefs(c_elems.iter().map(|s| s.sql.clone()).collect())?.then({
                     let expr = expr.clone();
                     move |args: Ref<Vec<Ref<SQL<CRef<MType>>>>>| {
@@ -2026,7 +2221,7 @@ pub fn compile_sqlexpr(
                         Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                             names: sqlexpr.read()?.names.clone(),
                             body: SQLBody::Expr(constructor(Box::new(
-                                sqlexpr.read()?.body.as_expr(),
+                                sqlexpr.read()?.body.as_expr()?,
                             ))),
                         }))))
                     }
@@ -2056,10 +2251,10 @@ pub fn compile_sqlexpr(
                         Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                             names,
                             body: SQLBody::Expr(sqlast::Expr::Between {
-                                expr: Box::new(args.read()?[0].read()?.body.as_expr()),
+                                expr: Box::new(args.read()?[0].read()?.body.as_expr()?),
                                 negated: negated,
-                                low: Box::new(args.read()?[1].read()?.body.as_expr()),
-                                high: Box::new(args.read()?[2].read()?.body.as_expr()),
+                                low: Box::new(args.read()?[1].read()?.body.as_expr()?),
+                                high: Box::new(args.read()?[2].read()?.body.as_expr()?),
                             }),
                         }))))
                     }
@@ -2125,9 +2320,9 @@ pub fn compile_sqlexpr(
                         Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                             names,
                             body: SQLBody::Expr(sqlast::Expr::BinaryOp {
-                                left: Box::new(args.read()?[0].read()?.body.as_expr()),
+                                left: Box::new(args.read()?[0].read()?.body.as_expr()?),
                                 op: op.clone(),
-                                right: Box::new(args.read()?[1].read()?.body.as_expr()),
+                                right: Box::new(args.read()?[1].read()?.body.as_expr()?),
                             }),
                         }))))
                     }
@@ -2169,7 +2364,7 @@ pub fn compile_sqlexpr(
                         names: expr.names.clone(),
                         body: SQLBody::Expr(sqlast::Expr::UnaryOp {
                             op,
-                            expr: Box::new(expr.body.as_expr()),
+                            expr: Box::new(expr.body.as_expr()?),
                         }),
                     }))))
                 })?,
@@ -2235,7 +2430,7 @@ pub fn compile_sqlexpr(
                                 let operand = (&o.sql).await?;
                                 let operand = operand.read()?;
                                 names.extend(operand.names.clone());
-                                Some(Box::new(operand.body.as_expr()))
+                                Some(Box::new(operand.body.as_expr()?))
                             }
                             None => None,
                         };
@@ -2253,7 +2448,7 @@ pub fn compile_sqlexpr(
                                 let operand = (&o.sql).await?;
                                 let operand = operand.read()?;
                                 names.extend(operand.names.clone());
-                                Some(Box::new(operand.body.as_expr()))
+                                Some(Box::new(operand.body.as_expr()?))
                             }
                             None => None,
                         };
@@ -2637,7 +2832,7 @@ pub fn compile_sqlexpr(
                                         &arg.read()?.to_typed_expr(),
                                     )?;
                                     args.push(sqlast::FunctionArg::Unnamed(
-                                        sqlast::FunctionArgExpr::Expr(sql.body.as_expr()),
+                                        sqlast::FunctionArgExpr::Expr(sql.body.as_expr()?),
                                     ));
                                     names.extend(sql.names.clone());
                                 }
@@ -2645,7 +2840,7 @@ pub fn compile_sqlexpr(
                                 for arg in &variadic_args {
                                     let sql = intern_placeholder(compiler.clone(), "arg", &arg)?;
                                     args.push(sqlast::FunctionArg::Unnamed(
-                                        sqlast::FunctionArgExpr::Expr(sql.body.as_expr()),
+                                        sqlast::FunctionArgExpr::Expr(sql.body.as_expr()?),
                                     ));
                                     names.extend(sql.names.clone());
                                 }
@@ -2723,7 +2918,7 @@ pub fn compile_sqlexpr(
                     for expr in &*exprs.read()? {
                         let expr = expr.read()?;
                         names.extend(expr.names.clone());
-                        ret.push(expr.body.as_expr());
+                        ret.push(expr.body.as_expr()?);
                     }
 
                     Ok(mkcref(Expr::native_sql(Arc::new(SQL {
@@ -2789,7 +2984,7 @@ pub fn compile_sqlexpr(
                         Some(limit) => {
                             let limit = limit.read()?;
                             names.extend(limit.names.clone());
-                            Some(Box::new(limit.body.as_expr()))
+                            Some(Box::new(limit.body.as_expr()?))
                         }
                         None => None,
                     };
@@ -2798,7 +2993,7 @@ pub fn compile_sqlexpr(
                         names,
                         body: SQLBody::Expr(sqlast::Expr::ArrayAgg(sqlast::ArrayAgg {
                             distinct,
-                            expr: Box::new(expr.body.as_expr()),
+                            expr: Box::new(expr.body.as_expr()?),
                             order_by: ob.body,
                             limit,
                             within_group,
@@ -2884,7 +3079,7 @@ pub fn compile_sqlexpr(
                     Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                         names,
                         body: SQLBody::Expr(sqlast::Expr::InSubquery {
-                            expr: Box::new(expr.body.as_expr()),
+                            expr: Box::new(expr.body.as_expr()?),
                             subquery: Box::new(subquery.body),
                             negated,
                         }),
@@ -2937,7 +3132,7 @@ pub fn compile_sqlexpr(
                     Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                         names,
                         body: SQLBody::Expr(sqlast::Expr::Substring {
-                            expr: Box::new(body.as_expr()),
+                            expr: Box::new(body.as_expr()?),
                             substring_from: substring_from.body,
                             substring_for: substring_for.body,
                         }),
@@ -3014,7 +3209,7 @@ pub fn compile_sqlexpr(
                     let SQLSnippet { names, body } = expr.read()?.clone();
 
                     // SQL parsers don't like the cast we apply here.
-                    let value = match body.as_expr() {
+                    let value = match body.as_expr()? {
                         sqlast::Expr::Cast { expr, .. } => expr,
                         other => Box::new(other),
                     };
@@ -3063,7 +3258,7 @@ pub fn compile_sqlexpr(
                         for expr in compiled_set.read()?.iter() {
                             let expr = expr.read()?;
                             names.extend(expr.names.clone());
-                            set.push(expr.body.as_expr());
+                            set.push(expr.body.as_expr()?);
                         }
                         sets.push(set);
                     }

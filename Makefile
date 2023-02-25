@@ -28,8 +28,8 @@ ts-bindings:
 	cd queryscript/src && cargo test ${CARGO_FLAGS} --features ts export_bindings
 
 
-.PHONY: test lfs refresh-test-data
-test: lfs submodules
+.PHONY: test refresh-test-data
+test: submodules
 	cd queryscript/src/ && cargo test ${CARGO_FLAGS} -- --nocapture
 
 lfs:

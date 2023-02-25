@@ -123,7 +123,7 @@ pub fn eval<'a>(
                         let engine = ctx.sql_engine(sql_url.clone())?;
 
                         if !engine.table_exists(&table_name).await? {
-                            let query = create_table_as(table_name, sql.body.as_query(), true);
+                            let query = create_table_as(table_name, sql.body.as_query()?, true);
                             let sql_params = eval_params(ctx, &sql.names.params).await?;
                             let _ = ctx
                                 .sql_engine(sql_url.clone())?
@@ -168,12 +168,12 @@ pub fn eval<'a>(
             schema::Expr::SQL(e, url) => {
                 let schema::SQL { body, names } = e.as_ref();
                 let sql_params = eval_params(ctx, &names.params).await?;
-                let query = body.as_statement();
+                let query = body.as_statement()?;
 
                 let engine = ctx.sql_engine(url.clone())?;
 
                 // TODO: This ownership model implies some necessary copying (below).
-                let rows = engine.eval(&query, sql_params).await?;
+                let mut rows = engine.eval(&query, sql_params).await?;
 
                 // Before returning, we perform some runtime checks that might only be necessary in debug mode:
                 // - For expressions, validate that the result is a single row and column
@@ -189,15 +189,15 @@ pub fn eval<'a>(
                             return fail!("Expected an expression to have exactly one column");
                         }
 
-                        let row = &rows.batch(0).records()[0];
-                        let value = row.column(0).clone();
-                        let value_type = value.type_();
+                        let value_type = rows.batch(0).records()[0].column(0).type_();
                         if !ctx.disable_typechecks && *expected_type != value_type {
-                            return Err(RuntimeError::type_mismatch(
+                            let target_schema = vec![crate::types::Field::new_nullable(
+                                "value".into(),
                                 expected_type.clone(),
-                                value_type,
-                            ));
+                            )];
+                            rows = rows.try_cast(&target_schema)?;
                         }
+                        let row = &rows.batch(0).records()[0];
                         Ok(row.column(0).clone())
                     }
                     schema::SQLBody::Query(_) | schema::SQLBody::Table(_) => {
@@ -208,10 +208,25 @@ pub fn eval<'a>(
                                 crate::types::Type::Record(rows.schema()),
                             ));
                             if *expected_type != rows_type {
-                                return Err(RuntimeError::type_mismatch(
-                                    expected_type.clone(),
-                                    rows_type,
-                                ));
+                                let target_schema = match &*expected_type {
+                                    crate::types::Type::List(t) => match &**t {
+                                        crate::types::Type::Record(s) => s,
+                                        _ => {
+                                            return Err(RuntimeError::type_mismatch(
+                                                expected_type.clone(),
+                                                rows_type,
+                                            ));
+                                        }
+                                    },
+                                    _ => {
+                                        return Err(RuntimeError::type_mismatch(
+                                            expected_type.clone(),
+                                            rows_type,
+                                        ));
+                                    }
+                                };
+
+                                rows = rows.try_cast(&target_schema)?;
                             }
                         }
 

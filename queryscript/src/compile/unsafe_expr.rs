@@ -52,20 +52,21 @@ impl SQLVisitor for NameCollector {
     ) -> Option<Vec<sqlast::Located<sqlast::Ident>>> {
         let ast_path = path.to_path(self.schema.read().unwrap().file.clone());
 
+        // Because we're not compiling, we can't rely on our own parameter logic to string together
+        // references to the same expression. Furthermore, our parameters are strings (not paths), so
+        // we can really only do this replacement for single-length paths.
+        let name = if path.len() == 1 {
+            path[0].clone()
+        } else {
+            return None;
+        };
+
         match compile_reference(self.compiler.clone(), self.schema.clone(), &ast_path) {
             Ok(expr) => {
                 if !Self::can_inline_expr(expr.expr.as_ref()) {
                     return None;
                 }
 
-                // Because we're not compiling, we can't rely on our own parameter logic to string together
-                // references to the same expression. Furthermore, our parameters are strings (not paths), so
-                // we can really only do this replacement for single-length paths.
-                let name = if path.len() == 1 {
-                    path[0].clone()
-                } else {
-                    return None;
-                };
                 self.names
                     .borrow_mut()
                     .params

@@ -43,6 +43,12 @@ pub struct ParamInliner {
     context: BTreeMap<Ident, SQLBody>,
 }
 
+impl ParamInliner {
+    pub fn new(context: BTreeMap<Ident, SQLBody>) -> Self {
+        Self { context }
+    }
+}
+
 impl SQLVisitor for ParamInliner {
     fn visit_sqlexpr(&self, expr: &sqlast::Expr) -> Option<sqlast::Expr> {
         let ident = match expr {
@@ -60,7 +66,7 @@ impl SQLVisitor for ParamInliner {
         .into();
 
         if let Some(e) = self.context.get(&ident) {
-            Some(e.as_expr())
+            e.as_expr().ok()
         } else {
             None
         }
@@ -83,7 +89,7 @@ impl SQLVisitor for ParamInliner {
                             columns: vec![],
                         },
                     };
-                    Some(e.as_table(Some(new_alias)))
+                    e.as_table(Some(new_alias)).ok()
                 } else {
                     None
                 }

@@ -165,7 +165,7 @@ impl ConnectionSchema {
                     mkcref(Expr::SQL(
                         Arc::new(SQLSnippet {
                             names: SQLNames::new(),
-                            body: SQLBody::Query(select_limit_0(body.as_query())),
+                            body: SQLBody::Query(select_limit_0(body.as_query()?)),
                         }),
                         Some(self.url.clone()),
                     )),
