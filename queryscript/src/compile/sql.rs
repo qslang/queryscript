@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use lazy_static::lazy_static;
 use snafu::prelude::*;
 use sqlparser::ast::WildcardAdditionalOptions;
@@ -20,7 +19,7 @@ use crate::compile::inference::*;
 use crate::compile::inline::*;
 use crate::compile::schema::*;
 use crate::compile::scope::{AvailableReferences, SQLScope};
-use crate::compile::traverse::{SQLVisitor, Visit, VisitSQL, Visitor};
+use crate::compile::traverse::VisitSQL;
 use crate::types::{number::parse_numeric_type, AtomicType, IntervalUnit, Type};
 use crate::{
     ast,
@@ -2184,17 +2183,17 @@ impl CompileSQL for sqlast::LoopRange {
         scope: &Ref<SQLScope>,
         loc: &SourceLocation,
     ) -> Result<CRefSnippet<Self>> {
-        let sqlast::LoopRange { expr, alias } = self;
+        let sqlast::LoopRange { item, range } = self;
 
-        let c_expr = expr.compile_sql(compiler, schema, scope, loc)?;
+        let item = item.clone();
+        let c_range = range.compile_sql(compiler, schema, scope, loc)?;
 
-        let alias = alias.clone();
         compiler.async_cref(async move {
-            let SQLSnippet { names, body } = cunwrap(c_expr.await?)?;
+            let SQLSnippet { names, body } = cunwrap(c_range.await?)?;
 
             Ok(CSQLSnippet::wrap(
                 names,
-                sqlast::LoopRange { expr: body, alias },
+                sqlast::LoopRange { item, range: body },
             ))
         })
     }
@@ -2262,11 +2261,11 @@ where
     } else {
         let mut ret = vec![];
         let range = &ranges[0];
-        match range.expr.as_ref() {
+        match range.range.as_ref() {
             sqlast::Expr::Array(sqlast::Array { elem, .. }) => {
                 for e in elem.iter() {
                     let mut substitutions = substitutions.clone();
-                    substitutions.insert(range.alias.get().into(), SQLBody::Expr(e.clone()));
+                    substitutions.insert(range.item.get().into(), SQLBody::Expr(e.clone()));
 
                     ret.extend(apply_foreach(
                         compiler,
@@ -3453,58 +3452,6 @@ pub fn compile_sqlexpr(
                     }))))
                 })?,
             }
-        }
-        sqlast::Expr::ForEach(foreach) => {
-            /*
-            let (type_, expr) = compile_foreach(
-                &compiler,
-                &schema,
-                &scope,
-                &loc,
-                foreach,
-                |compiler, schema, scope, loc, expr| {
-                    let arg = compile_sqlarg(
-                        compiler.clone(),
-                        schema.clone(),
-                        scope.clone(),
-                        &loc,
-                        &expr,
-                    )?;
-
-                    let expr = arg.sql.clone();
-                    Ok((
-                        arg.type_,
-                        compiler.async_cref(async move {
-                            let expr = expr.await?;
-                            let expr = expr.read()?;
-                            Ok(cwrap(SQLSnippet {
-                                names: expr.names.clone(),
-                                body: expr.body.as_expr()?,
-                            }))
-                        })?,
-                    ))
-                },
-            )?;
-
-            CTypedExpr {
-                type_,
-                expr: compiler.async_cref(async move {
-                    let expr = cunwrap(expr.await?)?;
-                    let mut exprs = Vec::new();
-                    for e in expr {
-                        exprs.push(SQLSnippet {
-                            names: e.names,
-                            body: SQLBody::Expr(e.body),
-                        });
-                    }
-                    Ok(mkcref(Expr::native_sql(Arc::new(SQL {
-                        names: SQLNames::new(),
-                        body: SQLBody::Iterator(exprs),
-                    }))))
-                })?,
-            }
-            */
-            todo!("Should probably remove")
         }
         _ => {
             return Err(CompileError::unimplemented(
