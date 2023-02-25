@@ -10,8 +10,6 @@ use colored::*;
 use snafu::{Backtrace, Snafu};
 use std::io;
 
-use super::schema::{CRef, SQLBody, SQLSnippet};
-
 pub type Result<T, E = CompileError> = std::result::Result<T, E>;
 
 #[derive(Debug, Snafu)]
@@ -137,12 +135,6 @@ pub enum CompileError {
         loc: ErrorLocation,
     },
 
-    #[snafu(display("Cannot expand expression here{}", example.as_ref().map(|e| format!(" (e.g. {})", e)).unwrap_or_default()))]
-    ExpansionError {
-        example: Option<String>,
-        backtrace: Option<Backtrace>,
-    },
-
     #[snafu(display("{}", sources.first().unwrap()))]
     Multiple {
         // This is assumed to be non-empty
@@ -239,13 +231,6 @@ impl CompileError {
         }
         .build();
     }
-
-    pub fn invalid_expansion(exprs: &Vec<SQLSnippet<CRef<MType>, SQLBody>>) -> CompileError {
-        return ExpansionSnafu {
-            example: exprs.iter().next().map(|e| format!("{:?}", e)),
-        }
-        .build();
-    }
 }
 
 pub fn path_location(path: &Vec<ast::Located<ast::Ident>>) -> ErrorLocation {
@@ -304,7 +289,6 @@ impl PrettyError for CompileError {
             CompileError::ScalarSubselectError { loc, .. } => loc.clone(),
             CompileError::InvalidConnectionError { loc, .. } => loc.clone(),
             CompileError::InvalidForEachError { loc, .. } => loc.clone(),
-            CompileError::ExpansionError { .. } => ErrorLocation::Unknown,
             CompileError::Multiple { sources } => sources.first().unwrap().location(),
         }
     }

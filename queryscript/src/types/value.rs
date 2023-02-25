@@ -343,7 +343,6 @@ impl fmt::Display for Value {
                 write!(f, "{}", table)
             }
 
-            // TODO: Implement list without Debug
             Self::List(l) => {
                 write!(f, "[")?;
                 let mut delim = "";

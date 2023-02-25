@@ -951,7 +951,6 @@ impl<V: SQLVisitor> VisitSQL<V> for schema::SQLBody {
             schema::SQLBody::Expr(e) => schema::SQLBody::Expr(e.visit_sql(visitor)),
             schema::SQLBody::Query(q) => schema::SQLBody::Query(q.visit_sql(visitor)),
             schema::SQLBody::Table(t) => schema::SQLBody::Table(t.visit_sql(visitor)),
-            schema::SQLBody::Iterator(t) => schema::SQLBody::Iterator(t.visit_sql(visitor)),
         }
     }
 }
@@ -1029,7 +1028,6 @@ impl<V: Visitor<schema::CRef<schema::MType>> + Sync> Visit<V, schema::CRef<schem
             }),
             Expr::Unknown => Expr::Unknown,
             Expr::UncompiledFn(def) => Expr::UncompiledFn(def.clone()),
-            Expr::Expanded(items) => Expr::Expanded(items.clone()),
         })
     }
 }

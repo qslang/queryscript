@@ -501,7 +501,6 @@ impl LanguageServer for Backend {
     }
 
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
-        eprintln!("code lens: {:?}", params);
         let uri = params.text_document.uri;
         let schema = match self.get_schema(&uri, true).await? {
             Some(schema) => schema,
@@ -516,12 +515,10 @@ impl LanguageServer for Backend {
             .iter()
             .enumerate()
         {
-            eprintln!("expr: {:?}", expr);
             let loc = match expr.location().normalize() {
                 Some(loc) => loc,
                 None => continue,
             };
-            eprintln!("has loc : {:?}", loc);
 
             let command = Command {
                 title: "Run".to_string(),

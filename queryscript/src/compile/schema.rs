@@ -612,7 +612,6 @@ pub enum SQLBody {
     Expr(sqlast::Expr),
     Query(sqlast::Query),
     Table(sqlast::TableFactor),
-    Iterator(Vec<SQLSnippet<CRef<MType>, SQLBody>>),
 }
 
 impl SQLBody {
@@ -663,7 +662,6 @@ impl SQLBody {
                     locks: Vec::new(),
                 }))
             }
-            SQLBody::Iterator(items) => return Err(CompileError::invalid_expansion(items)),
         })
     }
 
@@ -678,7 +676,6 @@ impl SQLBody {
             SQLBody::Expr(expr) => select_no_from(expr.clone(), None),
             SQLBody::Query(query) => query.clone(),
             SQLBody::Table(table) => select_star_from(table.clone()),
-            SQLBody::Iterator(items) => return Err(CompileError::invalid_expansion(items)),
         })
     }
 
@@ -731,7 +728,6 @@ impl SQLBody {
                 alias,
             },
             SQLBody::Table(table) => with_table_alias(table, alias),
-            SQLBody::Iterator(items) => return Err(CompileError::invalid_expansion(items)),
         })
     }
 }
@@ -745,11 +741,6 @@ impl fmt::Debug for SQLBody {
                 SQLBody::Expr(expr) => expr.to_string(),
                 SQLBody::Query(query) => query.to_string(),
                 SQLBody::Table(table) => table.to_string(),
-                SQLBody::Iterator(items) => items
-                    .iter()
-                    .map(|i| format!("{:?}", i))
-                    .collect::<Vec<_>>()
-                    .join(", "),
             }
         )
     }
@@ -914,7 +905,6 @@ where
     Connection(Arc<ConnectionString>),
     Materialize(MaterializeExpr<TypeRef>),
     UncompiledFn(ast::FnDef),
-    Expanded(Vec<CTypedExpr>), // XXX Remove
     Unknown,
 }
 
@@ -972,7 +962,6 @@ impl Expr<CRef<MType>> {
                 inlined: inlined.clone(),
             })),
             Expr::UncompiledFn(def) => Ok(Expr::UncompiledFn(def.clone())),
-            Expr::Expanded(items) => Ok(Expr::Expanded(items.clone())),
             Expr::Unknown => Ok(Expr::Unknown),
         }
     }

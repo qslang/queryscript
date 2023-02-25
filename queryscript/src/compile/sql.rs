@@ -442,29 +442,6 @@ pub fn compile_reference(
     Ok(r)
 }
 
-/*
-pub fn intern_placeholder_expr(
-    compiler: Compiler,
-    kind: &str,
-    expr: &Expr<CRef<MType>>,
-) -> Result<Arc<SQL<CRef<MType>>>> {
-    match expr {
-        Expr::SQL(sql, url) => {
-            if url.is_some() {
-                return Err(CompileError::internal(
-                    SourceLocation::Unknown,
-                    "Cannot intern a placeholder for a remote SQL expression",
-                ));
-            }
-            Ok(sql.clone())
-        }
-        _ => {
-            let (_, e) = intern_nonsql_placeholder_expr(compiler.clone(), kind, expr)?;
-            Ok(e)
-        }
-    }
-} */
-
 pub fn intern_placeholder(
     compiler: Compiler,
     kind: &str,
@@ -486,37 +463,6 @@ pub fn intern_placeholder(
         }
     }
 }
-
-/*
-pub fn intern_nonsql_placeholder_expr(
-    compiler: Compiler,
-    kind: &str,
-    expr: &Expr<CRef<MType>>,
-) -> Result<(sqlast::Located<sqlast::Ident>, Arc<SQL<CRef<MType>>>)> {
-    match &*expr {
-        Expr::SQL(..) => Err(CompileError::internal(
-            SourceLocation::Unknown,
-            "Cannot call intern_nonsql_placeholder on a SQL expression",
-        )),
-        _ => {
-            let placeholder_name = "@".to_string() + compiler.next_placeholder(kind)?.as_str();
-
-            Ok((
-                param_ident(placeholder_name.clone()),
-                Arc::new(SQL {
-                    names: SQLNames {
-                        params: Params::from([(placeholder_name.clone().into(), expr.clone())]),
-                        unbound: BTreeSet::new(),
-                    },
-                    body: SQLBody::Expr(sqlast::Expr::Identifier(param_ident(
-                        placeholder_name.clone(),
-                    ))),
-                }),
-            ))
-        }
-    }
-}
-*/
 
 pub fn intern_nonsql_placeholder(
     compiler: Compiler,
@@ -546,25 +492,6 @@ pub fn intern_nonsql_placeholder(
         }
     }
 }
-
-/*
-pub fn intern_cref_placeholder_expr(
-    compiler: Compiler,
-    kind: String,
-    expr: CRef<Expr<CRef<MType>>>,
-) -> Result<CRef<SQL<CRef<MType>>>> {
-    expr.clone().then(move |expr: Ref<Expr<CRef<MType>>>| {
-        let sqlexpr: SQL<CRef<MType>> = intern_placeholder_expr(
-            compiler.clone(),
-            kind.as_str(),
-            Arc::new(expr.read()?.clone()),
-        )?
-        .as_ref()
-        .clone();
-        Ok(mkcref(sqlexpr))
-    })
-}
-*/
 
 pub fn intern_cref_placeholder(
     compiler: Compiler,
@@ -599,21 +526,6 @@ pub fn compile_sqlarg(
     let compiled = compile_sqlexpr(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
     intern_cref_placeholder(compiler.clone(), "param".to_string(), compiled)
 }
-
-/*
-pub struct PlaceholderInterner {
-    context: BTreeMap<Ident, Arc<Expr<CRef<MType>>>>,
-}
-
-impl SQLVisitor for PlaceholderInterner {}
-
-#[async_trait]
-impl Visitor<CRef<MType>> for PlaceholderInterner {
-    async fn visit_expr(&self, expr: &Expr<CRef<MType>>) -> Result<Option<Expr<CRef<MType>>>> {
-        intern_cref_placeholder();
-    }
-}
-*/
 
 pub type CSQLNames = SQLNames<CRef<MType>>;
 
@@ -1195,23 +1107,6 @@ where
             }
 
             Ok(mkcref(ret))
-
-            /*
-                       let mut c_elem_iter = substituted.iter();
-                       let (data_type, exprs) = if let Some((first_type, first_sql)) = c_elem_iter.next() {
-                           let mut exprs = vec![first_sql.clone()];
-                           for (next_type, next_sql) in c_elem_iter {
-                               first_type.unify(&next_type)?;
-                               exprs.push(next_sql.clone());
-                           }
-                           (first_type.clone(), exprs)
-                       } else {
-                           (
-                               mkcref(MType::Atom(Located::new(AtomicType::Null, loc.clone()))),
-                               vec![],
-                           )
-                       };
-            */
         }
     })
 }
@@ -1301,27 +1196,11 @@ fn compile_select_item(
                 let sql = sql.read()?;
 
                 let mut ret = Vec::new();
-                match &sql.body {
-                    SQLBody::Iterator(items) => {
-                        for item in items.iter() {
-                            ret.push(CTypedNameAndSQL {
-                                name: Ident::with_location(
-                                    loc.clone(),
-                                    expr_to_alias(&item.body.as_expr()?),
-                                ),
-                                type_: compiled.type_.clone(),
-                                sql: mkcref(item.clone()),
-                            });
-                        }
-                    }
-                    _ => {
-                        ret.push(CTypedNameAndSQL {
-                            name: Ident::with_location(loc.clone(), name),
-                            type_: compiled.type_,
-                            sql: mkcref(sql.clone()),
-                        });
-                    }
-                }
+                ret.push(CTypedNameAndSQL {
+                    name: Ident::with_location(loc.clone(), name),
+                    type_: compiled.type_,
+                    sql: mkcref(sql.clone()),
+                });
 
                 Ok(mkcref(ret))
             })?
@@ -1394,78 +1273,16 @@ fn compile_select_item(
                 }
             })?
         }
-        sqlast::SelectItem::ForEach(foreach) => {
-            compile_foreach(
-                compiler,
-                schema,
-                scope,
-                loc,
-                foreach,
-                |compiler, schema, scope, loc, expr| {
-                    compile_select_item(compiler, schema, scope, loc, expr)
-
-                    /*
-                    let type_ = compiler.async_cref({
-                        let items = items.clone();
-                        let loc = loc.clone();
-                        async move {
-                            let items = items.await?;
-                            let item = {
-                                let items = items.read()?;
-
-                                // xxx
-                                if items.len() != 1 {
-                                    return err(compileerror::unimplemented(
-                                        loc.clone(),
-                                        "loops must have exactly 1 return value",
-                                    ));
-                                }
-
-                                items[0].clone()
-                            };
-                            ok(item.type_.clone())
-                        }
-                    })?;
-
-                    let expr = compiler.async_cref({
-                        let items = items.clone();
-                        let loc = loc.clone();
-                        async move {
-                            let items = items.await?;
-                            let item = {
-                                let items = items.read()?;
-
-                                // XXX
-                                // I think to solve this, we need to instrument compile_foreach()
-                                // itself to let the compile function return a list
-                                if items.len() != 1 {
-                                    return Err(CompileError::unimplemented(
-                                        loc.clone(),
-                                        "loops must have exactly 1 return value",
-                                    ));
-                                }
-
-                                items[0].clone()
-                            };
-
-                            let sql = item.sql.await?;
-                            let sql = sql.read()?;
-
-                            Ok(mkcref(SQLSnippet {
-                                names: sql.names.clone(),
-                                body: NamedSQLSnippet {
-                                    name: item.name,
-                                    body: sql.body.clone(),
-                                },
-                            }))
-                        }
-                    })?;
-
-                    Ok(CTypedSQLSnippet { type_, sql: expr })
-                    */
-                },
-            )?
-        }
+        sqlast::SelectItem::ForEach(foreach) => compile_foreach(
+            compiler,
+            schema,
+            scope,
+            loc,
+            foreach,
+            |compiler, schema, scope, loc, expr| {
+                compile_select_item(compiler, schema, scope, loc, expr)
+            },
+        )?,
     })
 }
 
