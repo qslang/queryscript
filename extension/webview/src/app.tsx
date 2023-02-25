@@ -1,12 +1,21 @@
 import React, { useCallback, useState, useEffect } from "react";
 import ReactDOM from "react-dom";
+import {
+  VSCodePanels,
+  VSCodePanelTab,
+  VSCodePanelView,
+} from "@vscode/webview-ui-toolkit/react";
 
-import { Type } from "queryscript/Type";
 import { RunExprResult } from "api";
 
 import Table from "./visualizations/table";
 
 import "./app.css";
+
+interface Panel {
+  tab: string;
+  panel: JSX.Element;
+}
 
 const App = () => {
   const [data, setData] = useState<RunExprResult>({
@@ -22,14 +31,29 @@ const App = () => {
     return () => window.removeEventListener("message", onMessage);
   });
 
+  const panels = [];
+
+  if (data.value !== null) {
+    panels.push({
+      tab: "Table",
+      panel: <Table data={data.value} schema={data.type} />,
+    });
+  }
+
+  panels.push({
+    tab: "Raw",
+    panel: <pre>{JSON.stringify(data, null, 2)}</pre>,
+  });
+
   return (
-    <>
-      {data.value !== null ? (
-        <Table data={data.value} schema={data.type} />
-      ) : (
-        <pre>{JSON.stringify(data, null, 2)}</pre>
-      )}
-    </>
+    <VSCodePanels>
+      {panels.map((p) => (
+        <VSCodePanelTab key={p.tab}>{p.tab}</VSCodePanelTab>
+      ))}
+      {panels.map((p) => (
+        <VSCodePanelView key={p.tab}>{p.panel}</VSCodePanelView>
+      ))}
+    </VSCodePanels>
   );
 };
 
