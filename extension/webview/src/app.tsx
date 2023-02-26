@@ -9,6 +9,7 @@ import {
 import { RunExprResult } from "api";
 
 import Table from "./visualizations/table";
+import BarChart from "./visualizations/barchart";
 
 import "./app.css";
 
@@ -39,6 +40,11 @@ const App = () => {
       panel: <Table data={data.value} schema={data.type} />,
     });
   }
+
+  panels.push({
+    tab: "Bar chart",
+    panel: <BarChart data={data.value} schema={data.type} />,
+  });
 
   panels.push({
     tab: "Raw",

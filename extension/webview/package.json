@@ -12,8 +12,11 @@
     "queryscript": "file:../../queryscript/bindings",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-vega": "^7.6.0",
     "ts-pattern": "^4.0.6",
-    "typescript": "^4.9.4"
+    "typescript": "^4.9.4",
+    "vega": "^5.22.1",
+    "vega-lite": "^5.6.1"
   },
   "scripts": {
     "vscode:prepublish": "yarn run esbuild-base -- --minify",
