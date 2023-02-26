@@ -34,6 +34,34 @@ SELECT for item in [id, org_id] {
     item AS f"metric_{item}"
 } FROM users;
 
+let strings = ['id', 'org_id'];
+let numbers = ['id', 'org_id'];
+
+strings;
+SELECT strings;
+
+numbers;
+SELECT numbers;
+
+SELECT for item in numbers {
+    item
+} FROM users;
+
+
+SELECT for item in strings {
+    item
+} FROM users;
+
+-- Idents
+SELECT for item in strings {
+    f"{item}"
+} FROM users;
+
+let id_types = ['', 'org_'];
+SELECT for item in id_types {
+    f"{item}id"
+} FROM users;
+
 /*
 SELECT for item in [users, org_id] {
     item

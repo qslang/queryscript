@@ -1,7 +1,10 @@
 {
     "compile_errors": [],
     "decls": {
+        "let id_types": [Utf8],
+        "let numbers": [Utf8],
         "let slices": [Utf8],
+        "let strings": [Utf8],
         "let users": [{
         	id Int32,
         	org_id Int32,
@@ -239,6 +242,166 @@
                     ),
                 ),
                 value: "| metric_id | metric_org_id |\n|-----------|---------------|\n| 1         | 1             |\n| 2         | 1             |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Atom(
+                        Utf8,
+                    ),
+                ),
+                value: "[id, org_id]",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "strings",
+                                type_: List(
+                                    Atom(
+                                        Utf8,
+                                    ),
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| strings      |\n|--------------|\n| [id, org_id] |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Atom(
+                        Utf8,
+                    ),
+                ),
+                value: "[id, org_id]",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "numbers",
+                                type_: List(
+                                    Atom(
+                                        Utf8,
+                                    ),
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| numbers      |\n|--------------|\n| [id, org_id] |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "'id'",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "'org_id'",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| 'id' | 'org_id' |\n|------|----------|\n| id   | org_id   |\n| id   | org_id   |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "'id'",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "'org_id'",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| 'id' | 'org_id' |\n|------|----------|\n| id   | org_id   |\n| id   | org_id   |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "org_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| id | org_id |\n|----|--------|\n| 1  | 1      |\n| 2  | 1      |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "org_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| id | org_id |\n|----|--------|\n| 1  | 1      |\n| 2  | 1      |",
             },
         ),
     ],
