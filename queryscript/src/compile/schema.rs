@@ -1321,6 +1321,18 @@ impl Schema {
             None => Ok(None),
         }
     }
+
+    /// Creates a child schema with this schema as a parent scope. This is useful
+    /// when entering scope contexts (e.g. functions, loops).
+    pub fn derive(schema: Ref<Schema>) -> Result<Ref<Schema>> {
+        let (file, folder) = {
+            let schema = schema.read()?;
+            (schema.file.clone(), schema.folder.clone())
+        };
+        let inner_schema = Schema::new(file, folder);
+        inner_schema.write()?.parent_scope = Some(schema.clone());
+        Ok(inner_schema)
+    }
 }
 
 pub const SCHEMA_EXTENSIONS: &[&str] = &["qs"];

@@ -22,6 +22,14 @@ SELECT for item in [1, 2] {
     item
 } FROM users;
 
+let slices = ['month', 'day'];
+
+select
+    for item in slices {
+        item
+    }
+;
+
 /*
 SELECT foreach ([a, b] AS item) {
     item AS IDENT("metric_", item)
