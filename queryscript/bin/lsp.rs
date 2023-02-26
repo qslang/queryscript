@@ -1131,6 +1131,7 @@ impl compile::OnSchema for SchemaRecorder {
             if document.compiling_version.is_some() {
                 document.schema_version = document.compiling_version;
                 document.compiling_version = None;
+                document.schema_signal.notify_waiters();
             }
 
             client.publish_diagnostics(uri, diagnostics, None).await;
