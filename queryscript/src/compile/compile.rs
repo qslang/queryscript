@@ -1035,7 +1035,7 @@ fn add_decls<E: Entry>(
                 Decl {
                     public: stmt.export,
                     extern_: *extern_,
-                    fn_arg: false,
+                    is_arg: false,
                     name: name.clone(),
                     value: value.clone(),
                 },
@@ -1410,8 +1410,7 @@ pub fn compile_fn_body(
     context: FnContext,
 ) -> Result<(CTypedExpr, Vec<Located<Ident>>)> {
     let mut def = def.clone();
-    let inner_schema = Schema::new(schema.read()?.file.clone(), schema.read()?.folder.clone());
-    inner_schema.write()?.parent_scope = Some(schema.clone());
+    let schema = Schema::derive(schema)?;
 
     let generic_return_type_name = || Located::new("__Return".into(), loc.clone());
     if !def.generics.is_empty() && def.ret.is_none() {
@@ -1434,13 +1433,13 @@ pub fn compile_fn_body(
     };
     let mut unknowns = BTreeMap::new();
     for generic in def.generics.iter() {
-        inner_schema.write()?.type_decls.insert(
+        schema.write()?.type_decls.insert(
             generic.get().clone(),
             Located::new(
                 Decl {
                     public: false,
                     extern_: true,
-                    fn_arg: true,
+                    is_arg: true,
                     name: generic.clone(),
                     value: mkcref(MType::Name(generic.clone())),
                 },
@@ -1466,22 +1465,22 @@ pub fn compile_fn_body(
     let mut compiled_args = Vec::new();
 
     let process_arg = |arg: &ast::FnArg| {
-        if inner_schema.read()?.expr_decls.get(&arg.name).is_some() {
+        if schema.read()?.expr_decls.get(&arg.name).is_some() {
             return Err(CompileError::duplicate_entry(vec![arg.name.clone()]));
         }
-        let mut type_ = resolve_type(compiler.clone(), inner_schema.clone(), &arg.type_)?;
+        let mut type_ = resolve_type(compiler.clone(), schema.clone(), &arg.type_)?;
         if compile_body {
             type_ = type_.substitute(&unknowns)?;
         }
 
         let stype = SType::new_mono(type_.clone());
-        inner_schema.write()?.expr_decls.insert(
+        schema.write()?.expr_decls.insert(
             arg.name.get().clone(),
             Located::new(
                 Decl {
                     public: false,
                     extern_: true,
-                    fn_arg: true,
+                    is_arg: true,
                     name: arg.name.clone(),
                     value: STypedExpr {
                         type_: stype.clone(),
@@ -1498,7 +1497,7 @@ pub fn compile_fn_body(
             arg.name.location().clone(),
             None,
         )?;
-        inner_schema
+        schema
             .write()?
             .externs
             .insert(arg.name.get().clone(), type_.clone());
@@ -1519,7 +1518,7 @@ pub fn compile_fn_body(
     };
 
     let mut ret_type = if let Some(ret) = &def.ret {
-        resolve_type(compiler.clone(), inner_schema.clone(), ret)?
+        resolve_type(compiler.clone(), schema.clone(), ret)?
     } else if def.generics.is_empty() {
         MType::new_unknown("return")
     } else {
@@ -1554,10 +1553,9 @@ pub fn compile_fn_body(
                 },
                 true,
             ),
-            ast::FnBody::Expr(expr) => (
-                compile_expr(compiler.clone(), inner_schema.clone(), expr)?,
-                false,
-            ),
+            ast::FnBody::Expr(expr) => {
+                (compile_expr(compiler.clone(), schema.clone(), expr)?, false)
+            }
         };
 
         ret_type.unify(&compiled.type_)?;
@@ -1566,7 +1564,7 @@ pub fn compile_fn_body(
             Ok(mkcref(match &*expr {
                 Expr::NativeFn(..) => expr.clone(),
                 _ => Expr::Fn(FnExpr {
-                    inner_schema: inner_schema.clone(),
+                    inner_schema: schema.clone(),
                     body: if is_sql {
                         FnBody::SQLBuiltin
                     } else {

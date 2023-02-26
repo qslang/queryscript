@@ -1,6 +1,7 @@
 {
     "compile_errors": [],
     "decls": {
+        "let slices": [Utf8],
         "let users": [{
         	id Int32,
         	org_id Int32,
@@ -188,6 +189,31 @@
                     ),
                 ),
                 value: "| 1 | 2 |\n|---|---|\n| 1 | 2 |\n| 1 | 2 |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "'month'",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "'day'",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| 'month' | 'day' |\n|---------|-------|\n| month   | day   |",
             },
         ),
     ],

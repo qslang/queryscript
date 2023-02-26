@@ -379,7 +379,7 @@ pub fn compile_reference(
                 Decl {
                     public: true,
                     extern_: false,
-                    fn_arg: false,
+                    is_arg: false,
                     name: Located::new(url.db_name(), loc),
                     value: STypedExpr {
                         type_: SType::new_mono(mkcref(MType::Generic(Located::new(
@@ -425,7 +425,7 @@ pub fn compile_reference(
     };
 
     if let Some(ident) = path.last() {
-        let kind = if decl.fn_arg {
+        let kind = if decl.is_arg {
             SymbolKind::Argument
         } else {
             SymbolKind::Value
@@ -1072,11 +1072,55 @@ where
                 body: ranges,
             } = cunwrap(ranges.await?)?;
 
-            if !names.params.is_empty() {
-                return Err(CompileError::unimplemented(
-                    loc.clone(),
-                    "ForEach with external parameters",
-                ));
+            // First, inline as much as possible. This is important because we need to at least be
+            // able to process the range as an array (even if the array's elements are params).
+            let mut inlined_ranges = Vec::new();
+            let mut inlined_names = SQLNames::new();
+            for range in ranges {
+                let range_expr = Expr::native_sql(Arc::new(SQL {
+                    names: names.clone(),
+                    body: SQLBody::Expr(range.range.as_ref().clone()),
+                }));
+                let inlined = inline_params(&range_expr).await?;
+                match inlined {
+                    Expr::SQL(expr, None) => {
+                        inlined_names.extend(expr.names.clone());
+
+                        inlined_ranges.push(sqlast::LoopRange {
+                            item: range.item,
+                            range: Box::new(expr.body.as_expr()?),
+                        })
+                    }
+                    _ => {
+                        return Err(CompileError::internal(
+                            loc.clone(),
+                            "ForEach range transformed into non-sql expression",
+                        ))
+                    }
+                }
+            }
+            let ranges = inlined_ranges;
+            let names = names;
+
+            let schema = Schema::derive(schema)?;
+            for (name, expr) in names.params {
+                let stype = SType::new_mono(expr.type_.clone());
+                schema.write()?.expr_decls.insert(
+                    name.clone(),
+                    Located::new(
+                        Decl {
+                            public: false,
+                            extern_: true,
+                            is_arg: true,
+                            name: Located::new(name.clone(), SourceLocation::Unknown),
+                            value: STypedExpr {
+                                type_: stype,
+                                expr: mkcref(expr.expr.as_ref().clone()),
+                            },
+                        },
+                        loc.clone(),
+                    ),
+                );
             }
 
             let mut substituted = Vec::new();
@@ -2095,10 +2139,10 @@ where
                     )?);
                 }
             }
-            _ => {
+            o => {
                 return Err(CompileError::invalid_foreach(
                     loc.clone(),
-                    "foreach range expected to be a literal array",
+                    &format!("foreach range expected to be a literal array (got {:?})", o),
                 ));
             }
         };

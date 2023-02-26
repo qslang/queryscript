@@ -18,6 +18,14 @@ let cte_prep =
         m.activity = 'customer_churn_committed'
 ;
 
+let time_slices = ['month', 'day'];
+
+SELECT
+  for slice in time_slices {
+    slice
+  }
+;
+
 let cte_grouping_sets =
   select
     date_trunc('month', timestamp)::date as metric_month,
