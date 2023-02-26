@@ -190,7 +190,7 @@ impl ConnectionSchema {
                     Decl {
                         public: true,
                         extern_: false,
-                        fn_arg: false,
+                        is_arg: false,
                         name: ident.clone(),
                         value: STypedExpr {
                             type_: SType::new_mono(external_type),

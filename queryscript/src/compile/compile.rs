@@ -1035,7 +1035,7 @@ fn add_decls<E: Entry>(
                 Decl {
                     public: stmt.export,
                     extern_: *extern_,
-                    fn_arg: false,
+                    is_arg: false,
                     name: name.clone(),
                     value: value.clone(),
                 },
@@ -1439,7 +1439,7 @@ pub fn compile_fn_body(
                 Decl {
                     public: false,
                     extern_: true,
-                    fn_arg: true,
+                    is_arg: true,
                     name: generic.clone(),
                     value: mkcref(MType::Name(generic.clone())),
                 },
@@ -1480,7 +1480,7 @@ pub fn compile_fn_body(
                 Decl {
                     public: false,
                     extern_: true,
-                    fn_arg: true,
+                    is_arg: true,
                     name: arg.name.clone(),
                     value: STypedExpr {
                         type_: stype.clone(),

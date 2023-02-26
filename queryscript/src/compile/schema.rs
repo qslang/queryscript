@@ -1165,7 +1165,7 @@ impl Entry for ExprEntry {
 pub struct Decl<Entry: Clone> {
     pub public: bool,
     pub extern_: bool,
-    pub fn_arg: bool,
+    pub is_arg: bool,
     pub name: Located<Ident>,
     pub value: Entry,
 }

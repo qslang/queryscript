@@ -379,7 +379,7 @@ pub fn compile_reference(
                 Decl {
                     public: true,
                     extern_: false,
-                    fn_arg: false,
+                    is_arg: false,
                     name: Located::new(url.db_name(), loc),
                     value: STypedExpr {
                         type_: SType::new_mono(mkcref(MType::Generic(Located::new(
@@ -425,7 +425,7 @@ pub fn compile_reference(
     };
 
     if let Some(ident) = path.last() {
-        let kind = if decl.fn_arg {
+        let kind = if decl.is_arg {
             SymbolKind::Argument
         } else {
             SymbolKind::Value
@@ -1111,7 +1111,7 @@ where
                         Decl {
                             public: false,
                             extern_: true,
-                            fn_arg: true, // XXX: This should probably be renamed to "arg"
+                            is_arg: true,
                             name: Located::new(name.clone(), SourceLocation::Unknown),
                             value: STypedExpr {
                                 type_: stype,
