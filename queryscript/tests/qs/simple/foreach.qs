@@ -30,11 +30,9 @@ select
     }
 ;
 
-/*
-SELECT foreach ([a, b] AS item) {
-    item AS IDENT("metric_", item)
-} FROM foo;
-*/
+SELECT for item in [id, org_id] {
+    item AS f"metric_{item}"
+} FROM users;
 
 /*
 SELECT for item in [users, org_id] {

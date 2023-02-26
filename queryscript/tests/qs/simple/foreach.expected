@@ -216,5 +216,30 @@
                 value: "| 'month' | 'day' |\n|---------|-------|\n| month   | day   |",
             },
         ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "metric_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "metric_org_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| metric_id | metric_org_id |\n|-----------|---------------|\n| 1         | 1             |\n| 2         | 1             |",
+            },
+        ),
     ],
 }

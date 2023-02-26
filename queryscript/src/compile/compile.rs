@@ -144,7 +144,8 @@ pub struct ParsedFile {
 
 #[derive(Debug, Clone)]
 pub struct Compiler {
-    runtime: Ref<tokio::runtime::Runtime>,
+    // XXX Undo this
+    pub runtime: Ref<tokio::runtime::Runtime>,
     data: Ref<CompilerData>,
     builtins: Ref<Schema>,
 }

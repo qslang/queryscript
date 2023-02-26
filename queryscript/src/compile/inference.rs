@@ -10,6 +10,8 @@ use crate::compile::error::*;
 use crate::compile::schema::{mkref, Ref};
 use crate::runtime;
 
+use super::schema::Located;
+
 pub trait Constrainable: Clone + fmt::Debug + Send + Sync {
     fn unify(&self, other: &Self) -> Result<()> {
         Err(CompileError::internal(
@@ -47,6 +49,8 @@ where
 }
 
 impl Constrainable for Ident {}
+impl Constrainable for Located<Ident> {}
+impl Constrainable for String {}
 impl Constrainable for () {
     fn unify(&self, _other: &Self) -> Result<()> {
         Ok(())
@@ -74,6 +78,7 @@ where
         }
     }
 }
+
 impl<T> Constrainable for Vec<T>
 where
     T: Constrainable,
@@ -99,6 +104,7 @@ where
         Ok(())
     }
 }
+
 impl<K, V> Constrainable for BTreeMap<K, V>
 where
     K: Constrainable,

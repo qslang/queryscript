@@ -1,0 +1,94 @@
+{
+    "compile_errors": [
+        (
+            Some(
+                4,
+            ),
+            Unimplemented {
+                what: "Format string values: f'{ss}'",
+                backtrace: None,
+                loc: Range(
+                    "tests/qs/trivial/fmt.qs",
+                    Range {
+                        start: Location {
+                            line: 6,
+                            column: 1,
+                        },
+                        end: Location {
+                            line: 6,
+                            column: 14,
+                        },
+                    },
+                ),
+            },
+        ),
+    ],
+    "decls": {
+        "let s": Utf8,
+        "let slices": [Utf8],
+        "let ss": Utf8,
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "foo_month",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| foo_month |\n|-----------|\n| 1         |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "s",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| s |\n|---|\n| 1 |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "metric_month",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "metric_day",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| metric_month | metric_day |\n|--------------|------------|\n| month        | day        |",
+            },
+        ),
+    ],
+}

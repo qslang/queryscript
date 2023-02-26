@@ -135,6 +135,13 @@ pub enum CompileError {
         loc: ErrorLocation,
     },
 
+    #[snafu(display("Unknown format string parameter: {}", name))]
+    UnknownFormatStringParamError {
+        name: String,
+        backtrace: Option<Backtrace>,
+        loc: ErrorLocation,
+    },
+
     #[snafu(display("{}", sources.first().unwrap()))]
     Multiple {
         // This is assumed to be non-empty
@@ -217,6 +224,14 @@ impl CompileError {
         .build();
     }
 
+    pub fn unknown_format_param(loc: ErrorLocation, name: &str) -> CompileError {
+        return UnknownFormatStringParamSnafu {
+            loc,
+            name: name.to_string(),
+        }
+        .build();
+    }
+
     pub fn internal(loc: ErrorLocation, what: &str) -> CompileError {
         return InternalSnafu {
             loc,
@@ -289,6 +304,7 @@ impl PrettyError for CompileError {
             CompileError::ScalarSubselectError { loc, .. } => loc.clone(),
             CompileError::InvalidConnectionError { loc, .. } => loc.clone(),
             CompileError::InvalidForEachError { loc, .. } => loc.clone(),
+            CompileError::UnknownFormatStringParamError { loc, .. } => loc.clone(),
             CompileError::Multiple { sources } => sources.first().unwrap().location(),
         }
     }
