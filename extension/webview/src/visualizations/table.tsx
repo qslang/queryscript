@@ -41,7 +41,7 @@ export const Table = ({ data, schema }: TableProps) => {
     <>
       <VSCodeDataGrid
         aria-label="Results"
-        gridTemplateColumns={"1fr ".repeat(fields.length)}
+        gridTemplateColumns={"minmax(120px, 1fr) ".repeat(fields.length)}
       >
         <VSCodeDataGridRow row-type="header">
           {fields.map((field, idx) => (
@@ -54,7 +54,7 @@ export const Table = ({ data, schema }: TableProps) => {
           <VSCodeDataGridRow>
             {fields.map((field, idx) => (
               <VSCodeDataGridCell grid-column={idx + 1}>
-                {normalizeForDisplay(row[field.name])}
+                {normalizeForDisplay(row[field.name as string])}
               </VSCodeDataGridCell>
             ))}
           </VSCodeDataGridRow>
