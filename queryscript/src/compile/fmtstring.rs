@@ -64,17 +64,15 @@ impl StringFormatter {
         }
     }
 
-    pub fn format(self, names: BTreeMap<String, String>) -> crate::compile::error::Result<String> {
+    pub fn format(self, names: BTreeMap<String, String>) -> String {
         self.segments
             .into_iter()
             .map(|s| match s {
-                Segment::Literal(s) => Ok(s),
-                Segment::Format(s) => names.get(&s).cloned().ok_or_else(|| {
-                    CompileError::unknown_format_param(
-                        self.loc.clone(),
-                        &format!("Unknown format specifier: {}", s),
-                    )
-                }),
+                Segment::Literal(s) => s,
+                Segment::Format(s) => names
+                    .get(&s)
+                    .cloned()
+                    .expect(&format!("Unknown format specifier: {}", s)),
             })
             .collect()
     }
@@ -127,7 +125,7 @@ impl StringFormatter {
             value_names.insert(name, result.to_string());
         }
 
-        Ok(self.format(value_names)?)
+        Ok(self.format(value_names))
     }
 }
 
