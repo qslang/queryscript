@@ -18,27 +18,23 @@ let cte_prep =
         m.activity = 'customer_churn_committed'
 ;
 
-let time_slices = ['month', 'day'];
-
-SELECT
-  for slice in time_slices {
-    slice
-  }
-;
+let date_slices = ['month', 'day'];
+let metric_slices = ['segment', 'channel', 'plan_type'];
 
 let cte_grouping_sets =
   select
-    date_trunc('month', timestamp)::date as metric_month,
-      grouping(metric_month) as month_bit,
-    date_trunc('day', timestamp)::date as metric_day,
-      grouping(metric_day) as day_bit,
+    for slice in date_slices {
+      date_trunc(slice, timestamp)::date as f"metric_{slice}",
+      grouping(f"metric_{slice}") as f"{slice}_bit",
+    },
+
+
+    for slice in metric_slices {
+      concat('{"dim_name": "', slice, '", "dim_value": "', f"{slice}", '"}') as f"combination_{slice}",
+      grouping(f"combination_{slice}") as f"{slice}_bit",
+    },
+
     'Total' as total_object,
-    concat('{"dim_name": "segment", "dim_value": "', segment , '"}') as combination_1,
-    concat('{"dim_name": "channel", "dim_value": "', channel , '"}') as combination_2,
-    concat('{"dim_name": "plan_type", "dim_value": "', plan_type , '"}') as combination_3,
-    grouping(combination_1) as combination_1_bit,
-    grouping(combination_2) as combination_2_bit,
-    grouping(combination_3) as combination_3_bit,
     grouping(total_object) as total_bit,
     -- select null returns a strange type in duckdb
     -- https://github.com/qscl/queryscript/issues/73
@@ -49,13 +45,13 @@ let cte_grouping_sets =
     cte_prep
   where timestamp between '2014-01-01'::timestamp and current_date() + interval 365 day
   group by grouping sets (
-    (metric_month, combination_1),
-      (metric_month, combination_2),
-      (metric_month, combination_3),
+    (metric_month, combination_segment),
+      (metric_month, combination_channel),
+      (metric_month, combination_plan_type),
       (metric_month, total_object),
-    (metric_day, combination_1),
-      (metric_day, combination_2),
-      (metric_day, combination_3),
+    (metric_day, combination_segment),
+      (metric_day, combination_channel),
+      (metric_day, combination_plan_type),
       (metric_day, total_object)
     )
 ;

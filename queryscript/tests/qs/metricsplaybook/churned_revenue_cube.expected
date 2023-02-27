@@ -1,5 +1,60 @@
 {
-    "compile_errors": [],
+    "compile_errors": [
+        (
+            None,
+            NoSuchEntry {
+                path: [
+                    "combination_1_bit",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            None,
+            NoSuchEntry {
+                path: [
+                    "combination_2_bit",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            None,
+            NoSuchEntry {
+                path: [
+                    "combination_3_bit",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            None,
+            NoSuchEntry {
+                path: [
+                    "combination_1",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            None,
+            NoSuchEntry {
+                path: [
+                    "combination_2",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            None,
+            NoSuchEntry {
+                path: [
+                    "combination_3",
+                ],
+                backtrace: None,
+            },
+        ),
+    ],
     "decls": {
         "let contract_stream": [{
         	id Int64,
@@ -17,30 +72,19 @@
             None,
         ),
         }],
-        "let cte_final": [{
-        	metric_model Utf8,
-        	is_snapshot_reliant_metric Boolean,
-        	anchor_date Utf8,
-        	date_grain Utf8,
-        	metric_date Date32,
-        	slice_object Utf8,
-        	slice_dimension Utf8,
-        	slice_value Utf8,
-        	metric_calculation Utf8,
-        	metric_value Float64,
-        }],
+        "let cte_final": [?async_slot?],
         "let cte_grouping_sets": [{
         	metric_month Date32,
         	month_bit Int64,
         	metric_day Date32,
         	day_bit Int64,
+        	combination_segment Utf8,
+        	segment_bit Int64,
+        	combination_channel Utf8,
+        	channel_bit Int64,
+        	combination_plan_type Utf8,
+        	plan_type_bit Int64,
         	total_object Utf8,
-        	combination_1 Utf8,
-        	combination_2 Utf8,
-        	combination_3 Utf8,
-        	combination_1_bit Int64,
-        	combination_2_bit Int64,
-        	combination_3_bit Int64,
         	total_bit Int64,
         	metric_calculation Utf8,
         	metric_value SumAgg<Float64>,
@@ -58,6 +102,7 @@
         	activity Utf8,
         	plan_type Utf8,
         }],
+        "let date_slices": [Utf8],
         "let dim_customer": [{
         	id Int64,
         	segment Utf8,
@@ -68,34 +113,9 @@
         ),
         	cohort Utf8,
         }],
-        "let time_slices": [Utf8],
+        "let metric_slices": [Utf8],
     },
     "queries": [
-        Ok(
-            TypedValue {
-                type_: List(
-                    Record(
-                        [
-                            Field {
-                                name: "'month'",
-                                type_: Atom(
-                                    Utf8,
-                                ),
-                                nullable: true,
-                            },
-                            Field {
-                                name: "'day'",
-                                type_: Atom(
-                                    Utf8,
-                                ),
-                                nullable: true,
-                            },
-                        ],
-                    ),
-                ),
-                value: "| 'month' | 'day' |\n|---------|-------|\n| month   | day   |",
-            },
-        ),
         Ok(
             TypedValue {
                 type_: List(
@@ -114,22 +134,10 @@
                 value: "| COUNT(*) |\n|----------|\n| 731      |",
             },
         ),
-        Ok(
-            TypedValue {
-                type_: List(
-                    Record(
-                        [
-                            Field {
-                                name: "count(*)",
-                                type_: Atom(
-                                    Int64,
-                                ),
-                                nullable: true,
-                            },
-                        ],
-                    ),
-                ),
-                value: "| count(*) |\n|----------|\n| 731      |",
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?async_slot?)",
+                backtrace: None,
             },
         ),
     ],
