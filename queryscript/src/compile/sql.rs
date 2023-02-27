@@ -2255,8 +2255,8 @@ impl CompileSQL for sqlast::LoopRange {
 
 #[derive(Clone, Debug)]
 struct CompiledCaseArm {
-    condition: TypedSQL,
-    result: TypedSQL,
+    condition: CTypedSQL,
+    result: CTypedSQL,
 }
 
 impl Constrainable for CompiledCaseArm {}
@@ -2289,6 +2289,17 @@ fn compile_case_arm_expr(
                 loc,
                 &item.condition,
             )?;
+            mkcref(vec![CompiledCaseArm {
+                condition: CTypedSQL {
+                    type_: condition.type_.clone(),
+                    sql: condition.sql.clone(),
+                },
+                result: CTypedSQL {
+                    type_: condition.type_.clone(),
+                    sql: condition.sql.clone(),
+                },
+            }])
+            /*
             let result = compile_sqlarg(
                 compiler.clone(),
                 schema.clone(),
@@ -2297,19 +2308,22 @@ fn compile_case_arm_expr(
                 &item.result,
             )?;
             compiler.async_cref(async move {
-                let condition_sql = condition.sql.await?;
-                let result_sql = result.sql.await?;
+                // let condition_sql = condition.sql.await?;
+                // let result_sql = result.sql.await?;
+                // let condition_sql = condition_sql.read()?;
+                // let result_sql = result_sql.read()?;
                 Ok(mkcref(vec![CompiledCaseArm {
-                    condition: TypedSQL {
+                    condition: CTypedSQL {
                         type_: condition.type_.clone(),
-                        sql: condition_sql.clone(),
+                        sql: condition.sql.clone(),
                     },
-                    result: TypedSQL {
-                        type_: result.type_.clone(),
-                        sql: result_sql.clone(),
+                    result: CTypedSQL {
+                        type_: condition.type_.clone(),
+                        sql: condition.sql.clone(),
                     },
                 }]))
             })?
+            */
         }
     })
 }
@@ -2696,7 +2710,7 @@ pub fn compile_sqlexpr(
 
             let full_expr = compiler.clone().async_cref({
                 let compiler = compiler.clone();
-                async move {
+                async_backtrace::location!().frame(async move {
                     let arms = arms.await?;
                     let arms = arms.read()?.clone();
 
@@ -2707,29 +2721,26 @@ pub fn compile_sqlexpr(
                     }
                     eprintln!("ARMS 1");
 
-                    // If there's an operand, then unify the conditions against it, otherwise
-                    // unify them to bool.
-                    let condition_type = match &c_operand {
-                        Some(o) => o.type_.clone(),
-                        None => resolve_global_atom(compiler.clone(), "bool")?,
-                    };
+                    /*
+                                       // If there's an operand, then unify the conditions against it, otherwise
+                                       // unify them to bool.
+                                       let condition_type = match &c_operand {
+                                           Some(o) => o.type_.clone(),
+                                           None => resolve_global_atom(compiler.clone(), "bool")?,
+                                       };
 
-                    eprintln!("ARMS 2");
-                    for arm in all_arms.iter() {
-                        arm.condition.type_.unify(&condition_type)?;
-                    }
-
+                                       eprintln!("ARMS 2");
+                                       for arm in all_arms.iter() {
+                                           arm.condition.type_.unify(&condition_type)?;
+                                       }
+                    */
                     let mut all_results = Vec::new();
                     for arm in all_arms.iter() {
                         all_results.push(arm.result.clone());
                     }
 
                     if let Some(e) = &else_result {
-                        let e_sql = e.sql.clone().await?;
-                        all_results.push(TypedSQL {
-                            type_: e.type_.clone(),
-                            sql: e_sql.clone(),
-                        });
+                        all_results.push(e.clone());
                     }
 
                     eprintln!("ARMS 3");
@@ -2766,25 +2777,23 @@ pub fn compile_sqlexpr(
 
                     let mut arms = Vec::new();
                     for (arm, c_result) in all_arms.into_iter().zip(c_results) {
-                        eprintln!("waiting on condition: {:?}", arm.condition.sql);
-                        let condition = arm.condition.sql.clone();
-                        eprintln!("condition");
-                        let result = c_result.sql.clone();
-                        eprintln!("result");
+                        let condition = arm.condition.sql.await?;
+                        // let result = c_result.sql.await?;
                         let condition = condition.read()?;
-                        let result = result.read()?;
+                        // let result = result.read()?;
                         names.extend(condition.names.clone());
-                        names.extend(result.names.clone());
+                        // names.extend(result.names.clone());
                         arms.push(sqlast::ForEachOr::Item(sqlast::CaseArm {
                             condition: condition.body.as_expr()?,
-                            result: result.body.as_expr()?,
+                            result: condition.body.as_expr()?,
+                            // result.body.as_expr()?,
                         }));
                     }
                     eprintln!("ARMS 7");
 
                     let else_result = match c_else_result {
                         Some(ref o) => {
-                            let operand = o.sql.clone();
+                            let operand = o.sql.clone().await?;
                             let operand = operand.read()?;
                             names.extend(operand.names.clone());
                             Some(Box::new(operand.body.as_expr()?))
@@ -2807,7 +2816,7 @@ pub fn compile_sqlexpr(
                             body: SQLBody::Expr(body),
                         }))),
                     }))
-                }
+                })
             })?;
 
             CTypedExpr::split(&compiler, full_expr)?

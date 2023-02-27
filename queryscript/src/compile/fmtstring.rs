@@ -83,6 +83,7 @@ impl StringFormatter {
         schema: &Ref<Schema>,
         loc: &SourceLocation,
     ) -> Result<String> {
+        eprintln!("RESOLVING FORMAT STRING {:?}", self);
         let mut names = BTreeMap::new();
         for segment in self.segments.iter() {
             let param_name = match segment {
@@ -125,6 +126,7 @@ impl StringFormatter {
             value_names.insert(name, result.to_string());
         }
 
+        eprintln!("RESOLVED FORMAT STRING");
         Ok(self.format(value_names))
     }
 }

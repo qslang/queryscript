@@ -309,6 +309,14 @@ impl Compiler {
                 )
             );
 
+            eprintln!("SUCCESS TASK TREE 1:");
+            eprintln!("{}", async_backtrace::taskdump_tree(true));
+
+            let drive_result = self.drive().await;
+
+            eprintln!("SUCCESS TASK TREE 2: {:?}", drive_result);
+            eprintln!("{}", async_backtrace::taskdump_tree(true));
+
             result
         })
     }
@@ -455,11 +463,14 @@ impl Compiler {
         let mut data = self.data.write()?;
         let slot = CRef::<T>::new_unknown("async_slot");
         let ret = slot.clone();
-        data.handles
-            .push_back(self.runtime.read()?.spawn(async move {
-                let r = f.await?;
-                slot.unify(&r)
-            }));
+        data.handles.push_back(
+            self.runtime
+                .read()?
+                .spawn(async_backtrace::location!().frame(async move {
+                    let r = f.await?;
+                    slot.unify(&r)
+                })),
+        );
 
         Ok(ret)
     }

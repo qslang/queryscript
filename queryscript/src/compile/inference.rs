@@ -243,6 +243,8 @@ impl<T: 'static + Constrainable> CRef<T> {
         match &*self.find().unwrap().0.read()? {
             Constrained::Known { value, .. } => Ok(value.clone()),
             Constrained::Unknown { .. } => {
+                eprintln!("TASK TREE:");
+                eprintln!("{}", async_backtrace::taskdump_tree(true));
                 runtime::error::fail!("Unknown type cannot exist at runtime ({:?})", self)
             }
             Constrained::Ref(_) => runtime::error::fail!("Canon value should never be a ref"),
