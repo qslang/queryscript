@@ -45,15 +45,13 @@ let cte_grouping_sets =
     cte_prep
   where timestamp between '2014-01-01'::timestamp and current_date() + interval 365 day
   group by grouping sets (
-    (metric_month, combination_segment),
-      (metric_month, combination_channel),
-      (metric_month, combination_plan_type),
-      (metric_month, total_object),
-    (metric_day, combination_segment),
-      (metric_day, combination_channel),
-      (metric_day, combination_plan_type),
-      (metric_day, total_object)
-    )
+    for date_s in date_slices, metric_s in metric_slices {
+      (f"metric_{date_s}", f"combination_{metric_s}"),
+    },
+    for date_s in date_slices {
+      (f"metric_{date_s}", "total_object"),
+    },
+  )
 ;
 
 SELECT COUNT(*) FROM cte_grouping_sets;

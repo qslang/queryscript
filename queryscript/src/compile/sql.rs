@@ -1056,6 +1056,70 @@ pub fn compile_gb_ob_expr(
     })
 }
 
+pub fn compile_gb_ob_set(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    scope: &Ref<SQLScope>,
+    loc: &SourceLocation,
+    expr: &sqlast::ForEachOr<Vec<sqlast::Expr>>,
+) -> Result<CRef<Vec<Ref<SQL<CRef<MType>>>>>> {
+    Ok(match expr {
+        sqlast::ForEachOr::ForEach(foreach) => {
+            let compiled = compile_foreach(
+                compiler,
+                schema,
+                scope,
+                loc,
+                foreach,
+                |_, _, _, _| Ok(()),
+                |compiler, schema, scope, loc, expr, _| {
+                    compile_gb_ob_set(compiler, schema, scope, loc, expr)
+                },
+            )?;
+            compiled
+        }
+        sqlast::ForEachOr::Item(set) => {
+            let mut compiled_set = Vec::new();
+            for expr in set {
+                let expr =
+                    compile_gb_ob_expr(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
+                compiled_set.push(expr);
+            }
+            combine_crefs(compiled_set)?
+        }
+    })
+}
+
+pub fn compile_gb_ob_multi_expr(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    scope: &Ref<SQLScope>,
+    loc: &SourceLocation,
+    expr: &sqlast::ForEachOr<sqlast::Expr>,
+) -> Result<CRef<Vec<Ref<SQL<CRef<MType>>>>>> {
+    Ok(match expr {
+        sqlast::ForEachOr::ForEach(foreach) => {
+            let compiled = compile_foreach(
+                compiler,
+                schema,
+                scope,
+                loc,
+                foreach,
+                |_, _, _, _| Ok(()),
+                |compiler, schema, scope, loc, expr, _| {
+                    compile_gb_ob_multi_expr(compiler, schema, scope, loc, expr)
+                },
+            )?;
+            compiled
+        }
+        sqlast::ForEachOr::Item(expr) => {
+            let expr =
+                compile_gb_ob_expr(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
+            combine_crefs(vec![expr])?
+        }
+    })
+}
+
 fn compile_foreach<T, O, LF, LS, C>(
     compiler: &Compiler,
     schema: &Ref<Schema>,
@@ -1587,12 +1651,13 @@ pub fn compile_select(
 
             let mut group_by = Vec::new();
             for gb in &select.group_by {
-                let sql =
-                    compile_gb_ob_expr(compiler.clone(), schema.clone(), scope.clone(), &loc, gb)?
-                        .await?;
-                let sql = sql.read()?;
-                names.extend(sql.names.clone());
-                group_by.push(sql.body.as_expr()?);
+                let exprs = compile_gb_ob_multi_expr(&compiler, &schema, &scope, &loc, gb)?.await?;
+                let exprs = exprs.read()?;
+                for sql in exprs.iter() {
+                    let sql = sql.read()?;
+                    names.extend(sql.names.clone());
+                    group_by.push(sqlast::ForEachOr::Item(sql.body.as_expr()?));
+                }
             }
 
             let mut ret = select.clone();
@@ -3402,18 +3467,7 @@ pub fn compile_sqlexpr(
         sqlast::Expr::GroupingSets(sets) => {
             let mut compiled_sets = Vec::new();
             for set in sets {
-                let mut compiled_set = Vec::new();
-                for expr in set {
-                    let expr = compile_gb_ob_expr(
-                        compiler.clone(),
-                        schema.clone(),
-                        scope.clone(),
-                        loc,
-                        expr,
-                    )?;
-                    compiled_set.push(expr);
-                }
-                compiled_sets.push(combine_crefs(compiled_set)?);
+                compiled_sets.push(compile_gb_ob_set(&compiler, &schema, &scope, loc, set)?);
             }
 
             let compiled_sets = combine_crefs(compiled_sets)?;
@@ -3432,7 +3486,7 @@ pub fn compile_sqlexpr(
                             names.extend(expr.names.clone());
                             set.push(expr.body.as_expr()?);
                         }
-                        sets.push(set);
+                        sets.push(sqlast::ForEachOr::Item(set));
                     }
 
                     Ok(mkcref(Expr::native_sql(Arc::new(SQL {

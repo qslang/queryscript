@@ -62,11 +62,9 @@ SELECT for item in id_types {
     f"{item}id"
 } FROM users;
 
-/*
-SELECT for item in [users, org_id] {
+SELECT for item in [id, org_id] {
     item
-} FROM foo
-GROUP BY for item in [users, org_id] {
+} FROM users
+GROUP BY for item in [id, org_id] {
     item
 };
-*/

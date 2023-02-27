@@ -900,6 +900,15 @@ impl<V: SQLVisitor, T: VisitSQL<V>> VisitSQL<V> for ForEach<T> {
     }
 }
 
+impl<V: SQLVisitor, T: VisitSQL<V>> VisitSQL<V> for ForEachOr<T> {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        match self {
+            ForEachOr::ForEach(f) => ForEachOr::ForEach(f.visit_sql(visitor)),
+            ForEachOr::Item(f) => ForEachOr::Item(f.visit_sql(visitor)),
+        }
+    }
+}
+
 impl<V: SQLVisitor, T: VisitSQL<V>> VisitSQL<V> for Vec<T> {
     fn visit_sql(&self, visitor: &V) -> Self {
         self.iter().map(|o| o.visit_sql(visitor)).collect()
