@@ -13,24 +13,6 @@
             None,
             NoSuchEntry {
                 path: [
-                    "combination_2_bit",
-                ],
-                backtrace: None,
-            },
-        ),
-        (
-            None,
-            NoSuchEntry {
-                path: [
-                    "combination_3_bit",
-                ],
-                backtrace: None,
-            },
-        ),
-        (
-            None,
-            NoSuchEntry {
-                path: [
                     "combination_1",
                 ],
                 backtrace: None,
@@ -40,7 +22,25 @@
             None,
             NoSuchEntry {
                 path: [
+                    "combination_2_bit",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            None,
+            NoSuchEntry {
+                path: [
                     "combination_2",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            None,
+            NoSuchEntry {
+                path: [
+                    "combination_3_bit",
                 ],
                 backtrace: None,
             },

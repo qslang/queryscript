@@ -56,13 +56,26 @@ let cte_grouping_sets =
 
 SELECT COUNT(*) FROM cte_grouping_sets;
 
+select
+        'churned_revenue_cube' as metric_model,
+        false as is_snapshot_reliant_metric,
+        'timestamp' as anchor_date,
+        case
+          for slice in date_slices {
+            when "month_bit" = 0 then 'month'
+          }
+          end as date_grain,
+from cte_grouping_sets;
+
+
 let cte_final = select
         'churned_revenue_cube' as metric_model,
         False as is_snapshot_reliant_metric,
         'timestamp' as anchor_date,
         case
-          when month_bit = 0 then 'month'
-          when day_bit = 0 then 'day'
+          for slice in date_slices {
+            when f"{slice}_bit" = 0 then slice
+          }
           end as date_grain,
         case
           when month_bit = 0 then metric_month

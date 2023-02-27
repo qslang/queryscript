@@ -24,6 +24,8 @@ use crate::types::{AtomicType, Field, FnType, Type};
 pub use crate::compile::inference::CRef;
 pub use ast::Ident;
 
+use super::Compiler;
+
 #[derive(Debug, Clone)]
 pub struct MField {
     pub name: Ident,
@@ -367,6 +369,21 @@ impl CTypedExpr {
         Ok(TypedExpr {
             type_: mkref(self.type_.must()?.read()?.to_runtime_type()?),
             expr: Arc::new(self.expr.must()?.read()?.to_runtime_type()?),
+        })
+    }
+
+    pub fn split(compiler: &Compiler, expr: CRef<Self>) -> Result<Self> {
+        let te = expr.clone();
+        Ok(CTypedExpr {
+            // type_: expr.then(|e| Ok(e.read()?.type_.clone()))?,
+            type_: compiler.async_cref(async move {
+                let te = te.await?;
+                let tt = te.read()?.type_.clone();
+                let tt = tt.await?;
+                let tt = tt.read()?;
+                Ok(mkcref(tt.clone()))
+            })?,
+            expr: expr.then(|e| Ok(e.read()?.expr.clone()))?,
         })
     }
 }
