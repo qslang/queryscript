@@ -180,6 +180,7 @@ pub fn eval<'a>(
                 // - For expressions and queries, check that the RecordBatch's type matches the
                 //   expected type from the compiler.
                 let expected_type = typed_expr.type_.read()?;
+                eprintln!("EXPECTED TYPE: {:?}", expected_type);
                 match body {
                     schema::SQLBody::Expr(_) => {
                         if rows.num_batches() != 1 {

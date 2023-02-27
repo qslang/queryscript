@@ -183,6 +183,7 @@ impl DuckDBEngine {
         }
 
         let query_string = format!("{}", query);
+        eprintln!("RUNNING QUERY: {}", query_string);
 
         let duckdb_params: Vec<&dyn duckdb::ToSql> = scalar_params
             .iter()
