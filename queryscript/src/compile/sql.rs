@@ -50,7 +50,8 @@ pub struct CTypedNameAndSQL {
 #[derive(Clone, Debug)]
 pub struct NameAndSQL {
     pub name: Located<Ident>,
-    pub sql: Arc<SQL<CRef<MType>>>,
+    pub type_: CRef<MType>,
+    pub sql: SQL<CRef<MType>>,
 }
 
 #[derive(Clone, Debug)]
@@ -1055,18 +1056,27 @@ pub fn compile_gb_ob_expr(
     })
 }
 
-fn compile_foreach<T, O, C>(
+fn compile_foreach<T, O, LF, LS, C>(
     compiler: &Compiler,
     schema: &Ref<Schema>,
     scope: &Ref<SQLScope>,
     loc: &SourceLocation,
     foreach: &sqlast::ForEach<T>,
+    loop_state_fn: LF,
     compile_fn: C,
 ) -> Result<CRef<Vec<O>>>
 where
     T: Clone + fmt::Debug + Send + Sync + VisitSQL<ParamInliner> + 'static,
     O: Clone + fmt::Debug + Send + Sync + 'static + Constrainable,
-    C: Fn(&Compiler, &Ref<Schema>, &Ref<SQLScope>, &SourceLocation, &T) -> Result<CRef<Vec<O>>>
+    LF: Fn(&Compiler, &Ref<Schema>, &Ref<SQLScope>, &SourceLocation) -> Result<LS> + Send + 'static,
+    C: Fn(
+            &Compiler,
+            &Ref<Schema>,
+            &Ref<SQLScope>,
+            &SourceLocation,
+            &T,
+            &mut LS,
+        ) -> Result<CRef<Vec<O>>>
         + Send
         + 'static,
 {
@@ -1144,6 +1154,8 @@ where
                 let inliner = ParamInliner::new(substitutions.clone());
                 let schema = Schema::derive(schema.clone())?;
 
+                let mut loop_state = loop_state_fn(&compiler, &schema, &scope, &loc)?;
+
                 // Although we substitute the loop items into the expressions (using param inlining), the loop
                 // variable may be used in formatting aliases, which are not visited by the param inliner.
                 // We save each of the loop items as a string value.
@@ -1194,7 +1206,8 @@ where
 
                 for expr in body.iter() {
                     let expr = expr.visit_sql(&inliner);
-                    let expr = compile_fn(&compiler, &schema, &scope, &loc, &expr)?;
+                    let expr =
+                        compile_fn(&compiler, &schema, &scope, &loc, &expr, &mut loop_state)?;
                     substituted.push(expr);
                 }
             }
@@ -1322,7 +1335,14 @@ fn compile_select_item(
     scope: &Ref<SQLScope>,
     loc: &SourceLocation,
     select_item: &sqlast::SelectItem,
+    projection_terms: &mut BTreeMap<Ident, CTypedSQL>,
 ) -> Result<CRef<Vec<CTypedNameAndSQL>>> {
+    // Construct a scope that includes the projection terms we've seen so far. We clone it so that
+    // each term can be compiled in parallel with the exact set of projection terms that it's
+    // allowed to see
+    let scope = mkref(scope.read()?.clone());
+    scope.write()?.projection_terms = projection_terms.clone();
+
     Ok(match select_item {
         sqlast::SelectItem::UnnamedExpr(expr) => {
             let compiled =
@@ -1349,7 +1369,7 @@ fn compile_select_item(
                 compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
             let name = Ident::from_formatted_sqlident(compiler, schema, loc, alias.get())?;
 
-            scope.write()?.add_projection_term(name.get(), &compiled)?;
+            projection_terms.insert(name.get().clone(), compiled.clone());
 
             mkcref(vec![CTypedNameAndSQL {
                 name,
@@ -1415,11 +1435,12 @@ fn compile_select_item(
         sqlast::SelectItem::ForEach(foreach) => compile_foreach(
             compiler,
             schema,
-            scope,
+            &scope,
             loc,
             foreach,
-            |compiler, schema, scope, loc, expr| {
-                compile_select_item(compiler, schema, scope, loc, expr)
+            |_compiler, _schema, _scope, _loc| Ok(BTreeMap::new()),
+            |compiler, schema, scope, loc, expr, mut projection_terms| {
+                compile_select_item(compiler, schema, scope, loc, expr, &mut projection_terms)
             },
         )?,
     })
@@ -1470,10 +1491,11 @@ pub fn compile_select(
 
     let (scope, from) = compile_from(&compiler, &schema, parent_scope.clone(), loc, &select.from)?;
 
+    let mut projection_terms = BTreeMap::new();
     let exprs = select
         .projection
         .iter()
-        .map(|p| compile_select_item(&compiler, &schema, &scope, loc, p))
+        .map(|p| compile_select_item(&compiler, &schema, &scope, loc, p, &mut projection_terms))
         .collect::<Result<Vec<_>>>()?;
 
     let projections = combine_crefs(exprs)?;
@@ -1515,7 +1537,8 @@ pub fn compile_select(
                     let n = b.name.clone();
                     proj_exprs.push(NameAndSQL {
                         name: n.clone(),
-                        sql: Arc::new(b.sql.await?.read()?.clone()),
+                        type_: b.type_.clone(),
+                        sql: b.sql.await?.read()?.clone(),
                     });
                 }
             }
@@ -1530,6 +1553,16 @@ pub fn compile_select(
                     alias: sqlexpr.name.to_sqlident(),
                     expr: sqlexpr.sql.body.as_expr()?,
                 });
+
+                // Now that each projection term has been compiled (with its own copy of scope), we can add the projection
+                // terms to the query's scope.
+                scope.write()?.projection_terms.insert(
+                    sqlexpr.name.get().clone(),
+                    CTypedSQL {
+                        type_: sqlexpr.type_.clone(),
+                        sql: mkcref(sqlexpr.sql.clone()),
+                    },
+                );
             }
             names.extend(from.names);
 
