@@ -2280,7 +2280,10 @@ fn compile_case_arm_expr(
                 &scope,
                 loc,
                 foreach,
-                compile_case_arm_expr,
+                |_, _, _, _| Ok(()),
+                |compiler, schema, scope, loc, expr, _| {
+                    compile_case_arm_expr(compiler, schema, scope, loc, expr)
+                },
             )?;
             fe
         }
