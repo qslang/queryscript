@@ -1,3 +1,4 @@
+use crate::error::MultiError;
 use object_store;
 use snafu::{Backtrace, Snafu};
 use std::num::ParseFloatError;
@@ -73,6 +74,13 @@ pub enum RuntimeError {
         #[snafu(backtrace)]
         source: Box<crate::compile::CompileError>,
     },
+
+    #[snafu(display("{}", sources.first().unwrap()))]
+    Multiple {
+        // This is assumed to be non-empty
+        //
+        sources: Vec<RuntimeError>,
+    },
 }
 
 impl RuntimeError {
@@ -115,6 +123,20 @@ impl From<crate::compile::CompileError> for RuntimeError {
     fn from(e: crate::compile::CompileError) -> RuntimeError {
         RuntimeError::CompileError {
             source: Box::new(e),
+        }
+    }
+}
+
+impl MultiError for RuntimeError {
+    fn new_multi_error(errs: Vec<Self>) -> Self {
+        RuntimeError::Multiple { sources: errs }
+    }
+    fn into_errors(self) -> Vec<Self> {
+        match self {
+            RuntimeError::Multiple { sources } => {
+                sources.into_iter().flat_map(|e| e.into_errors()).collect()
+            }
+            _ => vec![self],
         }
     }
 }

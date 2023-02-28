@@ -1,6 +1,10 @@
-use crate::compile::traverse::{SQLVisitor, VisitSQL};
 use sqlparser::{ast as sqlast, ast::Located};
+use std::cell::RefCell;
 use std::collections::HashMap;
+
+use super::error::RuntimeError;
+use crate::compile::traverse::{SQLVisitor, VisitSQL};
+use crate::error::MultiResult;
 
 pub trait Normalizer {
     fn quote_style(&self) -> Option<char>;
@@ -12,9 +16,20 @@ pub trait Normalizer {
     }
     fn params(&self) -> &HashMap<String, String>;
 
-    fn normalize<'s>(&'s self, stmt: &sqlast::Statement) -> sqlast::Statement {
-        let visitor = NormalizerVisitor::<'s, Self> { normalizer: &self };
-        stmt.visit_sql(&visitor)
+    fn normalize<'s>(
+        &'s self,
+        stmt: &sqlast::Statement,
+    ) -> MultiResult<sqlast::Statement, RuntimeError> {
+        let visitor = NormalizerVisitor::<'s, Self> {
+            normalizer: &self,
+            errors: RefCell::new(Vec::new()),
+        };
+        let mut result = MultiResult::new(stmt.visit_sql(&visitor));
+        for e in visitor.errors.into_inner() {
+            result.add_error(None, e);
+        }
+
+        result
     }
 }
 
@@ -23,6 +38,7 @@ where
     N: Normalizer + 'n + ?Sized,
 {
     normalizer: &'n N,
+    errors: RefCell<Vec<RuntimeError>>,
 }
 
 impl<'n, N> SQLVisitor for NormalizerVisitor<'n, N>
@@ -33,6 +49,17 @@ where
         &self,
         path: &Vec<Located<sqlast::Ident>>,
     ) -> Option<Vec<Located<sqlast::Ident>>> {
+        // If we encounter any format strings in the idents, then it's a bug (we should
+        // have resolved these in the compiler)
+        for p in path {
+            if matches!(p.get().quote_style, Some('f')) {
+                self.errors.borrow_mut().push(RuntimeError::new(&format!(
+                    "unresolved format string: {:?}",
+                    p.get()
+                )))
+            }
+        }
+
         let params = self.normalizer.params();
         if path.len() == 1 {
             let ident = &path[0];

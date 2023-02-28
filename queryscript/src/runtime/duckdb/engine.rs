@@ -161,7 +161,7 @@ impl DuckDBEngine {
 
         scalar_params.sort();
         let normalizer = DuckDBNormalizer::new(&scalar_params, &relation_params);
-        let query = normalizer.normalize(&query);
+        let query = normalizer.normalize(&query).as_result()?;
 
         {
             let relations = &mut conn_state.relations.lock()?;

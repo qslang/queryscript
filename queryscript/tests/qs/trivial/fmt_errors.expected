@@ -1,0 +1,66 @@
+{
+    "compile_errors": [
+        (
+            Some(
+                0,
+            ),
+            NoSuchEntry {
+                path: [
+                    "s",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            Some(
+                1,
+            ),
+            NoSuchEntry {
+                path: [
+                    "ss",
+                ],
+                backtrace: None,
+            },
+        ),
+        (
+            Some(
+                2,
+            ),
+            Unimplemented {
+                what: "Format string values: f'{ss}'",
+                backtrace: None,
+                loc: Range(
+                    "tests/qs/trivial/fmt_errors.qs",
+                    Range {
+                        start: Location {
+                            line: 3,
+                            column: 1,
+                        },
+                        end: Location {
+                            line: 3,
+                            column: 14,
+                        },
+                    },
+                ),
+            },
+        ),
+        (
+            None,
+            NoSuchEntry {
+                path: [
+                    "slices",
+                ],
+                backtrace: None,
+            },
+        ),
+    ],
+    "decls": {},
+    "queries": [
+        Err(
+            StringError {
+                what: "Unknown type cannot exist at runtime (?slot?)",
+                backtrace: None,
+            },
+        ),
+    ],
+}

@@ -27,6 +27,7 @@ use crate::{
 };
 
 use super::compile::ExternalTypeRank;
+use super::fmtstring::StringFormatter;
 
 const QS_NAMESPACE: &str = "__qs";
 
@@ -241,8 +242,20 @@ pub fn compile_sqlreference(
     sqlpath: &Vec<sqlast::Located<sqlast::Ident>>,
 ) -> Result<CTypedExpr> {
     let file = schema.read()?.file.clone();
-    let sqlpath = sqlpath.clone();
-    let path = sqlpath.to_path(file.clone());
+    let path = sqlpath
+        .iter()
+        .map(|i| {
+            Ident::from_formatted_sqlident(
+                &compiler,
+                &schema,
+                &SourceLocation::from_file_range(file.clone(), i.location().clone()),
+                i.get(),
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
+    // We need to roundtrip the sql path because we might have formatted it in the path expression above
+    let sqlpath: Vec<sqlast::Located<sqlast::Ident>> =
+        path.iter().map(|i| i.to_sqlident()).collect();
     let loc = path_location(&path);
     match sqlpath.len() {
         0 => {
@@ -1124,19 +1137,66 @@ where
             }
 
             let mut substituted = Vec::new();
-            for e in apply_foreach(
-                &compiler,
-                &schema,
-                &scope,
-                &loc,
-                &ranges,
-                BTreeMap::new(),
-                &body,
-            )?
-            .into_iter()
+            for substitutions in
+                expand_foreach(&compiler, &schema, &scope, &loc, &ranges, BTreeMap::new())?
+                    .into_iter()
             {
-                let expr = compile_fn(&compiler, &schema, &scope, &loc, &e)?;
-                substituted.push(expr);
+                let inliner = ParamInliner::new(substitutions.clone());
+                let schema = Schema::derive(schema.clone())?;
+
+                // Although we substitute the loop items into the expressions (using param inlining), the loop
+                // variable may be used in formatting aliases, which are not visited by the param inliner.
+                // We save each of the loop items as a string value.
+                for range in &ranges {
+                    let stype = SType::new_mono(mkcref(MType::Atom(Located::new(
+                        AtomicType::Utf8,
+                        SourceLocation::Unknown,
+                    ))));
+                    let item_name: Ident = range.item.get().into();
+                    let s_value = format!(
+                        "{}",
+                        substitutions
+                            .get(&item_name)
+                            .expect("missing loop variable substitution")
+                            .as_expr()?
+                    );
+
+                    // Format strings look better if string literals and idents are treated the same
+                    // way (i.e. without quotes)
+                    let s_value = s_value
+                        .strip_prefix("'")
+                        .map_or(s_value.clone(), |s| s.to_string())
+                        .strip_suffix("'")
+                        .map_or(s_value.clone(), |s| s.to_string());
+
+                    schema.write()?.expr_decls.insert(
+                        item_name.clone(),
+                        Located::new(
+                            Decl {
+                                public: false,
+                                extern_: true,
+                                is_arg: true,
+                                name: Located::new(item_name.clone(), SourceLocation::Unknown),
+                                value: STypedExpr {
+                                    type_: stype,
+                                    expr: mkcref(Expr::native_sql(Arc::new(SQL {
+                                        names: SQLNames::new(),
+                                        body: SQLBody::Expr(sqlast::Expr::Value(
+                                            sqlast::Value::SingleQuotedString(s_value),
+                                        )),
+                                    }))),
+                                },
+                            },
+                            loc.clone(),
+                        ),
+                    );
+                }
+
+                for expr in body.iter() {
+                    let expr = expr.visit_sql(&inliner);
+                    let expr = compile_fn(&compiler, &schema, &scope, &loc, &expr)?;
+                    substituted.push(expr);
+                }
             }
 
             let all_substituted = combine_crefs(substituted)?;
@@ -1206,19 +1266,54 @@ fn extract_renamings(
     ret
 }
 
+impl Ident {
+    fn from_formatted_sqlident(
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        loc: &SourceLocation,
+        sql_ident: &sqlast::Ident,
+    ) -> Result<Located<Ident>> {
+        let ident: Ident = sql_ident.into();
+        if !ident.is_format() {
+            return Ok(Located::new(ident, loc.clone()));
+        }
+
+        let fmt = StringFormatter::build((&ident).into(), loc.clone());
+        let s = fmt.resolve_format_string(compiler, schema, loc)?;
+
+        // Idents must be known at compile time for now
+        Ok(Located::new(s.into(), loc.clone()))
+    }
+}
+
 // If the expression is an identifier, then simply forward it along. In the case of a
 // compound identifier (e.g. table.foo), SQL semantics are to pick the last element (i.e.
 // foo) as the new name.
-fn expr_to_alias(expr: &sqlast::Expr) -> Ident {
-    match expr {
-        sqlast::Expr::Identifier(i) => i.get().into(),
-        sqlast::Expr::CompoundIdentifier(c) => c
-            .last()
-            .expect("Compound identifiers should have at least one element")
-            .get()
-            .into(),
-        _ => format!("{}", expr).into(),
-    }
+fn expr_to_alias(
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    expr: &sqlast::Expr,
+    loc: &SourceLocation,
+) -> Result<Located<Ident>> {
+    let file = schema.read()?.file.clone();
+    let (ident, loc) = match expr {
+        sqlast::Expr::Identifier(i) => (
+            i.get().clone(),
+            SourceLocation::from_file_range(file, i.location().clone()),
+        ),
+        sqlast::Expr::CompoundIdentifier(c) => {
+            let item = c
+                .last()
+                .expect("Compound identifiers should have at least one element");
+            (
+                item.get().clone(),
+                SourceLocation::from_file_range(file, item.location().clone()),
+            )
+        }
+        _ => (format!("{}", expr).as_str().into(), loc.clone()),
+    };
+
+    Ident::from_formatted_sqlident(compiler, schema, &loc, &ident)
 }
 
 fn compile_select_item(
@@ -1233,7 +1328,7 @@ fn compile_select_item(
             let compiled =
                 compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
 
-            let name = expr_to_alias(expr);
+            let name = expr_to_alias(&compiler, &schema, expr, loc)?.into_inner();
             let loc = loc.clone();
             compiler.async_cref(async move {
                 let sql = compiled.sql.await?;
@@ -1252,7 +1347,7 @@ fn compile_select_item(
         sqlast::SelectItem::ExprWithAlias { expr, alias } => {
             let compiled =
                 compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
-            let name = Ident::from_sqlident(loc.clone(), alias.get().clone());
+            let name = Ident::from_formatted_sqlident(compiler, schema, loc, alias.get())?;
 
             scope.write()?.add_projection_term(name.get(), &compiled)?;
 
@@ -2104,21 +2199,16 @@ async fn extract_scalar_subselect_field(
     })
 }
 
-fn apply_foreach<T>(
+fn expand_foreach(
     compiler: &Compiler,
     schema: &Ref<Schema>,
     scope: &Ref<SQLScope>,
     loc: &SourceLocation,
     ranges: &[sqlast::LoopRange],
     substitutions: BTreeMap<Ident, SQLBody>,
-    exprs: &Vec<T>,
-) -> Result<Vec<T>>
-where
-    T: VisitSQL<ParamInliner>,
-{
+) -> Result<Vec<BTreeMap<Ident, SQLBody>>> {
     if ranges.len() == 0 {
-        let inliner = ParamInliner::new(substitutions);
-        Ok(exprs.visit_sql(&inliner))
+        Ok(vec![substitutions])
     } else {
         let mut ret = vec![];
         let range = &ranges[0];
@@ -2128,14 +2218,13 @@ where
                     let mut substitutions = substitutions.clone();
                     substitutions.insert(range.item.get().into(), SQLBody::Expr(e.clone()));
 
-                    ret.extend(apply_foreach(
+                    ret.extend(expand_foreach(
                         compiler,
                         schema,
                         scope,
                         loc,
                         &ranges[1..],
                         substitutions,
-                        exprs,
                     )?);
                 }
             }
@@ -2215,6 +2304,12 @@ pub fn compile_sqlexpr(
                 return Err(CompileError::unimplemented(
                     loc.clone(),
                     format!("SQL Parameter syntax: {}", expr).as_str(),
+                ))
+            }
+            sqlast::Value::FormatString(_) => {
+                return Err(CompileError::unimplemented(
+                    loc.clone(),
+                    format!("Format string values: {}", expr).as_str(),
                 ))
             }
         },
