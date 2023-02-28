@@ -1436,7 +1436,6 @@ fn compile_select_item(
             let name = Ident::from_formatted_sqlident(compiler, schema, loc, alias.get())?;
 
             projection_terms.insert(name.get().clone(), compiled.clone());
-            eprintln!("ADDING PROJECTION TERM {:?}", name.get());
 
             mkcref(vec![CTypedNameAndSQL {
                 name,
@@ -2283,7 +2282,6 @@ fn compile_case_arm_expr(
                 foreach,
                 compile_case_arm_expr,
             )?;
-            eprintln!("FE: {:?}", fe);
             fe
         }
         sqlast::ForEachOr::Item(item) => {
@@ -2294,17 +2292,6 @@ fn compile_case_arm_expr(
                 loc,
                 &item.condition,
             )?;
-            mkcref(vec![CompiledCaseArm {
-                condition: CTypedSQL {
-                    type_: condition.type_.clone(),
-                    sql: condition.sql.clone(),
-                },
-                result: CTypedSQL {
-                    type_: condition.type_.clone(),
-                    sql: condition.sql.clone(),
-                },
-            }])
-            /*
             let result = compile_sqlarg(
                 compiler.clone(),
                 schema.clone(),
@@ -2312,23 +2299,16 @@ fn compile_case_arm_expr(
                 loc,
                 &item.result,
             )?;
-            compiler.async_cref(async move {
-                // let condition_sql = condition.sql.await?;
-                // let result_sql = result.sql.await?;
-                // let condition_sql = condition_sql.read()?;
-                // let result_sql = result_sql.read()?;
-                Ok(mkcref(vec![CompiledCaseArm {
-                    condition: CTypedSQL {
-                        type_: condition.type_.clone(),
-                        sql: condition.sql.clone(),
-                    },
-                    result: CTypedSQL {
-                        type_: condition.type_.clone(),
-                        sql: condition.sql.clone(),
-                    },
-                }]))
-            })?
-            */
+            mkcref(vec![CompiledCaseArm {
+                condition: CTypedSQL {
+                    type_: condition.type_.clone(),
+                    sql: condition.sql.clone(),
+                },
+                result: CTypedSQL {
+                    type_: result.type_.clone(),
+                    sql: result.sql.clone(),
+                },
+            }])
         }
     })
 }
@@ -2727,19 +2707,17 @@ pub fn compile_sqlexpr(
                     }
                     eprintln!("ARMS 1");
 
-                    /*
-                                       // If there's an operand, then unify the conditions against it, otherwise
-                                       // unify them to bool.
-                                       let condition_type = match &c_operand {
-                                           Some(o) => o.type_.clone(),
-                                           None => resolve_global_atom(compiler.clone(), "bool")?,
-                                       };
+                    // If there's an operand, then unify the conditions against it, otherwise
+                    // unify them to bool.
+                    let condition_type = match &c_operand {
+                        Some(o) => o.type_.clone(),
+                        None => resolve_global_atom(compiler.clone(), "bool")?,
+                    };
 
-                                       eprintln!("ARMS 2");
-                                       for arm in all_arms.iter() {
-                                           arm.condition.type_.unify(&condition_type)?;
-                                       }
-                    */
+                    eprintln!("ARMS 2");
+                    for arm in all_arms.iter() {
+                        arm.condition.type_.unify(&condition_type)?;
+                    }
                     let mut all_results = Vec::new();
                     for arm in all_arms.iter() {
                         all_results.push(arm.result.clone());
@@ -2750,7 +2728,6 @@ pub fn compile_sqlexpr(
                     }
 
                     eprintln!("ARMS 3");
-                    /*
                     let (result_type, mut c_results) = coerce_all(
                         &compiler,
                         &sqlast::BinaryOperator::Eq,
@@ -2758,9 +2735,6 @@ pub fn compile_sqlexpr(
                         all_results,
                         None,
                     )?;
-                    */
-                    let result_type = resolve_global_atom(compiler.clone(), "int")?;
-                    let mut c_results = all_results;
 
                     eprintln!("ARMS 4");
                     let c_else_result = match else_result {
@@ -2784,15 +2758,14 @@ pub fn compile_sqlexpr(
                     let mut arms = Vec::new();
                     for (arm, c_result) in all_arms.into_iter().zip(c_results) {
                         let condition = arm.condition.sql.await?;
-                        // let result = c_result.sql.await?;
+                        let result = c_result.sql.await?;
                         let condition = condition.read()?;
-                        // let result = result.read()?;
+                        let result = result.read()?;
                         names.extend(condition.names.clone());
-                        // names.extend(result.names.clone());
+                        names.extend(result.names.clone());
                         arms.push(sqlast::ForEachOr::Item(sqlast::CaseArm {
                             condition: condition.body.as_expr()?,
-                            result: condition.body.as_expr()?,
-                            // result.body.as_expr()?,
+                            result: result.body.as_expr()?,
                         }));
                     }
                     eprintln!("ARMS 7");
