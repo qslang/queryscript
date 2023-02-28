@@ -42,7 +42,7 @@ impl Constrainable for FieldMatch {}
 pub struct SQLScope {
     parent: Option<Ref<SQLScope>>,
     relations: BTreeMap<Ident, (CRef<MType>, SourceLocation)>,
-    projection_terms: BTreeMap<Ident, CTypedSQL>,
+    pub projection_terms: BTreeMap<Ident, CTypedSQL>,
 }
 
 impl SQLScope {
@@ -221,12 +221,6 @@ impl SQLScope {
                 e.insert((type_, loc.clone()));
             }
         };
-        Ok(())
-    }
-
-    pub fn add_projection_term(&mut self, name: &Ident, sql: &CTypedSQL) -> Result<()> {
-        // Only insert it if it's not already part of a relation
-        self.projection_terms.insert(name.clone(), sql.clone());
         Ok(())
     }
 }
