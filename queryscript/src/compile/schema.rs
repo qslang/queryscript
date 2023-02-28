@@ -11,7 +11,6 @@ use crate::ast;
 pub use crate::ast::Located;
 use crate::ast::SourceLocation;
 use crate::compile::{
-    casync,
     compile::SymbolKind,
     connection::{ConnectionSchema, ConnectionString},
     error::*,
@@ -24,8 +23,6 @@ use crate::types::{AtomicType, Field, FnType, Type};
 
 pub use crate::compile::inference::CRef;
 pub use ast::Ident;
-
-use super::Compiler;
 
 #[derive(Debug, Clone)]
 pub struct MField {
@@ -373,17 +370,9 @@ impl CTypedExpr {
         })
     }
 
-    pub fn split(compiler: &Compiler, expr: CRef<Self>) -> Result<Self> {
-        let te = expr.clone();
+    pub fn split(expr: CRef<Self>) -> Result<Self> {
         Ok(CTypedExpr {
-            // type_: expr.then(|e| Ok(e.read()?.type_.clone()))?,
-            type_: compiler.async_cref(casync!({
-                let te = te.await?;
-                let tt = te.read()?.type_.clone();
-                let tt = tt.await?;
-                let tt = tt.read()?;
-                Ok(mkcref(tt.clone()))
-            }))?,
+            type_: expr.then(|e| Ok(e.read()?.type_.clone()))?,
             expr: expr.then(|e| Ok(e.read()?.expr.clone()))?,
         })
     }

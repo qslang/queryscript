@@ -110,7 +110,6 @@ impl SQLScope {
                 .collect::<Result<Vec<_>>>()?,
         )?;
 
-        eprintln!("CURRENT PROJECTION TERMS: {:?}", self.projection_terms);
         let cprojection_terms = combine_crefs(
             self.projection_terms
                 .iter()

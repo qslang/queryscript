@@ -112,6 +112,16 @@ fn main_result() -> Result<(), QSError> {
                 cli.ignore_errors,
             ) {
                 Err(err) => {
+                    if cli.verbose {
+                        let task_tree = compiler
+                            .dump_task_tree()
+                            .or_else(|e| {
+                                Ok::<String, QSError>(format!("Failed to dump task tree: {}", e))
+                            })
+                            .unwrap();
+                        eprintln!("TASK TREE:\n{}", task_tree);
+                    }
+
                     let errs = if cli.verbose {
                         err.format_backtrace()
                     } else {

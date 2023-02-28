@@ -5,7 +5,7 @@ use sqlparser::{ast as sqlast, ast::DataType as ParserDataType};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use crate::compile::casync;
 use crate::compile::coerce::CoerceOp;
@@ -285,7 +285,6 @@ pub fn compile_sqlreference(
                 )?;
                 return Ok(CTypedExpr { type_, expr });
             } else {
-                eprintln!("GETTING AVAILABLE REFERENCES");
                 let available =
                     scope
                         .read()?
@@ -2686,7 +2685,6 @@ pub fn compile_sqlexpr(
                     .map(|arm| compile_case_arm_expr(&compiler, &schema, &scope, loc, arm))
                     .collect::<Result<Vec<_>>>()?,
             )?;
-            eprintln!("COMPILED ARMS: {:?}", arms);
 
             let loc = loc.clone();
             let else_result = else_result.clone();
@@ -2708,7 +2706,6 @@ pub fn compile_sqlexpr(
                         let arm_set = arm.read()?;
                         all_arms.extend(arm_set.iter().cloned());
                     }
-                    eprintln!("ARMS 1");
 
                     // If there's an operand, then unify the conditions against it, otherwise
                     // unify them to bool.
@@ -2717,7 +2714,6 @@ pub fn compile_sqlexpr(
                         None => resolve_global_atom(compiler.clone(), "bool")?,
                     };
 
-                    eprintln!("ARMS 2");
                     for arm in all_arms.iter() {
                         arm.condition.type_.unify(&condition_type)?;
                     }
@@ -2730,7 +2726,6 @@ pub fn compile_sqlexpr(
                         all_results.push(e.clone());
                     }
 
-                    eprintln!("ARMS 3");
                     let (result_type, mut c_results) = coerce_all(
                         &compiler,
                         &sqlast::BinaryOperator::Eq,
@@ -2739,13 +2734,11 @@ pub fn compile_sqlexpr(
                         None,
                     )?;
 
-                    eprintln!("ARMS 4");
                     let c_else_result = match else_result {
                         Some(_) => Some(c_results.pop().unwrap()),
                         None => None,
                     };
 
-                    eprintln!("ARMS 5");
                     let mut names = CSQLNames::new();
                     let operand = match c_operand {
                         Some(ref o) => {
@@ -2756,7 +2749,6 @@ pub fn compile_sqlexpr(
                         }
                         None => None,
                     };
-                    eprintln!("ARMS 6");
 
                     let mut arms = Vec::new();
                     for (arm, c_result) in all_arms.into_iter().zip(c_results) {
@@ -2771,7 +2763,6 @@ pub fn compile_sqlexpr(
                             result: result.body.as_expr()?,
                         }));
                     }
-                    eprintln!("ARMS 7");
 
                     let else_result = match c_else_result {
                         Some(ref o) => {
@@ -2789,8 +2780,6 @@ pub fn compile_sqlexpr(
                         else_result,
                     };
 
-                    eprintln!("DONEZO? ARMS");
-
                     Ok(mkcref(CTypedExpr {
                         type_: result_type,
                         expr: mkcref(Expr::native_sql(Arc::new(SQL {
@@ -2801,7 +2790,7 @@ pub fn compile_sqlexpr(
                 })
             })?;
 
-            CTypedExpr::split(&compiler, full_expr)?
+            CTypedExpr::split(full_expr)?
         }
         sqlast::Expr::Function(sqlast::Function {
             name,

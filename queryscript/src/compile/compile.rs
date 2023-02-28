@@ -142,6 +142,8 @@ pub struct ParsedFile {
     pub ast: ast::Schema,
 }
 
+// NOTE: We could disable this in debug mode, but the compiler is not
+// very performance sensitive code, so we'll leave it in until proven otherwise
 macro_rules! casync {
     ($f: block) => {
         async_backtrace::location!().frame(async move { $f })
@@ -315,14 +317,6 @@ impl Compiler {
                     &result.errors
                 )
             );
-
-            eprintln!("SUCCESS TASK TREE 1:");
-            eprintln!("{}", async_backtrace::taskdump_tree(true));
-
-            let drive_result = self.drive().await;
-
-            eprintln!("SUCCESS TASK TREE 2: {:?}", drive_result);
-            eprintln!("{}", async_backtrace::taskdump_tree(true));
 
             result
         })
@@ -539,6 +533,11 @@ impl Compiler {
 
     pub fn file_contents(&self) -> Result<std::sync::RwLockReadGuard<'_, CompilerData>> {
         Ok(self.data.read()?)
+    }
+
+    pub fn dump_task_tree(&self) -> Result<String> {
+        let runtime = self.runtime.read()?;
+        Ok(runtime.block_on(async { async_backtrace::taskdump_tree(true) }))
     }
 }
 

@@ -68,3 +68,12 @@ SELECT for item in [id, org_id] {
 GROUP BY for item in [id, org_id] {
     item
 };
+
+select
+    case
+        for item in strings {
+            when f"{item}"=1 then item
+        }
+    end as "foo"
+from users
+;
