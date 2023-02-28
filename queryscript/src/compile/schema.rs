@@ -11,6 +11,7 @@ use crate::ast;
 pub use crate::ast::Located;
 use crate::ast::SourceLocation;
 use crate::compile::{
+    casync,
     compile::SymbolKind,
     connection::{ConnectionSchema, ConnectionString},
     error::*,
@@ -376,13 +377,13 @@ impl CTypedExpr {
         let te = expr.clone();
         Ok(CTypedExpr {
             // type_: expr.then(|e| Ok(e.read()?.type_.clone()))?,
-            type_: compiler.async_cref(async move {
+            type_: compiler.async_cref(casync!({
                 let te = te.await?;
                 let tt = te.read()?.type_.clone();
                 let tt = tt.await?;
                 let tt = tt.read()?;
                 Ok(mkcref(tt.clone()))
-            })?,
+            }))?,
             expr: expr.then(|e| Ok(e.read()?.expr.clone()))?,
         })
     }

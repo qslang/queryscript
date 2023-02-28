@@ -130,6 +130,7 @@ where
         self.0.take().unwrap()
     }
 
+    #[async_backtrace::framed]
     pub async fn clone_inner(cref: &CRef<CWrap<T>>) -> Result<T> {
         let resolved = cref.await?;
         let unlocked = resolved.read()?;
@@ -395,6 +396,8 @@ impl<T: 'static + Constrainable> CRef<T> {
 macro_rules! ConstrainableImpl {
     () => {
         type Output = Result<Ref<T>>;
+
+        #[async_backtrace::framed]
         fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             match || -> Result<_> {
                 let canon = self.find()?;

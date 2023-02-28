@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::{Arc, RwLock};
 
+use crate::compile::casync;
 use crate::compile::coerce::CoerceOp;
 use crate::compile::compile::{
     compile_fn_body, lookup_path, resolve_global_atom, typecheck_path, Compiler, FnContext,
@@ -284,6 +285,7 @@ pub fn compile_sqlreference(
                 )?;
                 return Ok(CTypedExpr { type_, expr });
             } else {
+                eprintln!("GETTING AVAILABLE REFERENCES");
                 let available =
                     scope
                         .read()?
@@ -1153,7 +1155,7 @@ where
         let scope = scope.clone();
         let loc = loc.clone();
         let body = body.clone();
-        async move {
+        casync!({
             let SQLSnippet {
                 names,
                 body: ranges,
@@ -1288,7 +1290,7 @@ where
             }
 
             Ok(mkcref(ret))
-        }
+        })
     })
 }
 
@@ -1434,6 +1436,7 @@ fn compile_select_item(
             let name = Ident::from_formatted_sqlident(compiler, schema, loc, alias.get())?;
 
             projection_terms.insert(name.get().clone(), compiled.clone());
+            eprintln!("ADDING PROJECTION TERM {:?}", name.get());
 
             mkcref(vec![CTypedNameAndSQL {
                 name,
@@ -1678,6 +1681,7 @@ pub fn compile_select(
     Ok((scope, type_, expr))
 }
 
+#[async_backtrace::framed]
 pub async fn finish_sqlexpr(
     loc: &SourceLocation,
     expr: CRef<Expr<CRef<MType>>>,
@@ -1772,7 +1776,7 @@ pub fn compile_sqlquery(
 
             let loc = loc.clone();
             let compiler = compiler.clone();
-            async move {
+            casync!({
                 let body = cunwrap(set_expr.await?)?;
                 let SQLSnippet { mut names, body } = body;
                 let limit = match limit {
@@ -1808,7 +1812,7 @@ pub fn compile_sqlquery(
                         locks: Vec::new(),
                     },
                 ))
-            }
+            })
         })?,
     ))
 }
@@ -1954,6 +1958,7 @@ fn apply_sqlcast(
     })?)
 }
 
+#[async_backtrace::framed]
 fn coerce_all(
     compiler: &Compiler,
     op: &sqlparser::ast::BinaryOperator,
@@ -1981,7 +1986,7 @@ fn coerce_all(
             sql: compiler.clone().async_cref({
                 let compiler = compiler.clone();
                 let target = target.clone();
-                async move {
+                casync!({
                     let target = target.await?.read()?.clone();
                     let my_type = arg.type_.clone().await?;
                     let loc = my_type.read()?.location();
@@ -2002,7 +2007,7 @@ fn coerce_all(
                             arg.sql
                         },
                     )
-                }
+                })
             })?,
         })
     }
@@ -2137,7 +2142,7 @@ impl CompileSQL for sqlast::WindowFrameBound {
                 };
 
                 let c_e = e.compile_sql(compiler, schema, scope, loc)?;
-                compiler.async_cref(async move {
+                compiler.async_cref(casync!({
                     let c_e = cunwrap(c_e.await?)?;
                     Ok(CSQLSnippet::wrap(
                         c_e.names,
@@ -2146,7 +2151,7 @@ impl CompileSQL for sqlast::WindowFrameBound {
                             false => Following(c_e.body),
                         },
                     ))
-                })?
+                }))?
             }
         })
     }
@@ -2328,6 +2333,7 @@ fn compile_case_arm_expr(
     })
 }
 
+#[async_backtrace::framed]
 async fn extract_scalar_subselect_field(
     loc: &SourceLocation,
     query_type: &MType,
@@ -2710,7 +2716,7 @@ pub fn compile_sqlexpr(
 
             let full_expr = compiler.clone().async_cref({
                 let compiler = compiler.clone();
-                async_backtrace::location!().frame(async move {
+                casync!({
                     let arms = arms.await?;
                     let arms = arms.read()?.clone();
 
@@ -2975,7 +2981,7 @@ pub fn compile_sqlexpr(
                 let loc = loc.clone();
                 let name = name.clone();
                 let type_ = type_.clone();
-                async move {
+                casync!({
                     let arg_exprs = arg_exprs
                         .into_iter()
                         .map(move |cte| {
@@ -3230,7 +3236,7 @@ pub fn compile_sqlexpr(
                             }
                         }
                     }
-                }
+                })
             })?;
 
             CTypedExpr { type_, expr }

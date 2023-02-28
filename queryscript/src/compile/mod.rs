@@ -16,6 +16,7 @@ pub mod traverse;
 mod unsafe_expr;
 mod util;
 
+pub(crate) use compile::casync;
 pub use compile::{
     lookup_path, lookup_schema, Compiler, CompilerConfig, OnSchema, OnSymbol, SymbolKind,
 };
