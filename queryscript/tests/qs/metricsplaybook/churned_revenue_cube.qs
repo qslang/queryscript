@@ -45,15 +45,13 @@ let cte_grouping_sets =
     cte_prep
   where timestamp between '2014-01-01'::timestamp and current_date() + interval 365 day
   group by grouping sets (
-    (metric_month, combination_segment),
-      (metric_month, combination_channel),
-      (metric_month, combination_plan_type),
-      (metric_month, total_object),
-    (metric_day, combination_segment),
-      (metric_day, combination_channel),
-      (metric_day, combination_plan_type),
-      (metric_day, total_object)
-    )
+    for date_s in date_slices, metric_s in metric_slices {
+      (f"metric_{date_s}", f"combination_{metric_s}"),
+    },
+    for date_s in date_slices {
+      (f"metric_{date_s}", "total_object"),
+    },
+  )
 ;
 
 SELECT COUNT(*) FROM cte_grouping_sets;
@@ -63,29 +61,30 @@ let cte_final = select
         False as is_snapshot_reliant_metric,
         'timestamp' as anchor_date,
         case
-          when month_bit = 0 then 'month'
-          when day_bit = 0 then 'day'
+          for slice in date_slices {
+            when f"{slice}_bit" = 0 then slice
+          }
           end as date_grain,
         case
-          when month_bit = 0 then metric_month
-          when day_bit = 0 then metric_day
+          for slice in date_slices {
+            when f"{slice}_bit" = 0 then f"metric_{slice}"
+          }
           end as metric_date,
         case
-          when combination_1_bit = 0 then combination_1
-          when combination_2_bit = 0 then combination_2
-          when combination_3_bit = 0 then combination_3
-          when total_bit = 0 then total_object
+          for slice in metric_slices {
+            when f"{slice}_bit" = 0 then f"combination_{slice}"
+          }
           end as slice_object,
         case
-          when combination_1_bit = 0 then concat(ifnull(json_extract_string(slice_object, '$.dim_name'), 'null'))
-          when combination_2_bit = 0 then concat(ifnull(json_extract_string(slice_object, '$.dim_name'), 'null'))
-          when combination_3_bit = 0 then concat(ifnull(json_extract_string(slice_object, '$.dim_name'), 'null'))
+          for slice in metric_slices {
+            when f"{slice}_bit" = 0 then concat(ifnull(json_extract_string(slice_object, '$.dim_name'), 'null'))
+          }
           when total_bit = 0 then 'total'
           end as slice_dimension,
         case
-          when combination_1_bit = 0 then concat(ifnull(json_extract_string(slice_object, '$.dim_value'), 'null'))
-          when combination_2_bit = 0 then concat(ifnull(json_extract_string(slice_object, '$.dim_value'), 'null'))
-          when combination_3_bit = 0 then concat(ifnull(json_extract_string(slice_object, '$.dim_value'), 'null'))
+          for slice in metric_slices {
+            when f"{slice}_bit" = 0 then concat(ifnull(json_extract_string(slice_object, '$.dim_value'), 'null'))
+          }
           when total_bit = 0 then 'Total'
           end as slice_value,
         metric_calculation,

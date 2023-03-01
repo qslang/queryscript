@@ -404,5 +404,48 @@
                 value: "| id | org_id |\n|----|--------|\n| 1  | 1      |\n| 2  | 1      |",
             },
         ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "org_id",
+                                type_: Atom(
+                                    Int32,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| id | org_id |\n|----|--------|\n| 1  | 1      |\n| 2  | 1      |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "foo",
+                                type_: Atom(
+                                    Utf8,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| foo    |\n|--------|\n| id     |\n| org_id |",
+            },
+        ),
     ],
 }

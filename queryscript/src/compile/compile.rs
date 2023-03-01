@@ -142,6 +142,15 @@ pub struct ParsedFile {
     pub ast: ast::Schema,
 }
 
+// NOTE: We could disable this in debug mode, but the compiler is not
+// very performance sensitive code, so we'll leave it in until proven otherwise
+macro_rules! casync {
+    ($f: block) => {
+        async_backtrace::location!().frame(async move { $f })
+    };
+}
+pub(crate) use casync;
+
 #[derive(Debug, Clone)]
 pub struct Compiler {
     runtime: Ref<tokio::runtime::Runtime>,
@@ -455,11 +464,10 @@ impl Compiler {
         let mut data = self.data.write()?;
         let slot = CRef::<T>::new_unknown("async_slot");
         let ret = slot.clone();
-        data.handles
-            .push_back(self.runtime.read()?.spawn(async move {
-                let r = f.await?;
-                slot.unify(&r)
-            }));
+        data.handles.push_back(self.runtime.read()?.spawn(casync!({
+            let r = f.await?;
+            slot.unify(&r)
+        })));
 
         Ok(ret)
     }
@@ -525,6 +533,11 @@ impl Compiler {
 
     pub fn file_contents(&self) -> Result<std::sync::RwLockReadGuard<'_, CompilerData>> {
         Ok(self.data.read()?)
+    }
+
+    pub fn dump_task_tree(&self) -> Result<String> {
+        let runtime = self.runtime.read()?;
+        Ok(runtime.block_on(async { async_backtrace::taskdump_tree(true) }))
     }
 }
 
@@ -1688,7 +1701,7 @@ fn cref_inline_params(
     compiler: Compiler,
     expr: CRef<Expr<CRef<MType>>>,
 ) -> Result<CRef<Expr<CRef<MType>>>> {
-    compiler.async_cref(async move {
+    compiler.async_cref(casync!({
         // This inline pass will compress together SQL that can be pushed down to an underlying
         // remote database by comparing the URLs of subtrees and pushing down the SQL for any
         // subtree whose URLs are all the same or empty and the parent's is empty.
@@ -1698,7 +1711,7 @@ fn cref_inline_params(
         // If we remove that, then we should not need to
         let expr = expr.read()?.clone();
         Ok(mkcref(inline_params(&expr).await?))
-    })
+    }))
 }
 
 fn optimize_schema(compiler: Compiler, schema: Ref<Schema>) -> CompileResult<()> {

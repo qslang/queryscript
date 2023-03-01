@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::ast::{SourceLocation, ToSqlIdent};
 
+use crate::compile::casync;
 use crate::compile::compile::Compiler;
 use crate::compile::error::*;
 use crate::compile::inference::*;
@@ -116,7 +117,7 @@ impl SQLScope {
                     let n = Ident::with_location(loc.clone(), n.clone());
                     let type_ = Some(te.type_.clone());
                     let sql = te.sql.clone();
-                    compiler.async_cref(async move {
+                    compiler.async_cref(casync!({
                         let sql = sql.clone().await?;
                         let sql = sql.read()?.clone();
                         Ok(mkcref(FieldMatch {
@@ -124,7 +125,7 @@ impl SQLScope {
                             type_,
                             sql,
                         }))
-                    })
+                    }))
                 })
                 .collect::<Result<Vec<_>>>()?,
         )?;
@@ -138,7 +139,7 @@ impl SQLScope {
             None => None,
         };
 
-        compiler.async_cref(async move {
+        compiler.async_cref(casync!({
             let mut ret = match parent {
                 Some(parent) => match Arc::try_unwrap(parent.await?) {
                     Ok(parent) => parent.into_inner()?,
@@ -171,7 +172,7 @@ impl SQLScope {
 
             ret.push(references);
             Ok(mkcref(ret))
-        })
+        }))
     }
 
     pub fn remove_bound_references(
@@ -182,7 +183,7 @@ impl SQLScope {
         let relations = self.relations.clone();
         compiler.async_cref({
             let compiler = compiler.clone();
-            async move {
+            casync!({
                 let mut names = names.clone();
                 for (relation, (type_, _)) in &relations {
                     names.unbound.remove(&vec![relation.clone()]);
@@ -200,7 +201,7 @@ impl SQLScope {
                     };
                 }
                 Ok(mkcref(names))
-            }
+            })
         })
     }
 

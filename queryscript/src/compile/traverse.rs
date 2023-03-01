@@ -395,13 +395,11 @@ impl<V: SQLVisitor> VisitSQL<V> for Expr {
             },
             Case {
                 operand,
-                conditions,
-                results,
+                arms,
                 else_result,
             } => Case {
                 operand: operand.visit_sql(visitor),
-                conditions: conditions.visit_sql(visitor),
-                results: results.visit_sql(visitor),
+                arms: arms.visit_sql(visitor),
                 else_result: else_result.visit_sql(visitor),
             },
             Exists { subquery, negated } => Exists {
@@ -896,6 +894,24 @@ impl<V: SQLVisitor, T: VisitSQL<V>> VisitSQL<V> for ForEach<T> {
         ForEach {
             ranges: self.ranges.visit_sql(visitor),
             body: self.body.visit_sql(visitor),
+        }
+    }
+}
+
+impl<V: SQLVisitor, T: VisitSQL<V>> VisitSQL<V> for ForEachOr<T> {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        match self {
+            ForEachOr::ForEach(f) => ForEachOr::ForEach(f.visit_sql(visitor)),
+            ForEachOr::Item(f) => ForEachOr::Item(f.visit_sql(visitor)),
+        }
+    }
+}
+
+impl<V: SQLVisitor> VisitSQL<V> for CaseArm {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        CaseArm {
+            result: self.result.visit_sql(visitor),
+            condition: self.condition.visit_sql(visitor),
         }
     }
 }

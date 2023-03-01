@@ -369,6 +369,13 @@ impl CTypedExpr {
             expr: Arc::new(self.expr.must()?.read()?.to_runtime_type()?),
         })
     }
+
+    pub fn split(expr: CRef<Self>) -> Result<Self> {
+        Ok(CTypedExpr {
+            type_: expr.then(|e| Ok(e.read()?.type_.clone()))?,
+            expr: expr.then(|e| Ok(e.read()?.expr.clone()))?,
+        })
+    }
 }
 
 // Here, "C" means constrained.  In general, any structs prefixed with C indicate that there are

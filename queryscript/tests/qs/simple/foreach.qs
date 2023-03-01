@@ -62,11 +62,18 @@ SELECT for item in id_types {
     f"{item}id"
 } FROM users;
 
-/*
-SELECT for item in [users, org_id] {
+SELECT for item in [id, org_id] {
     item
-} FROM foo
-GROUP BY for item in [users, org_id] {
+} FROM users
+GROUP BY for item in [id, org_id] {
     item
 };
-*/
+
+select
+    case
+        for item in strings {
+            when f"{item}"=1 then item
+        }
+    end as "foo"
+from users
+;

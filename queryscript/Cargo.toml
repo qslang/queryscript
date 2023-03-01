@@ -49,7 +49,6 @@ backtraces = ["snafu/backtraces"]
 duckdb-bundled = ["duckdb/bundled"]
 
 [dependencies]
-
 # This version is synchronized with duckdb-rs
 arrow = { version = "28", default-features = false, features = [
     "csv",
@@ -63,6 +62,8 @@ arrow-schema = { version = "28" }
 arrow-buffer = { version = "28" }
 arrow-cast = { version = "28" }
 parquet = { version = "28" }
+
+async-backtrace = "0.2"
 
 async-trait = "0.1"
 chrono = { version = "0.4.22", default-features = false }
