@@ -29,7 +29,8 @@ path = "bin/lsp.rs"
 required-features = ["lsp"]
 
 [features]
-default = ["cli", "duckdb-bundled"]
+default = ["cli", "all-engines"]
+all-engines = ["duckdb-bundled", "mysql"]
 multi-thread = ["tokio/rt-multi-thread"]
 serde = ["dep:serde", "arrow-schema/serde", "half/serde"]
 ts = ["serde", "dep:ts-rs"]

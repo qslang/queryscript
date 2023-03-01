@@ -42,7 +42,7 @@ impl Context {
         }
     }
 
-    pub fn sql_engine<'a>(
+    pub async fn sql_engine<'a>(
         &'a mut self,
         url: Option<Arc<crate::compile::ConnectionString>>,
     ) -> Result<&'a mut (dyn SQLEngine + 'static)> {

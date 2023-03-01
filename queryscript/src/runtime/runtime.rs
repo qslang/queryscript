@@ -120,13 +120,14 @@ pub fn eval<'a>(
                 let result = match (inlined, expr.expr.as_ref()) {
                     (true, schema::Expr::SQL(sql, sql_url)) => {
                         let table_name = decl_name.into();
-                        let engine = ctx.sql_engine(sql_url.clone())?;
+                        let engine = ctx.sql_engine(sql_url.clone()).await?;
 
                         if !engine.table_exists(&table_name).await? {
                             let query = create_table_as(table_name, sql.body.as_query()?, true);
                             let sql_params = eval_params(ctx, &sql.names.params).await?;
                             let _ = ctx
-                                .sql_engine(sql_url.clone())?
+                                .sql_engine(sql_url.clone())
+                                .await?
                                 .eval(&query, sql_params)
                                 .await?;
                         }
@@ -170,7 +171,7 @@ pub fn eval<'a>(
                 let sql_params = eval_params(ctx, &names.params).await?;
                 let query = body.as_statement()?;
 
-                let engine = ctx.sql_engine(url.clone())?;
+                let engine = ctx.sql_engine(url.clone()).await?;
 
                 // TODO: This ownership model implies some necessary copying (below).
                 let mut rows = engine.eval(&query, sql_params).await?;

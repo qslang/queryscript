@@ -1,6 +1,5 @@
 use sqlparser::{ast as sqlast, ast::Located};
 use std::cell::RefCell;
-use std::collections::HashMap;
 
 use super::error::RuntimeError;
 use crate::compile::traverse::{SQLVisitor, VisitSQL};
@@ -14,7 +13,7 @@ pub trait Normalizer {
             _ => true,
         }
     }
-    fn params(&self) -> &HashMap<String, String>;
+    fn param(&self, key: &str) -> Option<&str>;
 
     fn normalize<'s>(
         &'s self,
@@ -60,13 +59,12 @@ where
             }
         }
 
-        let params = self.normalizer.params();
         if path.len() == 1 {
             let ident = &path[0];
-            if let Some(name) = params.get(&ident.value) {
+            if let Some(name) = self.normalizer.param(&ident.value) {
                 return Some(vec![Located::new(
                     sqlast::Ident {
-                        value: name.clone(),
+                        value: name.to_owned(),
                         quote_style: None,
                     },
                     ident.location().clone(),

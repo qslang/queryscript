@@ -51,6 +51,13 @@ pub enum RuntimeError {
         backtrace: Option<Backtrace>,
     },
 
+    #[cfg(feature = "mysql")]
+    #[snafu(context(false))]
+    MySQLError {
+        source: mysql_async::Error,
+        backtrace: Option<Backtrace>,
+    },
+
     #[snafu(context(false))]
     IOError {
         source: std::io::Error,

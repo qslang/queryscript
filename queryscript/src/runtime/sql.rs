@@ -37,8 +37,13 @@ pub trait SQLEngine: std::fmt::Debug + Send + Sync {
     fn engine_type(&self) -> SQLEngineType;
 }
 
+#[async_trait]
 pub trait SQLEnginePool {
-    fn new(url: Option<Arc<ConnectionString>>) -> Result<Box<dyn SQLEngine>>;
+    async fn new(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>>;
+}
+
+pub trait SQLEmbedded {
+    fn new_embedded() -> Result<Box<dyn SQLEngine>>;
 }
 
 #[derive(Debug, Clone)]
@@ -83,17 +88,19 @@ impl SQLEngineType {
 pub fn embedded_engine(kind: SQLEngineType) -> Box<dyn SQLEngine> {
     use SQLEngineType::*;
     match kind {
-        DuckDB => super::duckdb::DuckDBEngine::new(None),
+        DuckDB => super::duckdb::DuckDBEngine::new_embedded(),
         o => panic!("Unsupported embedded engine: {:?}", o),
     }
     .expect("Failed to create embedded engine")
 }
 
-// TODO We should turn this into a real pool
-pub fn new_engine(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>> {
+// TODO We should turn this into a real pool (i.e. cache the state
+// globally somewhere)
+pub async fn new_engine(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>> {
     use SQLEngineType::*;
     match url.engine_type() {
-        DuckDB => super::duckdb::DuckDBEngine::new(Some(url)),
-        MySQL => super::duckdb::DuckDBEngine::new(Some(url)),
+        DuckDB => super::duckdb::DuckDBEngine::new(url),
+        MySQL => super::duckdb::DuckDBEngine::new(url),
     }
+    .await
 }
