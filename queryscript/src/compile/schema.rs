@@ -372,8 +372,8 @@ impl CTypedExpr {
 
     pub fn split(expr: CRef<Self>) -> Result<Self> {
         Ok(CTypedExpr {
-            type_: expr.then(|e| Ok(e.read()?.type_.clone()))?,
-            expr: expr.then(|e| Ok(e.read()?.expr.clone()))?,
+            type_: expr.then(|e: Arc<RwLock<CTypedExpr>>| Ok(e.read()?.type_.clone()))?,
+            expr: expr.then(|e: Arc<RwLock<CTypedExpr>>| Ok(e.read()?.expr.clone()))?,
         })
     }
 }
