@@ -6,6 +6,10 @@ pub mod runtime;
 pub mod sql;
 
 pub mod duckdb;
+
+#[cfg(feature = "clickhouse")]
+pub mod clickhouse;
+#[cfg(feature = "mysql")]
 pub mod mysql;
 
 // NOTE: Datafusion is no longer in the repo, so this is technically dead code.

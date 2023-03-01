@@ -66,6 +66,7 @@ impl SQLParam {
 
 #[derive(Copy, Clone, Debug)]
 pub enum SQLEngineType {
+    ClickHouse,
     DuckDB,
     MySQL,
 }
@@ -74,6 +75,7 @@ impl SQLEngineType {
     pub fn from_name(name: &str) -> Result<SQLEngineType> {
         use SQLEngineType::*;
         Ok(match name.to_lowercase().as_str() {
+            "clickhouse" => ClickHouse,
             "duckdb" => DuckDB,
             "mysql" => MySQL,
             name => {
@@ -99,6 +101,7 @@ pub fn embedded_engine(kind: SQLEngineType) -> Box<dyn SQLEngine> {
 pub async fn new_engine(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>> {
     use SQLEngineType::*;
     match url.engine_type() {
+        ClickHouse => super::clickhouse::ClickHouseEngine::new(url),
         DuckDB => super::duckdb::DuckDBEngine::new(url),
         MySQL => super::mysql::MySQLEngine::new(url),
     }
