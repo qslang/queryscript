@@ -56,7 +56,7 @@ impl Context {
             Entry::Occupied(entry) => entry.into_mut().borrow_mut(),
             Entry::Vacant(entry) => {
                 // TODO We should turn this into a real pool
-                let engine = new_engine(url)?;
+                let engine = new_engine(url).await?;
                 entry.insert(engine).borrow_mut()
             }
         })

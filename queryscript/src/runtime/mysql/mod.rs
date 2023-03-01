@@ -4,18 +4,20 @@ use std::{
     sync::Arc,
 };
 
-use mysql_async::{Conn, Pool};
+use mysql_async::{prelude::*, Conn, Params, Pool, Row};
 use sqlparser::ast as sqlast;
 
 use crate::{
     compile::schema::Ident,
-    types::{Relation, Type, Value},
+    types::{record::VecRow, Relation, Type, Value},
 };
 
 use super::{
     error::rt_unimplemented, normalize::Normalizer, Result, SQLEngine, SQLEnginePool,
     SQLEngineType, SQLParam,
 };
+
+mod value;
 
 #[derive(Debug)]
 pub struct MySQLEngine {
@@ -55,12 +57,42 @@ impl SQLEngine for MySQLEngine {
             }
         }
 
-        let mut normalizer = MySQLNormalizer::new(&scalar_params);
+        let normalizer = MySQLNormalizer::new(&scalar_params);
         let query = normalizer.normalize(&query).as_result()?;
 
-        let ordered_params = normalizer.into_ordered_params();
+        let query_string = format!("{}", query);
+        let mysql_params = if params.len() > 0 {
+            Params::Named(
+                params
+                    .into_iter()
+                    .map(|(k, v)| {
+                        (
+                            normalizer
+                                .params
+                                .get(k.as_str())
+                                .unwrap()
+                                .as_bytes()
+                                .to_vec(),
+                            v.value.into(),
+                        )
+                    })
+                    .collect(),
+            )
+        } else {
+            Params::Empty
+        };
 
-        todo!()
+        let result: Vec<value::MySQLRow> = self.conn.exec(query_string, mysql_params).await?;
+
+        let empty_schema = Arc::new(Vec::new());
+        let relation = Arc::new(value::MySQLRelation {
+            rows: result
+                .into_iter()
+                .map(|r| VecRow::new(empty_schema.clone(), r.0))
+                .collect(),
+            schema: empty_schema.clone(),
+        });
+        Ok(relation)
     }
 
     async fn load(
@@ -92,20 +124,18 @@ impl SQLEngine for MySQLEngine {
 }
 
 pub struct MySQLNormalizer {
-    param_names: HashSet<String>,
-    param_order: RefCell<Vec<String>>,
+    params: HashMap<String, String>,
 }
 
 impl MySQLNormalizer {
     pub fn new(scalar_params: &[Ident]) -> MySQLNormalizer {
-        MySQLNormalizer {
-            param_names: scalar_params.iter().map(|s| s.to_string()).collect(),
-            param_order: RefCell::new(Vec::new()),
-        }
-    }
+        let params: HashMap<String, String> = scalar_params
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.to_string(), format!(":{}", s)))
+            .collect();
 
-    pub fn into_ordered_params(&self) -> Vec<String> {
-        self.param_order.into_inner()
+        MySQLNormalizer { params }
     }
 }
 
@@ -115,14 +145,6 @@ impl Normalizer for MySQLNormalizer {
     }
 
     fn param(&self, key: &str) -> Option<&str> {
-        // This is a really hacky (but somewhat sound) assumption that
-        // the order that we traverse the tree is the same as the order
-        // we print the operators
-        if self.param_names.contains(key) {
-            self.param_order.borrow_mut().push(key.to_string());
-            Some("?")
-        } else {
-            None
-        }
+        self.params.get(key).map(|s| s.as_str())
     }
 }

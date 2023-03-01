@@ -19,12 +19,16 @@ pub type Runtime = tokio::runtime::Runtime;
 
 #[cfg(feature = "multi-thread")]
 pub fn build() -> Result<Runtime> {
-    Ok(tokio::runtime::Builder::new_multi_thread().build()?)
+    Ok(tokio::runtime::Builder::new_multi_thread()
+        .enable_io()
+        .build()?)
 }
 
 #[cfg(not(feature = "multi-thread"))]
 pub fn build() -> Result<Runtime> {
-    Ok(tokio::runtime::Builder::new_current_thread().build()?)
+    Ok(tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .build()?)
 }
 
 pub fn expensive<F, R>(f: F) -> R

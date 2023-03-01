@@ -1,7 +1,7 @@
 use super::types::*;
 use super::value::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VecRow {
     schema: Arc<Vec<Field>>,
     values: Vec<Value>,

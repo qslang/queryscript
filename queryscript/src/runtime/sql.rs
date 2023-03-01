@@ -100,7 +100,7 @@ pub async fn new_engine(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>
     use SQLEngineType::*;
     match url.engine_type() {
         DuckDB => super::duckdb::DuckDBEngine::new(url),
-        MySQL => super::duckdb::DuckDBEngine::new(url),
+        MySQL => super::mysql::MySQLEngine::new(url),
     }
     .await
 }
