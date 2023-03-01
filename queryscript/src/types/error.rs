@@ -23,8 +23,21 @@ pub enum TypesystemError {
     },
 
     #[snafu(context(false))]
+    Utf8Error {
+        source: std::str::Utf8Error,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[snafu(context(false))]
     ArrowError {
         source: arrow::error::ArrowError,
+        backtrace: Option<Backtrace>,
+    },
+
+    #[cfg(feature = "clickhouse")]
+    #[snafu(context(false))]
+    ClickHouseError {
+        source: clickhouse_rs::errors::Error,
         backtrace: Option<Backtrace>,
     },
 }

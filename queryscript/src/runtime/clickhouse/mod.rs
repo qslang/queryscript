@@ -1,19 +1,23 @@
 use sqlparser::ast as sqlast;
 use std::fmt;
 
-use clickhouse_rs::{ClientHandle, Pool};
+use clickhouse_rs::{types::SqlType, ClientHandle, Pool};
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     ast::Ident,
     compile::ConnectionString,
-    types::{record::VecRow, Relation, Type, Value},
+    types::{
+        arrow::ArrowRecordBatchRelation, try_fields_to_arrow_fields, value::ArrowRecordBatch,
+        ArrowSchema, Field, Relation, Type, Value,
+    },
 };
 
 use super::{error::rt_unimplemented, Result, SQLEngine, SQLEnginePool, SQLEngineType, SQLParam};
 
+mod value;
+
 pub struct ClickHouseEngine {
-    pool: Pool,
     conn: ClientHandle,
 }
 
@@ -26,27 +30,10 @@ impl fmt::Debug for ClickHouseEngine {
 #[async_trait::async_trait]
 impl SQLEnginePool for ClickHouseEngine {
     async fn new(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>> {
-        let url = url.get_url();
-        // NOTE: We could accept an "is_secure" flag in the connection string
-        let mut http_url = format!("https://{}", url.host_str().unwrap());
-        if let Some(port) = url.port() {
-            http_url.push_str(&format!(":{}", port));
-        }
-        let mut client = Client::default().with_url(http_url.as_str());
-
-        if url.username().len() > 0 {
-            client = client.with_user(url.username());
-        }
-
-        if let Some(password) = url.password() {
-            client = client.with_password(password);
-        }
-
-        if let Some(database) = url.path().strip_prefix("/") {
-            client = client.with_database(database);
-        }
-
-        Ok(Box::new(ClickHouseEngine { conn: client }))
+        let mut url = url.get_url().clone();
+        url.set_scheme("tcp").unwrap();
+        let conn = Pool::new(url.as_str()).get_handle().await?;
+        Ok(Box::new(ClickHouseEngine { conn }))
     }
 }
 
@@ -72,7 +59,28 @@ impl SQLEngine for ClickHouseEngine {
         }
 
         let query_string = format!("{}", query);
-        self.conn.query()
+        eprintln!("QUERY: {}", query_string);
+        let result = self.conn.query(query_string).fetch_all().await?;
+        eprintln!("RESULT: {:?}", result);
+
+        let mut schema = Vec::new();
+        let mut arrays = Vec::new();
+        for column in result.columns() {
+            let field = Field {
+                name: column.name().to_string().into(),
+                type_: (&column.sql_type()).try_into()?,
+                nullable: matches!(column.sql_type(), SqlType::Nullable(_)),
+            };
+            schema.push(field);
+
+            // XXX Next step is to batch the rows the same way we do arrow rows
+            arrays.push(value::column_to_arrow(column, false)?);
+        }
+
+        let schema = Arc::new(ArrowSchema::new(try_fields_to_arrow_fields(&schema)?));
+        let record_batch = ArrowRecordBatch::try_new(schema.clone(), arrays)?;
+        let relation = ArrowRecordBatchRelation::new(schema, Arc::new(vec![record_batch]));
+        Ok(relation)
     }
 
     async fn load(

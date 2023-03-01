@@ -190,6 +190,7 @@ impl Compiler {
                     .thread_stack_size(3 * 1024 * 1024)
                     .on_thread_park(on_park)
                     .enable_io()
+                    .enable_time()
                     .build()?,
             ),
             data: mkref(CompilerData {

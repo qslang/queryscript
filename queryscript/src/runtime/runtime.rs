@@ -21,6 +21,7 @@ pub type Runtime = tokio::runtime::Runtime;
 pub fn build() -> Result<Runtime> {
     Ok(tokio::runtime::Builder::new_multi_thread()
         .enable_io()
+        .enable_time()
         .build()?)
 }
 
@@ -28,6 +29,7 @@ pub fn build() -> Result<Runtime> {
 pub fn build() -> Result<Runtime> {
     Ok(tokio::runtime::Builder::new_current_thread()
         .enable_io()
+        .enable_time()
         .build()?)
 }
 
