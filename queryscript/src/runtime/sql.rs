@@ -59,9 +59,10 @@ impl SQLParam {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum SQLEngineType {
     DuckDB,
+    MySQL,
 }
 
 impl SQLEngineType {
@@ -69,6 +70,7 @@ impl SQLEngineType {
         use SQLEngineType::*;
         Ok(match name.to_lowercase().as_str() {
             "duckdb" => DuckDB,
+            "mysql" => MySQL,
             name => {
                 return Err(crate::runtime::RuntimeError::unimplemented(
                     format!("SQL engine {}", name).as_str(),
@@ -82,6 +84,7 @@ pub fn embedded_engine(kind: SQLEngineType) -> Box<dyn SQLEngine> {
     use SQLEngineType::*;
     match kind {
         DuckDB => super::duckdb::DuckDBEngine::new(None),
+        o => panic!("Unsupported embedded engine: {:?}", o),
     }
     .expect("Failed to create embedded engine")
 }
@@ -91,5 +94,6 @@ pub fn new_engine(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>> {
     use SQLEngineType::*;
     match url.engine_type() {
         DuckDB => super::duckdb::DuckDBEngine::new(Some(url)),
+        MySQL => super::duckdb::DuckDBEngine::new(Some(url)),
     }
 }
