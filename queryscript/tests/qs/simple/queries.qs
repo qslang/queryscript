@@ -28,6 +28,11 @@ SELECT * EXCLUDE id FROM users ORDER BY name;
 SELECT * EXCLUDE (id, org_id) FROM users ORDER BY name;
 
 SELECT * RENAME (id AS user_id) FROM users ORDER BY id;
+SELECT * REPLACE (id+1 AS id, 'foo' as org_id) FROM users ORDER BY id;
+SELECT * REPLACE (id+1 AS id, id+10 AS id) FROM users ORDER BY id;
+
+-- Should fail
+SELECT * REPLACE (id+1 AS dne, 'foo' as org_id) FROM users ORDER BY id;
 
 SELECT
 	id, 1,

@@ -700,6 +700,7 @@ impl SQLBody {
                         opt_exclude: None,
                         opt_except: None,
                         opt_rename: None,
+                        opt_replace: None,
                     },
                 )],
                 vec![sqlast::TableWithJoins {

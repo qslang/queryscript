@@ -79,7 +79,7 @@ regex = { version = "1", optional = true }
 serde = { version = "1", optional = true }
 serde_json = { version = "1", optional = true }
 snafu = { version = "0.7.3" }
-sqlparser = { path = "../sqlparser-rs", version = "0.30.0", package = "sqlparser-queryscript" }
+sqlparser = { path = "../sqlparser-rs", version = "0.31.0", package = "sqlparser-queryscript" }
 tabled = "0.10"
 tokio = "1.25"
 tower-lsp = { version = "0.17", optional = true }

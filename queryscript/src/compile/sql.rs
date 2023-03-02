@@ -158,6 +158,7 @@ pub fn select_star_from(relation: sqlast::TableFactor) -> sqlast::Query {
             opt_exclude: None,
             opt_except: None,
             opt_rename: None,
+            opt_replace: None,
         })],
         vec![sqlast::TableWithJoins {
             relation,
@@ -1293,31 +1294,47 @@ where
     })
 }
 
+#[derive(Debug, Clone)]
+enum Renaming {
+    Exclude,
+    Name(Located<Ident>),
+    Expr(Located<Ident>, CTypedSQL),
+}
+
 fn extract_renamings(
-    file: Option<String>,
+    compiler: &Compiler,
+    schema: &Ref<Schema>,
+    scope: &Ref<SQLScope>,
+    loc: &SourceLocation,
     o: &sqlast::WildcardAdditionalOptions,
-) -> BTreeMap<Ident, Option<Located<Ident>>> {
+) -> Result<BTreeMap<Ident, (Option<sqlast::Range>, Renaming)>> {
     let mut ret = BTreeMap::new();
 
     if let Some(exclude) = &o.opt_exclude {
         use sqlast::ExcludeSelectItem::*;
         match exclude {
             Single(i) => {
-                ret.insert(i.get().into(), None);
+                ret.insert(i.get().into(), (i.location().clone(), Renaming::Exclude));
             }
             Multiple(l) => {
-                ret.extend(l.iter().map(|i| (i.get().into(), None)));
+                ret.extend(
+                    l.iter()
+                        .map(|i| (i.get().into(), (i.location().clone(), Renaming::Exclude))),
+                );
             }
         }
     }
 
     if let Some(except) = &o.opt_except {
-        ret.insert(except.first_element.get().into(), None);
+        ret.insert(
+            except.first_element.get().into(),
+            (except.first_element.location().clone(), Renaming::Exclude),
+        );
         ret.extend(
             except
                 .additional_elements
                 .iter()
-                .map(|i| (i.get().into(), None)),
+                .map(|i| (i.get().into(), (i.location().clone(), Renaming::Exclude))),
         );
     }
 
@@ -1327,21 +1344,54 @@ fn extract_renamings(
             Single(i) => {
                 ret.insert(
                     i.ident.get().into(),
-                    Some(Ident::from_located_sqlident(file.clone(), i.alias.clone())),
+                    (
+                        i.ident.location().clone(),
+                        Renaming::Name(Ident::from_located_sqlident(
+                            loc.file().clone(),
+                            i.alias.clone(),
+                        )),
+                    ),
                 );
             }
             Multiple(l) => {
                 ret.extend(l.iter().map(|i| {
                     (
                         i.ident.get().into(),
-                        Some(Ident::from_located_sqlident(file.clone(), i.alias.clone())),
+                        (
+                            i.ident.location().clone(),
+                            Renaming::Name(Ident::from_located_sqlident(
+                                loc.file().clone(),
+                                i.alias.clone(),
+                            )),
+                        ),
                     )
                 }));
             }
         }
     }
 
-    ret
+    if let Some(replacements) = &o.opt_replace {
+        for item in replacements.items.iter() {
+            ret.insert(
+                item.colum_name.get().into(),
+                (
+                    item.colum_name.location().clone(),
+                    Renaming::Expr(
+                        Ident::from_located_sqlident(loc.file().clone(), item.colum_name.clone()),
+                        compile_sqlarg(
+                            compiler.clone(),
+                            schema.clone(),
+                            scope.clone(),
+                            loc,
+                            &item.expr,
+                        )?,
+                    ),
+                ),
+            );
+        }
+    }
+
+    Ok(ret)
 }
 
 impl Ident {
@@ -1443,10 +1493,11 @@ fn compile_select_item(
             }])
         }
         sqlast::SelectItem::Wildcard(..) | sqlast::SelectItem::QualifiedWildcard { .. } => {
-            let (qualifier, renamings) = match select_item {
-                sqlast::SelectItem::Wildcard(options) => {
-                    (None, extract_renamings(loc.file(), options))
-                }
+            let (qualifier, mut renamings) = match select_item {
+                sqlast::SelectItem::Wildcard(options) => (
+                    None,
+                    extract_renamings(compiler, schema, &scope, loc, options)?,
+                ),
                 sqlast::SelectItem::QualifiedWildcard(qualifier, options) => {
                     if qualifier.0.len() != 1 {
                         return Err(CompileError::unimplemented(
@@ -1457,7 +1508,7 @@ fn compile_select_item(
 
                     (
                         Some(qualifier.0[0].get().into()),
-                        extract_renamings(loc.file(), options),
+                        extract_renamings(compiler, schema, &scope, loc, options)?,
                     )
                 }
                 _ => unreachable!(),
@@ -1467,35 +1518,55 @@ fn compile_select_item(
                 scope
                     .read()?
                     .get_available_references(compiler.clone(), loc, qualifier)?;
-            available.then({
-                let loc = loc.clone();
-                move |available: Ref<AvailableReferences>| {
-                    let mut ret = Vec::new();
-                    for (_, m) in available.read()?.current_level().unwrap().iter() {
-                        let type_ = match &m.type_ {
-                            Some(t) => t.clone(),
-                            None => {
-                                return Err(CompileError::duplicate_entry(vec![m
-                                    .field
-                                    .replace_location(loc.clone())]))
-                            }
-                        };
 
-                        let name = match renamings.get(&m.field) {
-                            Some(Some(n)) => n.clone(),
-                            Some(None) => continue,
-                            None => m.field.clone(),
-                        };
+            let loc = loc.clone();
+            compiler.async_cref(casync!({
+                let available = available.await?;
 
-                        ret.push(CTypedNameAndSQL {
-                            name,
+                let mut ret = Vec::new();
+                for (_, m) in available.read()?.current_level().unwrap().iter() {
+                    let type_ = match &m.type_ {
+                        Some(t) => t.clone(),
+                        None => {
+                            return Err(CompileError::duplicate_entry(vec![m
+                                .field
+                                .replace_location(loc.clone())]))
+                        }
+                    };
+
+                    let compiled = match renamings.remove(&m.field) {
+                        Some((_, Renaming::Exclude)) => continue,
+                        Some((_, Renaming::Name(n))) => CTypedNameAndSQL {
+                            name: n.clone(),
                             type_,
                             sql: mkcref(m.sql.clone()),
-                        });
-                    }
-                    Ok(mkcref(ret))
+                        },
+                        Some((_, Renaming::Expr(n, e))) => CTypedNameAndSQL {
+                            name: n.clone(),
+                            type_: e.type_.clone(),
+                            sql: e.sql.clone(),
+                        },
+                        None => CTypedNameAndSQL {
+                            name: m.field.clone(),
+                            type_,
+                            sql: mkcref(m.sql.clone()),
+                        },
+                    };
+
+                    ret.push(compiled);
                 }
-            })?
+
+                if let Some((name, (ident_loc, _))) = renamings.into_iter().next() {
+                    return Err(CompileError::no_such_entry(vec![
+                        Ident::from_located_sqlident(
+                            loc.file(),
+                            sqlast::Located::new((&name).into(), ident_loc),
+                        ),
+                    ]));
+                }
+
+                Ok(mkcref(ret))
+            }))?
         }
         sqlast::SelectItem::ForEach(foreach) => compile_foreach(
             compiler,
@@ -2438,7 +2509,8 @@ pub fn compile_sqlexpr(
             | sqlast::Value::HexStringLiteral(_)
             | sqlast::Value::UnQuotedString(_)
             | sqlast::Value::DollarQuotedString(_)
-            | sqlast::Value::DoubleQuotedString(_) => CTypedExpr {
+            | sqlast::Value::DoubleQuotedString(_)
+            | sqlast::Value::RawStringLiteral(_) => CTypedExpr {
                 type_: resolve_global_atom(compiler.clone(), "string")?,
                 expr: mkcref(Expr::native_sql(Arc::new(SQL {
                     names: CSQLNames::new(),
