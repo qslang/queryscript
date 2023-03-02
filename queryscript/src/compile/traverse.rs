@@ -762,6 +762,7 @@ impl<V: SQLVisitor> VisitSQL<V> for WildcardAdditionalOptions {
             opt_exclude: self.opt_exclude.visit_sql(visitor),
             opt_except: self.opt_except.visit_sql(visitor),
             opt_rename: self.opt_rename.visit_sql(visitor),
+            opt_replace: self.opt_replace.visit_sql(visitor),
         }
     }
 }
@@ -791,6 +792,24 @@ impl<V: SQLVisitor> VisitSQL<V> for RenameSelectItem {
         match self {
             Single(name) => Single(name.visit_sql(visitor)),
             Multiple(names) => Multiple(names.visit_sql(visitor)),
+        }
+    }
+}
+
+impl<V: SQLVisitor> VisitSQL<V> for ReplaceSelectItem {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        ReplaceSelectItem {
+            items: self.items.visit_sql(visitor),
+        }
+    }
+}
+
+impl<V: SQLVisitor> VisitSQL<V> for ReplaceSelectElement {
+    fn visit_sql(&self, visitor: &V) -> Self {
+        ReplaceSelectElement {
+            expr: self.expr.visit_sql(visitor),
+            colum_name: self.colum_name.clone(), // Do not visit the alias
+            as_keyword: self.as_keyword,
         }
     }
 }
