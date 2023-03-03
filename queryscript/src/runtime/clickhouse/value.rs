@@ -6,7 +6,7 @@ use clickhouse_rs::types::{Column, Complex, DateTimeType, SqlType};
 
 use crate::types::{
     arrow::EPOCH_DAYS_FROM_CE,
-    error::{ts_unimplemented, TypesystemError, UnsupportedTimestampPrecisionSnafu},
+    error::{ts_unimplemented, TypesystemError},
     precision_time_unit, AtomicType, TimeUnit, Type,
 };
 

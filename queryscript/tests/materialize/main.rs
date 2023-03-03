@@ -148,7 +148,10 @@ mod tests {
         }
 
         let folder = Some(target_dir.must_string());
-        let ctx_pool = ContextPool::new(folder.clone(), engine_type);
+        let ctx_pool = ContextPool::new(
+            folder.clone(),
+            SQLEngineType::DuckDB, /*embedded engine*/
+        );
 
         let conn_url = get_engine_url(engine_type);
         let conn_str =

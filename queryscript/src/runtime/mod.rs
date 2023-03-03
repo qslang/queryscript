@@ -9,8 +9,10 @@ pub mod duckdb;
 
 #[cfg(feature = "clickhouse")]
 pub mod clickhouse;
-#[cfg(feature = "mysql")]
-pub mod mysql;
+
+// NOTE: MySQL is half-supported, but I didn't finish because it has very different syntax
+// than what sqlparser spits out
+// pub mod mysql;
 
 // NOTE: Datafusion is no longer in the repo, so this is technically dead code.
 // pub mod datafusion;

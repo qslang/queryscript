@@ -30,7 +30,7 @@ required-features = ["lsp"]
 
 [features]
 default = ["cli", "all-engines"]
-all-engines = ["clickhouse", "duckdb-bundled", "mysql"]
+all-engines = ["clickhouse", "duckdb-bundled"]
 multi-thread = ["tokio/rt-multi-thread"]
 serde = ["dep:serde", "arrow-schema/serde", "half/serde"]
 ts = ["serde", "dep:ts-rs"]
@@ -50,8 +50,9 @@ backtraces = ["snafu/backtraces"]
 
 # Engines
 duckdb-bundled = ["duckdb/bundled"]
-mysql = ["mysql_async"]
 clickhouse = ["dep:clickhouse-rs", "chrono-tz", "serde"]
+
+# mysql = ["mysql_async"]
 
 [dependencies]
 # This version is synchronized with duckdb-rs
@@ -103,8 +104,8 @@ hashlink = { version = "0.8" }
 clickhouse-rs = { version = "1.0.0-alpha.1", optional = true }
 chrono-tz = { version = "0.6", optional = true }
 
-# MySQL
-mysql_async = { version = "0.31.3", optional = true }
+# MySQL (TODO)
+# mysql_async = { version = "0.31.3", optional = true }
 
 
 # -- CLI ---
