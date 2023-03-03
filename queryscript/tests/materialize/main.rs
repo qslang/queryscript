@@ -17,7 +17,11 @@ mod tests {
         ast::{self, Ident, SourceLocation},
         compile::{self, Compiler, ConnectionString},
         materialize,
-        runtime::{self, sql::SQLEngineType, Context, ContextPool},
+        runtime::{
+            self,
+            sql::{create_database, SQLEngineType},
+            Context, ContextPool,
+        },
     };
 
     lazy_static! {
@@ -31,7 +35,7 @@ mod tests {
         match engine_type {
             SQLEngineType::DuckDB => "duckdb://db.duckdb".to_string(),
             SQLEngineType::ClickHouse => {
-                "clickhouse://default:example@127.0.0.1:5472/qstest".to_string()
+                "clickhouse://default:example@127.0.0.1:5472/db".to_string()
             }
         }
     }
@@ -129,6 +133,13 @@ mod tests {
         Ok(ret)
     }
 
+    // TODO: This should be smarter...
+    fn replace_url(p: &PathBuf, url: &str) {
+        let mut contents = std::fs::read_to_string(p).unwrap();
+        contents = contents.replace("duckdb://db.duckdb", url);
+        std::fs::write(p, contents).unwrap();
+    }
+
     fn run_test_dir(
         rt: &tokio::runtime::Runtime,
         engine_type: SQLEngineType,
@@ -136,7 +147,10 @@ mod tests {
         mode: TestMode,
     ) {
         let test_suffix = test_dir.strip_prefix(&*TEST_ROOT).unwrap();
-        let target_dir = GEN_ROOT.join(test_suffix).join(&format!("{:?}", mode));
+        let target_dir = GEN_ROOT
+            .join(test_suffix)
+            .join(&format!("{:?}", mode))
+            .join(&format!("{:?}", engine_type));
 
         // Delete and recreate target_dir
         let _ = std::fs::remove_dir_all(&target_dir); // Don't care if this errors
@@ -161,13 +175,14 @@ mod tests {
 
         // Re-initialize the database
         let mut ctx = ctx_pool.get();
-        rt.block_on(async { ctx.sql_engine(Some(conn_str.clone())).await?.create().await })
+        rt.block_on(async { create_database(conn_str.clone()).await })
             .unwrap();
 
         let compiler = Compiler::new().unwrap();
 
         // Then, save the "data.qs" file into the database
         let data_file = target_dir.join("data.qs");
+        replace_url(&data_file, &conn_url);
         let data_schema = compiler
             .compile_schema_from_file(&data_file)
             .as_result()
@@ -179,6 +194,7 @@ mod tests {
 
         // Next, parse, the schema and then modify it depending on the mode
         let schema_file = target_dir.join("schema.qs");
+        replace_url(&data_file, &conn_url);
         let view_schema = build_schema(&compiler, mode, &schema_file).unwrap();
         rt.block_on(async { materialize::save_views(&ctx_pool, view_schema.clone()).await })
             .unwrap();

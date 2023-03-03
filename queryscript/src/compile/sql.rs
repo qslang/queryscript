@@ -21,6 +21,7 @@ use crate::compile::inline::*;
 use crate::compile::schema::*;
 use crate::compile::scope::{AvailableReferences, SQLScope};
 use crate::compile::traverse::VisitSQL;
+use crate::types::Field;
 use crate::types::{number::parse_numeric_type, AtomicType, IntervalUnit, Type};
 use crate::{
     ast,
@@ -220,6 +221,53 @@ pub fn create_table_as(
         on_commit: None,
         on_cluster: None,
     }
+}
+
+pub fn create_table(
+    name: sqlast::ObjectName,
+    fields: &Vec<Field>,
+    temporary: bool,
+) -> Result<sqlast::Statement> {
+    let columns = fields
+        .iter()
+        .map(|f| {
+            Ok(sqlast::ColumnDef {
+                name: sqlast::Located::new((&f.name).into(), None),
+                data_type: (&f.type_).try_into().context(TypesystemSnafu {
+                    loc: SourceLocation::Unknown,
+                })?,
+                collation: None,
+                options: Vec::new(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(sqlast::Statement::CreateTable {
+        name,
+        query: None,
+        or_replace: true,
+        temporary,
+        external: false,
+        global: None,
+        if_not_exists: false,
+        transient: false,
+        columns,
+        constraints: Vec::new(),
+        hive_distribution: sqlast::HiveDistributionStyle::NONE,
+        hive_formats: None,
+        table_properties: Vec::new(),
+        with_options: Vec::new(),
+        file_format: None,
+        location: None,
+        without_rowid: false,
+        like: None,
+        clone: None,
+        engine: None,
+        default_charset: None,
+        collation: None,
+        on_commit: None,
+        on_cluster: None,
+    })
 }
 
 pub fn with_table_alias(

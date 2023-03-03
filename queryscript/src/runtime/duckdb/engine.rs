@@ -273,12 +273,6 @@ impl SQLEngine for DuckDBEngine {
         Ok(())
     }
 
-    async fn create(&mut self) -> Result<()> {
-        // DuckDB will create the database if it doesn't exist.
-        let _ = self.conn.get_state();
-        Ok(())
-    }
-
     async fn table_exists(&mut self, table: &sqlast::ObjectName) -> Result<bool> {
         let conn_state = self.conn.get_state();
         let mut stmt = conn_state
@@ -393,6 +387,12 @@ lazy_static! {
 impl SQLEnginePool for DuckDBEngine {
     async fn new(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>> {
         DuckDBEngine::new_conn(Some(url))
+    }
+
+    async fn create(url: Arc<ConnectionString>) -> Result<()> {
+        // DuckDB will create the database if it doesn't exist.
+        let conn = Self::new(url).await?;
+        Ok(())
     }
 }
 

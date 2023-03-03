@@ -27,8 +27,6 @@ pub trait SQLEngine: std::fmt::Debug + Send + Sync {
         temporary: bool,
     ) -> Result<()>;
 
-    async fn create(&mut self) -> Result<()>;
-
     /// Ideally, this gets generalized and we use information schema tables. However, there's
     /// no standard way to tell what database we're currently in. We should generalize this function
     /// eventually.
@@ -39,6 +37,7 @@ pub trait SQLEngine: std::fmt::Debug + Send + Sync {
 
 #[async_trait]
 pub trait SQLEnginePool {
+    async fn create(url: Arc<ConnectionString>) -> Result<()>;
     async fn new(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>>;
 }
 
@@ -92,6 +91,17 @@ pub fn embedded_engine(kind: SQLEngineType) -> Box<dyn SQLEngine> {
         o => panic!("Unsupported embedded engine: {:?}", o),
     }
     .expect("Failed to create embedded engine")
+}
+
+// TODO We should turn this into a real pool (i.e. cache the state
+// globally somewhere)
+pub async fn create_database(url: Arc<ConnectionString>) -> Result<()> {
+    use SQLEngineType::*;
+    match url.engine_type() {
+        ClickHouse => super::clickhouse::ClickHouseEngine::create(url),
+        DuckDB => super::duckdb::DuckDBEngine::create(url),
+    }
+    .await
 }
 
 // TODO We should turn this into a real pool (i.e. cache the state

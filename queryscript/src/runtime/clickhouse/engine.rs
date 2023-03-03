@@ -6,7 +6,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     ast::Ident,
-    compile::ConnectionString,
+    compile::{sql::create_table, ConnectionString},
     runtime::{error::rt_unimplemented, Result, SQLEngine, SQLEnginePool, SQLEngineType, SQLParam},
     types::{
         arrow::ArrowRecordBatchRelation, try_fields_to_arrow_fields, value::ArrowRecordBatch,
@@ -33,6 +33,18 @@ impl SQLEnginePool for ClickHouseEngine {
         url.set_scheme("tcp").unwrap();
         let conn = Pool::new(url.as_str()).get_handle().await?;
         Ok(Box::new(ClickHouseEngine { conn }))
+    }
+
+    async fn create(url: Arc<ConnectionString>) -> Result<()> {
+        let mut url = url.get_url().clone();
+        url.set_scheme("tcp").unwrap();
+        let db_name = url.path().to_string();
+        let db_name = db_name.strip_prefix("/").unwrap();
+        url.set_path("");
+        let mut conn = Pool::new(url.as_str()).get_handle().await?;
+        conn.execute(format!("CREATE DATABASE IF NOT EXISTS \"{}\"", db_name))
+            .await?;
+        Ok(())
     }
 }
 
@@ -89,12 +101,20 @@ impl SQLEngine for ClickHouseEngine {
         type_: Type,
         temporary: bool,
     ) -> Result<()> {
-        todo!()
-    }
+        let fields = match type_ {
+            Type::List(r) => match r.as_ref() {
+                Type::Record(fields) => fields.clone(),
+                _ => {
+                    return rt_unimplemented!("Loading non-record lists into ClickHouse");
+                }
+            },
+            _ => {
+                return rt_unimplemented!("Loading non-record lists into ClickHouse");
+            }
+        };
+        let create_table_stmt = create_table(table.clone(), &fields, temporary)?;
+        self.conn.execute(&format!("{}", create_table_stmt)).await?;
 
-    async fn create(&mut self) -> Result<()> {
-        // NOTE: This should probably be a method on the pool, not the engine,
-        // since the connection assumes that the database exists.
         Ok(())
     }
 
