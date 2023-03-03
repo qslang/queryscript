@@ -68,7 +68,6 @@ impl SQLParam {
 pub enum SQLEngineType {
     ClickHouse,
     DuckDB,
-    MySQL,
 }
 
 impl SQLEngineType {
@@ -77,7 +76,6 @@ impl SQLEngineType {
         Ok(match name.to_lowercase().as_str() {
             "clickhouse" => ClickHouse,
             "duckdb" => DuckDB,
-            "mysql" => MySQL,
             name => {
                 return Err(crate::runtime::RuntimeError::unimplemented(
                     format!("SQL engine {}", name).as_str(),
@@ -103,7 +101,6 @@ pub async fn new_engine(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>
     match url.engine_type() {
         ClickHouse => super::clickhouse::ClickHouseEngine::new(url),
         DuckDB => super::duckdb::DuckDBEngine::new(url),
-        MySQL => super::mysql::MySQLEngine::new(url),
     }
     .await
 }

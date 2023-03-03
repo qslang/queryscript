@@ -8,7 +8,7 @@ use sqlparser::ast::{
     DataType as ParserDataType, ExactNumberInfo as ParserNumberInfo, TimezoneInfo as ParserTz,
 };
 
-use super::error::{ts_fail, ts_unimplemented, Result};
+use super::error::{ts_fail, ts_unimplemented, Result, UnsupportedTimestampPrecisionSnafu};
 use crate::ast::Ident;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -409,6 +409,16 @@ fn time_unit_precision(tu: &TimeUnit) -> u64 {
         TimeUnit::Microsecond => 6,
         TimeUnit::Nanosecond => 9,
     }
+}
+
+pub fn precision_time_unit(p: u64) -> Result<TimeUnit> {
+    Ok(match p {
+        0u64 => TimeUnit::Second,
+        3u64 => TimeUnit::Millisecond,
+        6u64 => TimeUnit::Microsecond,
+        9u64 => TimeUnit::Nanosecond,
+        _ => return Err(UnsupportedTimestampPrecisionSnafu { val: p as u64 }.build()),
+    })
 }
 
 impl TryInto<ParserDataType> for &Type {

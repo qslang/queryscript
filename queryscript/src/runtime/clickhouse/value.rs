@@ -1,12 +1,17 @@
 use arrow::array::Array as ArrowArray;
+use chrono::Datelike;
 use std::sync::Arc;
 
-use clickhouse_rs::types::{Column, Complex, SqlType};
+use clickhouse_rs::types::{Column, Complex, DateTimeType, SqlType};
 
-use crate::types::{error::ts_unimplemented, AtomicType, TimeUnit, Type};
+use crate::types::{
+    arrow::EPOCH_DAYS_FROM_CE,
+    error::{ts_unimplemented, TypesystemError, UnsupportedTimestampPrecisionSnafu},
+    precision_time_unit, AtomicType, TimeUnit, Type,
+};
 
 impl TryFrom<&SqlType> for Type {
-    type Error = crate::types::error::TypesystemError;
+    type Error = TypesystemError;
     fn try_from(st: &SqlType) -> crate::types::error::Result<Self> {
         use SqlType::*;
         Ok(match st {
@@ -22,7 +27,17 @@ impl TryFrom<&SqlType> for Type {
             Float32 => Type::Atom(AtomicType::Float32),
             Float64 => Type::Atom(AtomicType::Float64),
             Date => Type::Atom(AtomicType::Date32),
-            DateTime(_) => Type::Atom(AtomicType::Timestamp(TimeUnit::Second, None)),
+            DateTime(dt) => {
+                Type::Atom(match dt {
+                    DateTimeType::DateTime32 => AtomicType::Timestamp(TimeUnit::Second, None),
+                    // TODO: We ignore the timestamp here altogether :(
+                    // https://github.com/qscl/queryscript/issues/88
+                    DateTimeType::DateTime64(p, _) => {
+                        AtomicType::Timestamp(precision_time_unit(*p as u64)?, None)
+                    }
+                    DateTimeType::Chrono => AtomicType::Timestamp(TimeUnit::Microsecond, None),
+                })
+            }
             Nullable(inner) => (*inner).try_into()?,
             Array(inner) => Type::List(Box::new((*inner).try_into()?)),
             Decimal(p, s) => Type::Atom(AtomicType::Decimal128(*p, *s as i8)),
@@ -35,30 +50,38 @@ impl TryFrom<&SqlType> for Type {
 
 pub fn column_to_arrow(
     column: &Column<Complex>,
+    st: SqlType,
     nullable: bool,
 ) -> crate::types::error::Result<Arc<dyn ArrowArray>> {
+    use arrow::array::*;
     use SqlType::*;
 
-    let st = column.sql_type();
     match st {
-        UInt8 => u8::to_arrow(column, nullable),
-        UInt16 => u16::to_arrow(column, nullable),
-        UInt32 => u32::to_arrow(column, nullable),
-        UInt64 => u64::to_arrow(column, nullable),
-        Int8 => i8::to_arrow(column, nullable),
-        Int16 => i16::to_arrow(column, nullable),
-        Int32 => i32::to_arrow(column, nullable),
-        Int64 => i64::to_arrow(column, nullable),
-        String | FixedString(_) => <&[u8]>::to_arrow(column, nullable),
-        Float32 => f32::to_arrow(column, nullable),
-        Float64 => f64::to_arrow(column, nullable),
-
-        // XXX Finish these
-        Date => todo!("Date"),
-        DateTime(_) => todo!("DateTime"),
-        Nullable(inner) => column_to_arrow(column, true),
-        Array(inner) => todo!(),
-        Decimal(p, s) => todo!(),
+        UInt8 => UInt8Array::to_arrow(column, nullable),
+        UInt16 => UInt16Array::to_arrow(column, nullable),
+        UInt32 => UInt32Array::to_arrow(column, nullable),
+        UInt64 => UInt64Array::to_arrow(column, nullable),
+        Int8 => Int8Array::to_arrow(column, nullable),
+        Int16 => Int16Array::to_arrow(column, nullable),
+        Int32 => Int32Array::to_arrow(column, nullable),
+        Int64 => Int64Array::to_arrow(column, nullable),
+        String | FixedString(_) => StringArray::to_arrow(column, nullable),
+        Float32 => Float32Array::to_arrow(column, nullable),
+        Float64 => Float64Array::to_arrow(column, nullable),
+        Date => Date32Array::to_arrow(column, nullable),
+        DateTime(dt) => match dt {
+            DateTimeType::DateTime32 => TimestampSecondArray::to_arrow(column, nullable),
+            DateTimeType::DateTime64(p, _) => match precision_time_unit(p as u64)? {
+                TimeUnit::Second => TimestampSecondArray::to_arrow(column, nullable),
+                TimeUnit::Millisecond => TimestampMillisecondArray::to_arrow(column, nullable),
+                TimeUnit::Microsecond => TimestampMicrosecondArray::to_arrow(column, nullable),
+                TimeUnit::Nanosecond => TimestampNanosecondArray::to_arrow(column, nullable),
+            },
+            DateTimeType::Chrono => TimestampMicrosecondArray::to_arrow(column, nullable),
+        },
+        Nullable(inner) => column_to_arrow(column, inner.clone(), true),
+        Array(inner) => todo!("clickhouse arrays"),
+        Decimal(p, s) => todo!("clickhouse decimals"),
         Ipv4 | Ipv6 | Uuid | Enum8(..) | Enum16(..) => {
             return ts_unimplemented!("ClickHouse type: {:?}", st);
         }
@@ -66,8 +89,6 @@ pub fn column_to_arrow(
 }
 
 trait ClickHouseToArrow {
-    type Target: ArrowArray;
-
     fn to_arrow(
         column: &Column<Complex>,
         nullable: bool,
@@ -76,19 +97,17 @@ trait ClickHouseToArrow {
 
 macro_rules! primitive_array_conversion {
     ($ch_type:ty, $arrow_array:tt) => {
-        impl ClickHouseToArrow for $ch_type {
-            type Target = arrow::array::$arrow_array;
-
+        impl ClickHouseToArrow for arrow::array::$arrow_array {
             fn to_arrow(
                 column: &Column<Complex>,
                 nullable: bool,
             ) -> crate::types::error::Result<Arc<dyn ArrowArray>> {
                 if nullable {
-                    Ok(Arc::new(Self::Target::from_iter(
+                    Ok(Arc::new(Self::from_iter(
                         column.iter::<Option<$ch_type>>()?.map(|i| i.map(|i| *i)),
                     )))
                 } else {
-                    Ok(Arc::new(Self::Target::from_iter(
+                    Ok(Arc::new(Self::from_iter(
                         column.iter::<$ch_type>()?.map(|i| *i),
                     )))
                 }
@@ -108,9 +127,7 @@ primitive_array_conversion!(i64, Int64Array);
 primitive_array_conversion!(f32, Float32Array);
 primitive_array_conversion!(f64, Float64Array);
 
-impl ClickHouseToArrow for &[u8] {
-    type Target = arrow::array::StringArray;
-
+impl ClickHouseToArrow for arrow::array::StringArray {
     fn to_arrow(
         column: &Column<Complex>,
         nullable: bool,
@@ -132,3 +149,39 @@ impl ClickHouseToArrow for &[u8] {
         })
     }
 }
+
+impl ClickHouseToArrow for arrow::array::Date32Array {
+    fn to_arrow(
+        column: &Column<Complex>,
+        _nullable: bool, // Date32 has to be nullable (Arrow doesn't seem to support the other...)
+    ) -> crate::types::error::Result<Arc<dyn ArrowArray>> {
+        #[allow(deprecated)]
+        Ok(Arc::new(Self::from_iter(
+            column
+                .iter::<chrono::DateTime<_>>()?
+                .map(|i| Some(i.num_days_from_ce() - EPOCH_DAYS_FROM_CE)),
+        )))
+    }
+}
+
+macro_rules! timestamp_array_conversion {
+    ($arrow_array:tt, $timestamp_method:tt) => {
+        impl ClickHouseToArrow for arrow::array::$arrow_array {
+            fn to_arrow(
+                column: &Column<Complex>,
+                _nullable: bool, // Dates have to be nullable in arrow
+            ) -> crate::types::error::Result<Arc<dyn ArrowArray>> {
+                Ok(Arc::new(Self::from_iter(
+                    column
+                        .iter::<chrono::DateTime<_>>()?
+                        .map(|i| Some(i.$timestamp_method())),
+                )))
+            }
+        }
+    };
+}
+
+timestamp_array_conversion!(TimestampSecondArray, timestamp);
+timestamp_array_conversion!(TimestampMillisecondArray, timestamp_millis);
+timestamp_array_conversion!(TimestampMicrosecondArray, timestamp_micros);
+timestamp_array_conversion!(TimestampNanosecondArray, timestamp_nanos);

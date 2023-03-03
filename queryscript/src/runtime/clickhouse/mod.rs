@@ -74,7 +74,7 @@ impl SQLEngine for ClickHouseEngine {
             schema.push(field);
 
             // XXX Next step is to batch the rows the same way we do arrow rows
-            arrays.push(value::column_to_arrow(column, false)?);
+            arrays.push(value::column_to_arrow(column, column.sql_type(), false)?);
         }
 
         let schema = Arc::new(ArrowSchema::new(try_fields_to_arrow_fields(&schema)?));

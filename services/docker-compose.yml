@@ -1,0 +1,26 @@
+version: "3.1"
+
+services:
+  pg:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: example
+    ports:
+      - 5471:5432
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:23
+    environment:
+      CLICKHOUSE_PASSWORD: example
+    ports:
+      - 5472:9000
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - ./data/clickhouse:/var/lib/clickhouse/
+      - ./logs/clickhouse:/var/log/clickhouse-server/

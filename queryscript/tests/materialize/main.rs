@@ -30,6 +30,9 @@ mod tests {
     fn get_engine_url(engine_type: SQLEngineType) -> String {
         match engine_type {
             SQLEngineType::DuckDB => "duckdb://db.duckdb".to_string(),
+            SQLEngineType::ClickHouse => {
+                "clickhouse://default:example@127.0.0.1:5472/qstest".to_string()
+            }
         }
     }
 
@@ -38,6 +41,9 @@ mod tests {
             &sqlparser::dialect::GenericDialect {},
             match engine_type {
                 SQLEngineType::DuckDB => "SELECT name FROM sqlite_master WHERE type = 'view'",
+                SQLEngineType::ClickHouse => {
+                    "select database, name from system.tables where engine = 'View' AND NOT database ILIKE 'information_schema'"
+                }
             },
         )
         .unwrap()
@@ -152,7 +158,7 @@ mod tests {
 
         // Re-initialize the database
         let mut ctx = ctx_pool.get();
-        rt.block_on(async { ctx.sql_engine(Some(conn_str.clone()))?.create().await })
+        rt.block_on(async { ctx.sql_engine(Some(conn_str.clone())).await?.create().await })
             .unwrap();
 
         let compiler = Compiler::new().unwrap();
@@ -206,7 +212,8 @@ mod tests {
         let actual_view_names = rt
             .block_on({
                 async {
-                    ctx.sql_engine(Some(conn_str.clone()))?
+                    ctx.sql_engine(Some(conn_str.clone()))
+                        .await?
                         .eval(&show_views_query(engine_type), HashMap::new())
                         .await
                 }
@@ -256,5 +263,10 @@ mod tests {
     #[test]
     fn test_materialize_duckdb() {
         test_materialize(SQLEngineType::DuckDB)
+    }
+
+    #[test]
+    fn test_materialize_clickhouse() {
+        test_materialize(SQLEngineType::ClickHouse)
     }
 }

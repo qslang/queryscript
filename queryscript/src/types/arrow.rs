@@ -359,3 +359,6 @@ timestamp_array_conversion!(TimestampSecondArray, TimestampSecond);
 timestamp_array_conversion!(TimestampMillisecondArray, TimestampMillisecond);
 timestamp_array_conversion!(TimestampMicrosecondArray, TimestampMicrosecond);
 timestamp_array_conversion!(TimestampNanosecondArray, TimestampNanosecond);
+
+// This is copied from arrow-rs because it's not pub yet
+pub const EPOCH_DAYS_FROM_CE: i32 = 719_163;
