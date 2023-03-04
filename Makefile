@@ -29,7 +29,7 @@ ts-bindings:
 
 
 .PHONY: test services refresh-test-data
-test: submodules services
+test: submodules
 	cd queryscript/src/ && cargo test ${CARGO_FLAGS} -- --nocapture
 
 services:

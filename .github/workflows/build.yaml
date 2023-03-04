@@ -87,10 +87,6 @@ jobs:
         if: matrix.target == 'arm-unknown-linux-gnueabihf'
         run: sudo apt-get install gcc-arm-linux-gnueabihf
 
-      - name: Install Docker
-        uses: docker-practice/actions-setup-docker@master
-        timeout-minutes: 12
-
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
@@ -136,9 +132,9 @@ jobs:
             ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}-release-
             ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}
 
-      - name: Start services
-        run: make services
-        timeout-minutes: 60
+      - uses: isbang/compose-action@v1.4.1
+        with:
+          compose-file: "./services/docker-compose.yml"
 
       - name: Make
         run: make all
