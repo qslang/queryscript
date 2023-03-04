@@ -127,7 +127,10 @@ impl SQLEngine for ClickHouseEngine {
 
         let query = ClickHouseNormalizer::new().normalize(query).as_result()?;
         let query_string = format!("{}", query);
+        eprintln!("QUERY: {}", query_string);
+
         let result = self.conn.query(query_string).fetch_all().await?;
+        eprintln!("{:?}", result);
 
         let mut schema = Vec::new();
         let mut arrays = Vec::new();
@@ -139,7 +142,6 @@ impl SQLEngine for ClickHouseEngine {
             };
             schema.push(field);
 
-            // XXX Next step is to batch the rows the same way we do arrow rows
             arrays.push(value::column_to_arrow(column, column.sql_type(), false)?);
         }
 

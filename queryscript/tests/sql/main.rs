@@ -1,13 +1,20 @@
+#[path = "../common/mod.rs"]
+pub mod common;
 mod db;
 
 #[cfg(test)]
 mod tests {
-    use queryscript::types::arrow::ArrowRecordBatchRelation;
+    use queryscript::{
+        ast::SourceLocation,
+        compile::ConnectionString,
+        runtime::{create_database, SQLEngineType},
+        types::arrow::ArrowRecordBatchRelation,
+    };
     use sqllogictest::{parse, Record};
     use std::path::{Path, PathBuf};
     use walkdir;
 
-    use super::db::{duckdb_serialize, DuckDB, QueryScript};
+    use super::db::{serialize_db, DuckDB, QueryScript};
 
     fn update_sqllogic_file(path: &PathBuf) {
         let conn = duckdb::Connection::open_in_memory().unwrap();
@@ -22,7 +29,7 @@ mod tests {
         .unwrap();
     }
 
-    fn test_sqllogic_file(path: &PathBuf) {
+    fn test_sqllogic_file(path: &PathBuf, engine_type: SQLEngineType) {
         let conn = duckdb::Connection::open_in_memory().unwrap();
 
         let contents = std::fs::read_to_string(path).expect("Could not read file");
@@ -56,9 +63,6 @@ mod tests {
             .join(test_suffix);
 
         let mut qs_tester = None;
-        let rt = queryscript::runtime::build().unwrap();
-        let _ = rt.enter();
-
         for (i, record) in records.into_iter().enumerate() {
             let i = i as i64;
 
@@ -68,15 +72,28 @@ mod tests {
             }
 
             if i == last_statement + 1 {
+                let rt = queryscript::runtime::build().unwrap();
+                let _ = rt.enter();
+
+                rt.block_on(async {
+                    let conn_url = super::common::get_engine_url(engine_type);
+
+                    let url =
+                        ConnectionString::maybe_parse(None, &conn_url, &SourceLocation::Unknown)
+                            .unwrap()
+                            .unwrap();
+
+                    create_database(url).await
+                })
+                .unwrap();
+
                 qs_tester = Some(sqllogictest::Runner::new(QueryScript::new(
-                    duckdb_serialize(&conn, &target_dir).unwrap(),
+                    rt,
+                    serialize_db(&conn, &target_dir, engine_type).unwrap(),
                 )));
             }
 
-            futures::executor::block_on(async {
-                qs_tester.as_mut().unwrap().run_async(record).await
-            })
-            .unwrap();
+            qs_tester.as_mut().unwrap().run(record).unwrap();
         }
     }
 
@@ -102,7 +119,11 @@ mod tests {
 
         for test_file in test_files {
             update_sqllogic_file(&test_file); // TODO: We should figure out how to only update this when necessary
-            test_sqllogic_file(&test_file);
+
+            for engine_type in SQLEngineType::iterator() {
+                eprintln!("Testing engine type: {:?}", engine_type);
+                test_sqllogic_file(&test_file, engine_type);
+            }
         }
     }
 

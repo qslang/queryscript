@@ -1,5 +1,6 @@
 use sqlparser::ast as sqlast;
 use std::{collections::HashMap, sync::Arc};
+use strum::{EnumIter, IntoEnumIterator};
 
 use super::error::Result;
 use crate::ast::Ident;
@@ -69,7 +70,7 @@ impl SQLParam {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, EnumIter)]
 pub enum SQLEngineType {
     ClickHouse,
     DuckDB,
@@ -87,6 +88,11 @@ impl SQLEngineType {
                 ))
             }
         })
+    }
+
+    pub fn iterator() -> impl Iterator<Item = SQLEngineType> {
+        // This just avoids having to import strum::IntoEnumIterator everywhere
+        SQLEngineType::iter()
     }
 }
 

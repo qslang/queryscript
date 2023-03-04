@@ -1,3 +1,6 @@
+#[path = "../common/mod.rs"]
+mod common;
+
 #[cfg(test)]
 mod tests {
     use lazy_static::lazy_static;
@@ -24,34 +27,13 @@ mod tests {
         },
     };
 
+    use super::common::*;
+
     lazy_static! {
         static ref TEST_ROOT: PathBuf =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/materialize/");
         static ref GEN_ROOT: PathBuf =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/generated/materialize/");
-    }
-
-    fn get_engine_url(engine_type: SQLEngineType) -> String {
-        match engine_type {
-            SQLEngineType::DuckDB => "duckdb://db.duckdb".to_string(),
-            SQLEngineType::ClickHouse => {
-                "clickhouse://default:example@127.0.0.1:5472/db".to_string()
-            }
-        }
-    }
-
-    fn show_views_query(engine_type: SQLEngineType) -> sqlparser::ast::Statement {
-        sqlparser::parser::Parser::parse_sql(
-            &sqlparser::dialect::GenericDialect {},
-            match engine_type {
-                SQLEngineType::DuckDB => "SELECT name FROM sqlite_master WHERE type = 'view'",
-                SQLEngineType::ClickHouse => {
-                    "select name from system.tables where engine = 'View' AND database=currentDatabase()"
-                }
-            },
-        )
-        .unwrap()
-        .swap_remove(0)
     }
 
     trait MustString {
