@@ -3,9 +3,6 @@
 // mimic that engines' semantics. A secondary (stretch) goal is to make the semantics
 // identical across engines, which we could test here as well.
 
-use std::pin::Pin;
-
-use futures::{future::FutureExt, Future};
 use parquet::arrow::arrow_writer::ArrowWriter;
 use parquet::file::properties::WriterProperties;
 use snafu::prelude::*;

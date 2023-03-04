@@ -181,7 +181,6 @@ mod tests {
         rt.block_on(async { materialize::save_views(&ctx_pool, view_schema.clone()).await })
             .unwrap();
 
-        eprintln!("VIEW SCHEMA: {:#?}", view_schema);
         // Now, snapshot the value of each export view in the view_schema
         let expected_snapshot = rt
             .block_on(async { snapshot(&mut ctx, &view_schema).await })
