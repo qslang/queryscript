@@ -52,8 +52,6 @@ backtraces = ["snafu/backtraces"]
 duckdb-bundled = ["duckdb/bundled"]
 clickhouse = ["dep:clickhouse-rs", "chrono-tz", "serde"]
 
-# mysql = ["mysql_async"]
-
 [dependencies]
 # This version is synchronized with duckdb-rs
 arrow = { version = "28", default-features = false, features = [
@@ -104,10 +102,6 @@ hashlink = { version = "0.8" }
 # ClickHouse
 clickhouse-rs = { version = "1.0.0-alpha.1", optional = true }
 chrono-tz = { version = "0.5.3", optional = true } # This must be in-sync with clickhouse-rs
-
-# MySQL (TODO)
-# mysql_async = { version = "0.31.3", optional = true }
-
 
 # -- CLI ---
 clap = { version = "4.0", features = ["derive"], optional = true }
