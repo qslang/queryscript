@@ -108,6 +108,9 @@ impl SQLEnginePool for ClickHouseEngine {
         url.set_path("");
         let mut conn = Pool::new(url.as_str()).get_handle().await?;
         conn.ping().await?;
+
+        // ClickHouse fails on CREATE OR REPLACE TABLE commands if running in a Docker
+        // container because it uses renameat2()
         conn.execute(format!("DROP DATABASE IF EXISTS \"{}\"", db_name))
             .await?;
         conn.execute(format!("CREATE DATABASE \"{}\"", db_name))
