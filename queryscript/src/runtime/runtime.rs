@@ -124,59 +124,61 @@ pub fn eval<'a>(
                     return Ok(value.clone());
                 }
 
-                let result = match (inlined, expr.expr.as_ref()) {
-                    (true, schema::Expr::SQL(sql, _)) => {
-                        let table_name = decl_name.into();
-                        let engine = ctx.sql_engine(url.clone()).await?;
+                if *inlined {
+                    let table_name = decl_name.into();
+                    let engine = ctx.sql_engine(url.clone()).await?;
 
-                        if !engine.table_exists(&table_name).await? {
-                            let query = create_table_as(table_name, sql.body.as_query()?, true);
-                            let sql_params = eval_params(ctx, &sql.names.params).await?;
-                            let _ = ctx
-                                .sql_engine(url.clone())
-                                .await?
-                                .exec(&query, sql_params)
-                                .await?;
+                    if !engine.table_exists(&table_name).await? {
+                        match expr.expr.as_ref() {
+                            schema::Expr::SQL(sql, _) => {
+                                let query = create_table_as(table_name, sql.body.as_query()?, true);
+                                let sql_params = eval_params(ctx, &sql.names.params).await?;
+                                let _ = ctx
+                                    .sql_engine(url.clone())
+                                    .await?
+                                    .exec(&query, sql_params)
+                                    .await?;
+                            }
+                            schema::Expr::Materialize(schema::MaterializeExpr {
+                                decl_name: inner_decl,
+                                ..
+                            }) => {
+                                eval(ctx, &expr).await?;
+
+                                let query =
+                                    create_table_as(table_name, select_star_from(inner_decl), true);
+                                let _ = ctx
+                                    .sql_engine(url.clone())
+                                    .await?
+                                    .exec(&query, HashMap::new())
+                                    .await?;
+                            }
+                            _ => {
+                                let inner_type = expr.type_.read()?.clone();
+                                let result = eval(ctx, &expr).await?;
+
+                                let _ = ctx
+                                    .sql_engine(url.clone())
+                                    .await?
+                                    .load(&table_name, result, inner_type, true)
+                                    .await?;
+                            }
                         }
-
-                        // Don't stash the fact that we created the temporary table in the materialization index
-                        // NOTE: For performance sake, we could cache something here (that we created the temp
-                        // table), but for now we assume checking if the table exists is fast enough.
-                        return Ok(EMPTY_RELATION.clone());
                     }
-                    (
-                        true,
-                        schema::Expr::Materialize(schema::MaterializeExpr {
-                            decl_name: inner_decl,
-                            ..
-                        }),
-                    ) => {
-                        let table_name = decl_name.into();
-                        let engine = ctx.sql_engine(url.clone()).await?;
 
-                        if !engine.table_exists(&table_name).await? {
-                            eval(ctx, &expr).await?;
+                    // Don't stash the fact that we created the temporary table in the materialization index
+                    // NOTE: For performance sake, we could cache something here (that we created the temp
+                    // table), but for now we assume checking if the table exists is fast enough.
+                    Ok(EMPTY_RELATION.clone())
+                } else {
+                    let result = eval(ctx, expr).await?;
 
-                            let query =
-                                create_table_as(table_name, select_star_from(inner_decl), true);
-                            let _ = ctx
-                                .sql_engine(url.clone())
-                                .await?
-                                .exec(&query, HashMap::new())
-                                .await?;
-                        }
-
-                        return Ok(EMPTY_RELATION.clone());
-                    }
-                    (true, _) => unreachable!("inlined materialization should be a SQL query or another materialized expressoin"),
-                    _ => eval(ctx, expr).await?,
-                };
-
-                Ok(ctx
-                    .materializations
-                    .entry(key.clone())
-                    .or_insert(result)
-                    .clone())
+                    Ok(ctx
+                        .materializations
+                        .entry(key.clone())
+                        .or_insert(result)
+                        .clone())
+                }
             }
             schema::Expr::FnCall(schema::FnCallExpr {
                 func,

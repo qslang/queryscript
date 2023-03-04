@@ -94,7 +94,9 @@ impl SQLEnginePool for ClickHouseEngine {
     async fn new(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>> {
         let mut url = url.get_url().clone();
         url.set_scheme("tcp").unwrap();
-        let conn = Pool::new(url.as_str()).get_handle().await?;
+        let mut conn = Pool::new(url.as_str()).get_handle().await?;
+        conn.ping().await?;
+
         Ok(Box::new(ClickHouseEngine { conn }))
     }
 
@@ -105,6 +107,7 @@ impl SQLEnginePool for ClickHouseEngine {
         let db_name = db_name.strip_prefix("/").unwrap();
         url.set_path("");
         let mut conn = Pool::new(url.as_str()).get_handle().await?;
+        conn.ping().await?;
         conn.execute(format!("DROP DATABASE IF EXISTS \"{}\"", db_name))
             .await?;
         conn.execute(format!("CREATE DATABASE \"{}\"", db_name))
@@ -124,9 +127,7 @@ impl SQLEngine for ClickHouseEngine {
 
         let query = ClickHouseNormalizer::new().normalize(query).as_result()?;
         let query_string = format!("{}", query);
-        eprintln!("QUERY: {}", query_string);
         let result = self.conn.query(query_string).fetch_all().await?;
-        eprintln!("RESULT: {:?}", result);
 
         let mut schema = Vec::new();
         let mut arrays = Vec::new();
@@ -157,7 +158,6 @@ impl SQLEngine for ClickHouseEngine {
 
         let stmt = ClickHouseNormalizer::new().normalize(stmt).as_result()?;
         let query_string = format!("{}", stmt);
-        eprintln!("Statement: {}", query_string);
         self.conn.execute(query_string).await?;
         Ok(())
     }
@@ -197,7 +197,6 @@ impl SQLEngine for ClickHouseEngine {
             let mut block = Block::new();
             for (i, field) in fields.iter().enumerate() {
                 let column = batch.column(i);
-                eprintln!("NULLABLE? {}", field.nullable);
                 block = value::arrow_to_column(block, field.name.as_str(), column.as_ref())?;
             }
             self.conn.insert(&table_name, block).await?;
@@ -230,7 +229,6 @@ impl ClickHouseEngine {
                     continue
                 }
                 Value::Relation(_) => {
-                    eprintln!("ABOUT TO FAIL: {:#?}", param.value);
                     return rt_unimplemented!("Relation parameters in ClickHouse ({:?})", name,);
                 }
                 Value::Fn(_) => {
