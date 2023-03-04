@@ -28,9 +28,12 @@ ts-bindings:
 	cd queryscript/src && cargo test ${CARGO_FLAGS} --features ts export_bindings
 
 
-.PHONY: test refresh-test-data
-test: submodules
+.PHONY: test services refresh-test-data
+test: submodules services
 	cd queryscript/src/ && cargo test ${CARGO_FLAGS} -- --nocapture
+
+services:
+	docker-compose -f services/docker-compose.yml up -d
 
 lfs:
 	git lfs install && git lfs fetch
