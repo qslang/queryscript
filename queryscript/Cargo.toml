@@ -46,7 +46,11 @@ lsp = [
     "tower-lsp",
 ]
 backtraces = ["snafu/backtraces"]
+
+# Engines
 duckdb-bundled = ["duckdb/bundled"]
+
+# mysql = ["mysql_async"]
 
 [dependencies]
 # This version is synchronized with duckdb-rs
@@ -89,11 +93,13 @@ url = "2.3.1"
 
 
 # -- ENGINES ---
-# TODO: We should put each database dependency runtime behind a feature flag
 # DuckDB.
 duckdb = { version = "0.6.1" }
 # These are duckdb dependencies that we access directly
 hashlink = { version = "0.8" }
+
+# MySQL (TODO)
+# mysql_async = { version = "0.31.3", optional = true }
 
 
 # -- CLI ---
