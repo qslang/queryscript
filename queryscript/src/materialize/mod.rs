@@ -110,7 +110,7 @@ fn execute_create_view(
         let result = ctx
             .sql_engine(url.clone())
             .await?
-            .eval(&query, sql_params)
+            .exec(&query, sql_params)
             .await;
 
         completed_ref.unify(&mkcref(()))?;

@@ -52,7 +52,9 @@ pub async fn eval_params<'a>(
 ) -> Result<HashMap<Ident, SQLParam>> {
     let mut param_values = HashMap::new();
     for (name, param) in params {
+        eprintln!("EVALUATING PARAM: {:?} {:#?}", name, param);
         let value = eval(ctx, param).await?;
+        eprintln!("FINISHED EVALUATING PARAM: {:?} = {:?}", name, value);
         param_values.insert(
             name.clone(),
             SQLParam::new(name.clone(), value, &*param.type_.read()?),
@@ -119,8 +121,12 @@ pub fn eval<'a>(
                 decl_name,
                 ..
             }) => {
-                if let Some(value) = ctx.materializations.get(key) {
-                    return Ok(value.clone());
+                eprintln!("LOOKING AT KEY: {}. inlined? {}", key, inlined);
+                if !inlined {
+                    if let Some(value) = ctx.materializations.get(key) {
+                        eprintln!("ALREADY COMPUTED");
+                        return Ok(value.clone());
+                    }
                 }
 
                 let result = match (inlined, expr.expr.as_ref()) {
@@ -134,7 +140,7 @@ pub fn eval<'a>(
                             let _ = ctx
                                 .sql_engine(sql_url.clone())
                                 .await?
-                                .eval(&query, sql_params)
+                                .exec(&query, sql_params)
                                 .await?;
                         }
 
@@ -143,7 +149,27 @@ pub fn eval<'a>(
                         // table), but for now we assume checking if the table exists is fast enough.
                         return Ok(EMPTY_RELATION.clone());
                     }
-                    _ => eval(ctx, expr).await?,
+                    (
+                        true,
+                        schema::Expr::Materialize(schema::MaterializeExpr {
+                            decl_name,
+                            url: sql_url,
+                            ..
+                        }),
+                    ) => {
+                        eprintln!("It's an inlined materialize");
+                        let table_name = decl_name.into();
+                        let engine = ctx.sql_engine(sql_url.clone()).await?;
+
+                        if !engine.table_exists(&table_name).await? {
+                            eval(ctx, &expr).await?;
+                        }
+                        return Ok(EMPTY_RELATION.clone());
+                    }
+                    _ => {
+                        eprintln!("It's something else");
+                        eval(ctx, expr).await?
+                    }
                 };
 
                 Ok(ctx
@@ -180,7 +206,7 @@ pub fn eval<'a>(
                 let engine = ctx.sql_engine(url.clone()).await?;
 
                 // TODO: This ownership model implies some necessary copying (below).
-                let mut rows = engine.eval(&query, sql_params).await?;
+                let mut rows = engine.query(&query, sql_params).await?;
 
                 // Before returning, we perform some runtime checks that might only be necessary in debug mode:
                 // - For expressions, validate that the result is a single row and column

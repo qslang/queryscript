@@ -227,7 +227,7 @@ impl ArrowRecordBatchRelation {
 
 #[async_trait::async_trait]
 impl SQLEngine for DuckDBEngine {
-    async fn eval(
+    async fn query(
         &mut self,
         query: &sqlast::Statement,
         params: HashMap<Ident, SQLParam>,
@@ -237,6 +237,15 @@ impl SQLEngine for DuckDBEngine {
         // yield work). block_in_place() tells Tokio to expect this thread to spend a while working on
         // this stuff and use other threads for other work.
         runtime::expensive(|| self.eval_in_place(query, params))
+    }
+
+    async fn exec(
+        &mut self,
+        stmt: &sqlast::Statement,
+        params: HashMap<Ident, SQLParam>,
+    ) -> Result<()> {
+        self.query(stmt, params).await?;
+        Ok(())
     }
 
     async fn load(
@@ -269,7 +278,7 @@ impl SQLEngine for DuckDBEngine {
         )]
         .into_iter()
         .collect();
-        self.eval(&query, params).await?;
+        self.query(&query, params).await?;
         Ok(())
     }
 

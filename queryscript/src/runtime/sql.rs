@@ -13,11 +13,17 @@ use async_trait::async_trait;
 /// the Rust compiler to ensure exclusive access.
 #[async_trait]
 pub trait SQLEngine: std::fmt::Debug + Send + Sync {
-    async fn eval(
+    async fn query(
         &mut self,
         query: &sqlast::Statement,
         params: HashMap<Ident, SQLParam>,
     ) -> Result<Arc<dyn Relation>>;
+
+    async fn exec(
+        &mut self,
+        stmt: &sqlast::Statement,
+        params: HashMap<Ident, SQLParam>,
+    ) -> Result<()>;
 
     async fn load(
         &mut self,

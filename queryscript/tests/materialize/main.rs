@@ -46,7 +46,7 @@ mod tests {
             match engine_type {
                 SQLEngineType::DuckDB => "SELECT name FROM sqlite_master WHERE type = 'view'",
                 SQLEngineType::ClickHouse => {
-                    "select database, name from system.tables where engine = 'View' AND NOT database ILIKE 'information_schema'"
+                    "select name from system.tables where engine = 'View' AND database=currentDatabase()"
                 }
             },
         )
@@ -194,11 +194,12 @@ mod tests {
 
         // Next, parse, the schema and then modify it depending on the mode
         let schema_file = target_dir.join("schema.qs");
-        replace_url(&data_file, &conn_url);
+        replace_url(&schema_file, &conn_url);
         let view_schema = build_schema(&compiler, mode, &schema_file).unwrap();
         rt.block_on(async { materialize::save_views(&ctx_pool, view_schema.clone()).await })
             .unwrap();
 
+        eprintln!("VIEW SCHEMA: {:#?}", view_schema);
         // Now, snapshot the value of each export view in the view_schema
         let expected_snapshot = rt
             .block_on(async { snapshot(&mut ctx, &view_schema).await })
@@ -233,7 +234,7 @@ mod tests {
                 async {
                     ctx.sql_engine(Some(conn_str.clone()))
                         .await?
-                        .eval(&show_views_query(engine_type), HashMap::new())
+                        .query(&show_views_query(engine_type), HashMap::new())
                         .await
                 }
             })

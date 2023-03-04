@@ -220,6 +220,7 @@ pub fn create_table_as(
         collation: None,
         on_commit: None,
         on_cluster: None,
+        order_by: None,
     }
 }
 
@@ -267,6 +268,7 @@ pub fn create_table(
         collation: None,
         on_commit: None,
         on_cluster: None,
+        order_by: None,
     })
 }
 

@@ -1,4 +1,5 @@
 use sqlparser::{ast as sqlast, ast::Located};
+use std::borrow::Cow;
 use std::cell::RefCell;
 
 use super::error::RuntimeError;
@@ -15,6 +16,10 @@ pub trait Normalizer {
     }
     fn param(&self, key: &str) -> Option<&str>;
 
+    fn preprocess<'a>(&self, stmt: &'a sqlast::Statement) -> Cow<'a, sqlast::Statement> {
+        Cow::Borrowed(stmt)
+    }
+
     fn normalize<'s>(
         &'s self,
         stmt: &sqlast::Statement,
@@ -23,6 +28,8 @@ pub trait Normalizer {
             normalizer: &self,
             errors: RefCell::new(Vec::new()),
         };
+
+        let stmt = self.preprocess(stmt);
         let mut result = MultiResult::new(stmt.visit_sql(&visitor));
         for e in visitor.errors.into_inner() {
             result.add_error(None, e);
