@@ -101,7 +101,8 @@ pub fn coerce_types(lhs_type: &Type, op: &CoerceOp, rhs_type: &Type) -> Option<T
             | BinaryOperator::Minus
             | BinaryOperator::Modulo
             | BinaryOperator::Divide
-            | BinaryOperator::Multiply => mathematics_numerical_coercion(op, lhs_type, rhs_type),
+            | BinaryOperator::Multiply
+            | BinaryOperator::PGExp => mathematics_numerical_coercion(op, lhs_type, rhs_type),
             BinaryOperator::PGRegexMatch
             | BinaryOperator::PGRegexIMatch
             | BinaryOperator::PGRegexNotMatch

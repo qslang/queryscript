@@ -808,7 +808,7 @@ impl<V: SQLVisitor> VisitSQL<V> for ReplaceSelectElement {
     fn visit_sql(&self, visitor: &V) -> Self {
         ReplaceSelectElement {
             expr: self.expr.visit_sql(visitor),
-            colum_name: self.colum_name.clone(), // Do not visit the alias
+            column_name: self.column_name.clone(), // Do not visit the alias
             as_keyword: self.as_keyword,
         }
     }

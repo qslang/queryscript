@@ -39,13 +39,10 @@ impl<'a> Parser<'a> {
         let dialect = &GenericDialect {};
         Parser {
             file: file.to_string(),
-            sqlparser: parser::Parser::new_with_locations(
-                tokens,
-                eof,
-                dialect,
-                Some(parser::ParserOptions {
+            sqlparser: parser::Parser::new_with_locations(tokens, eof, dialect).with_options(
+                parser::ParserOptions {
                     trailing_commas: true,
-                }),
+                },
             ),
         }
     }

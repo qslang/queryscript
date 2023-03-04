@@ -1373,11 +1373,11 @@ fn extract_renamings(
     if let Some(replacements) = &o.opt_replace {
         for item in replacements.items.iter() {
             ret.insert(
-                item.colum_name.get().into(),
+                item.column_name.get().into(),
                 (
-                    item.colum_name.location().clone(),
+                    item.column_name.location().clone(),
                     Renaming::Expr(
-                        Ident::from_located_sqlident(loc.file().clone(), item.colum_name.clone()),
+                        Ident::from_located_sqlident(loc.file().clone(), item.column_name.clone()),
                         compile_sqlarg(
                             compiler.clone(),
                             schema.clone(),

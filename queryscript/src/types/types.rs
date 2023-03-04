@@ -541,7 +541,7 @@ impl TryFrom<&sqlparser::ast::DataType> for Type {
 
             Binary(_) | Varbinary(_) | Blob(_) | Bytea => Type::Atom(AtomicType::Binary),
 
-            Numeric(ni) | Decimal(ni) | Dec(ni) => {
+            Numeric(ni) | Decimal(ni) | Dec(ni) | BigNumeric(ni) | BigDecimal(ni) => {
                 use sqlparser::ast::ExactNumberInfo::*;
                 let (p, s) = match ni {
                     None => (DECIMAL128_MAX_PRECISION, DECIMAL128_MAX_SCALE),
