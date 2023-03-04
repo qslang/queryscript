@@ -44,7 +44,7 @@ impl TryFrom<&SqlType> for Type {
             Nullable(inner) => (*inner).try_into()?,
             Array(inner) => Type::List(Box::new((*inner).try_into()?)),
             Decimal(p, s) => Type::Atom(AtomicType::Decimal128(*p, *s as i8)),
-            Ipv4 | Ipv6 | Uuid | Enum8(..) | Enum16(..) => {
+            Ipv4 | Ipv6 | Uuid | Enum8(..) | Enum16(..) /* | SimpleAggregateFunction(..) | Map(..) */ => {
                 return ts_unimplemented!("ClickHouse type: {:?}", st);
             }
         })
@@ -85,7 +85,7 @@ pub fn column_to_arrow(
         Nullable(inner) => column_to_arrow(column, inner.clone(), true),
         Array(_inner) => todo!("clickhouse arrays"),
         Decimal(_p, _s) => todo!("clickhouse decimals"),
-        Ipv4 | Ipv6 | Uuid | Enum8(..) | Enum16(..) => {
+        Ipv4 | Ipv6 | Uuid | Enum8(..) | Enum16(..) /* |  SimpleAggregateFunction(..) | Map(..) */ => {
             return ts_unimplemented!("ClickHouse type: {:?}", st);
         }
     }

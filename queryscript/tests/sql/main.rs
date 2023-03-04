@@ -7,7 +7,7 @@ mod tests {
     use queryscript::{
         ast::SourceLocation,
         compile::ConnectionString,
-        runtime::{create_database, SQLEngineType},
+        runtime::{create_database, RuntimeError, SQLEngineType},
         types::arrow::ArrowRecordBatchRelation,
     };
     use sqllogictest::{parse, Record};
@@ -83,7 +83,11 @@ mod tests {
                             .unwrap()
                             .unwrap();
 
-                    create_database(url).await
+                    if !matches!(engine_type, SQLEngineType::DuckDB) {
+                        create_database(url).await?;
+                    }
+
+                    Ok::<(), RuntimeError>(())
                 })
                 .unwrap();
 

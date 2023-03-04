@@ -127,10 +127,7 @@ impl SQLEngine for ClickHouseEngine {
 
         let query = ClickHouseNormalizer::new().normalize(query).as_result()?;
         let query_string = format!("{}", query);
-        eprintln!("QUERY: {}", query_string);
-
         let result = self.conn.query(query_string).fetch_all().await?;
-        eprintln!("{:?}", result);
 
         let mut schema = Vec::new();
         let mut arrays = Vec::new();
@@ -211,9 +208,15 @@ impl SQLEngine for ClickHouseEngine {
     /// no standard way to tell what database we're currently in. We should generalize this function
     /// eventually.
     async fn table_exists(&mut self, name: &sqlast::ObjectName) -> Result<bool> {
-        let escaped_name = format!("{}", name).replace("'", "\\'");
+        let ident = if name.0.len() == 1 {
+            name.0[0].get().value.clone()
+        } else {
+            return rt_unimplemented!("Multi-part table names in clickhouse: {}", name);
+        };
+        let escaped_name = ident.replace("'", "\\'");
         let query = format!(
-            "SELECT name FROM system.tables WHERE name = '{escaped_name}' AND database=currentDatabase()"
+            // In ClickHouse, temporary tables are in the '' database and present across any session database
+            "SELECT name FROM system.tables WHERE name = '{escaped_name}' AND (database=currentDatabase() OR database='')"
         );
         Ok(self.conn.query(query).fetch_all().await?.row_count() > 0)
     }
