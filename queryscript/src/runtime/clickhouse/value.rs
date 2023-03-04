@@ -2,7 +2,10 @@ use arrow::array::Array as ArrowArray;
 use chrono::Datelike;
 use std::sync::Arc;
 
-use clickhouse_rs::types::{Column, Complex, DateTimeType, SqlType};
+use clickhouse_rs::{
+    types::{Column, Complex, DateTimeType, SqlType},
+    Block,
+};
 
 use crate::types::{
     arrow::EPOCH_DAYS_FROM_CE,
@@ -86,6 +89,31 @@ pub fn column_to_arrow(
             return ts_unimplemented!("ClickHouse type: {:?}", st);
         }
     }
+}
+
+pub fn arrow_to_column(
+    block: Block,
+    name: &str,
+    array: &dyn ArrowArray,
+) -> crate::types::error::Result<Block> {
+    use arrow::array::*;
+    use arrow::datatypes::DataType::*;
+
+    let data = array.data();
+
+    Ok(match data.data_type() {
+        Null => block.add_column::<Vec<Option<i32>>>(name, vec![None; data.len()]),
+        Int32 => block.add_column::<Vec<Option<i32>>>(
+            name,
+            array
+                .as_any()
+                .downcast_ref::<Int32Array>()
+                .unwrap()
+                .iter()
+                .collect(),
+        ),
+        _ => return ts_unimplemented!("ClickHouse type: {:?}", data.data_type()),
+    })
 }
 
 trait ClickHouseToArrow {

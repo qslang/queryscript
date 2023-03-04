@@ -238,7 +238,14 @@ pub fn create_table(
                     loc: SourceLocation::Unknown,
                 })?,
                 collation: None,
-                options: Vec::new(),
+                options: if f.nullable {
+                    vec![sqlast::ColumnOptionDef {
+                        name: None,
+                        option: sqlast::ColumnOption::Null,
+                    }]
+                } else {
+                    vec![]
+                },
             })
         })
         .collect::<Result<Vec<_>>>()?;

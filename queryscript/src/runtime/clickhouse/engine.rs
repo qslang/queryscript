@@ -1,7 +1,7 @@
 use sqlparser::ast as sqlast;
 use std::{borrow::Cow, cell::RefCell, fmt};
 
-use clickhouse_rs::{types::SqlType, ClientHandle, Pool};
+use clickhouse_rs::{types::SqlType, Block, ClientHandle, Pool};
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
@@ -185,6 +185,26 @@ impl SQLEngine for ClickHouseEngine {
 
         let create_table_stmt = create_table(table.clone(), &fields, temporary)?;
         self.exec(&create_table_stmt, HashMap::new()).await?;
+
+        let relation = match value {
+            Value::Relation(relation) => relation,
+            _ => {
+                return rt_unimplemented!("Loading non-relation values into ClickHouse");
+            }
+        };
+
+        let table_name = format!("{}", table);
+        for batch_idx in 0..relation.num_batches() {
+            let batch = relation.batch(batch_idx).as_arrow_recordbatch();
+            let mut block = Block::new();
+            for (i, field) in fields.iter().enumerate() {
+                let column = batch.column(i);
+                eprintln!("NULLABLE? {}", field.nullable);
+                block = value::arrow_to_column(block, field.name.as_str(), column.as_ref())?;
+            }
+            self.conn.insert(&table_name, block).await?;
+        }
+
         Ok(())
     }
 
