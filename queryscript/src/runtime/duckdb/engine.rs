@@ -400,7 +400,7 @@ impl SQLEnginePool for DuckDBEngine {
 
     async fn create(url: Arc<ConnectionString>) -> Result<()> {
         // DuckDB will create the database if it doesn't exist.
-        let conn = Self::new(url).await?;
+        let _ = Self::new(url).await?;
         Ok(())
     }
 }

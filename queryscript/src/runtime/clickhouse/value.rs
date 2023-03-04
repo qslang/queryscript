@@ -1,5 +1,5 @@
 use arrow::array::Array as ArrowArray;
-use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
 use std::sync::Arc;
 
 use clickhouse_rs::{

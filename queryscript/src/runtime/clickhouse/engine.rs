@@ -1,17 +1,15 @@
 use sqlparser::ast as sqlast;
-use std::{borrow::Cow, cell::RefCell, fmt};
+use std::{borrow::Cow, fmt};
 
 use clickhouse_rs::{types::SqlType, Block, ClientHandle, Pool};
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
-    ast::{Ident, ToSqlIdent},
-    compile::{sql::create_table, traverse::VisitSQL, ConnectionString},
-    error::MultiResult,
+    ast::Ident,
+    compile::{sql::create_table, ConnectionString},
     runtime::{
-        error::rt_unimplemented,
-        normalize::{Normalizer, NormalizerVisitor},
-        Result, RuntimeError, SQLEngine, SQLEnginePool, SQLEngineType, SQLParam,
+        error::rt_unimplemented, normalize::Normalizer, Result, SQLEngine, SQLEnginePool,
+        SQLEngineType, SQLParam,
     },
     types::{
         arrow::{ArrowRecordBatchRelation, EmptyRelation},
