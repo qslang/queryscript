@@ -1,5 +1,5 @@
 use arrow::array::Array as ArrowArray;
-use chrono::Datelike;
+use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use std::sync::Arc;
 
 use clickhouse_rs::{
@@ -83,8 +83,8 @@ pub fn column_to_arrow(
             DateTimeType::Chrono => TimestampMicrosecondArray::to_arrow(column, nullable),
         },
         Nullable(inner) => column_to_arrow(column, inner.clone(), true),
-        Array(inner) => todo!("clickhouse arrays"),
-        Decimal(p, s) => todo!("clickhouse decimals"),
+        Array(_inner) => todo!("clickhouse arrays"),
+        Decimal(_p, _s) => todo!("clickhouse decimals"),
         Ipv4 | Ipv6 | Uuid | Enum8(..) | Enum16(..) => {
             return ts_unimplemented!("ClickHouse type: {:?}", st);
         }
@@ -103,15 +103,33 @@ pub fn arrow_to_column(
 
     Ok(match data.data_type() {
         Null => block.add_column::<Vec<Option<i32>>>(name, vec![None; data.len()]),
-        Int32 => block.add_column::<Vec<Option<i32>>>(
-            name,
-            array
-                .as_any()
-                .downcast_ref::<Int32Array>()
-                .unwrap()
-                .iter()
-                .collect(),
-        ),
+        UInt8 => UInt8Array::to_block(name, array, block),
+        UInt16 => UInt16Array::to_block(name, array, block),
+        UInt32 => UInt32Array::to_block(name, array, block),
+        UInt64 => UInt64Array::to_block(name, array, block),
+        Int8 => Int8Array::to_block(name, array, block),
+        Int16 => Int16Array::to_block(name, array, block),
+        Int32 => Int32Array::to_block(name, array, block),
+        Int64 => Int64Array::to_block(name, array, block),
+        Utf8 => StringArray::to_block(name, array, block),
+        Float32 => Float32Array::to_block(name, array, block),
+        Float64 => Float64Array::to_block(name, array, block),
+        Date32 => Date32Array::to_block(name, array, block),
+        Time64(tu) => match tu {
+            arrow::datatypes::TimeUnit::Second => {
+                TimestampSecondArray::to_block(name, array, block)
+            }
+            arrow::datatypes::TimeUnit::Millisecond => {
+                TimestampMillisecondArray::to_block(name, array, block)
+            }
+            arrow::datatypes::TimeUnit::Microsecond => {
+                TimestampMicrosecondArray::to_block(name, array, block)
+            }
+            arrow::datatypes::TimeUnit::Nanosecond => {
+                TimestampNanosecondArray::to_block(name, array, block)
+            }
+        },
+
         _ => return ts_unimplemented!("ClickHouse type: {:?}", data.data_type()),
     })
 }
@@ -121,6 +139,12 @@ trait ClickHouseToArrow {
         column: &Column<Complex>,
         nullable: bool,
     ) -> crate::types::error::Result<Arc<dyn ArrowArray>>;
+
+    fn to_block(
+        name: &str,
+        array: &dyn arrow::array::Array,
+        block: clickhouse_rs::Block,
+    ) -> clickhouse_rs::Block;
 }
 
 macro_rules! primitive_array_conversion {
@@ -139,6 +163,22 @@ macro_rules! primitive_array_conversion {
                         column.iter::<$ch_type>()?.map(|i| *i),
                     )))
                 }
+            }
+
+            fn to_block(
+                name: &str,
+                array: &dyn arrow::array::Array,
+                block: clickhouse_rs::Block,
+            ) -> clickhouse_rs::Block {
+                block.add_column::<Vec<Option<$ch_type>>>(
+                    name,
+                    array
+                        .as_any()
+                        .downcast_ref::<arrow::array::$arrow_array>()
+                        .unwrap()
+                        .iter()
+                        .collect(),
+                )
             }
         }
     };
@@ -176,6 +216,23 @@ impl ClickHouseToArrow for arrow::array::StringArray {
             Arc::new(arrow::array::StringArray::from_iter_values(strings))
         })
     }
+
+    fn to_block(
+        name: &str,
+        array: &dyn arrow::array::Array,
+        block: clickhouse_rs::Block,
+    ) -> clickhouse_rs::Block {
+        block.add_column::<Vec<&str>>(
+            name,
+            array
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap()
+                .iter()
+                .map(|i| i.expect("non-null string in ClickHouse"))
+                .collect(),
+        )
+    }
 }
 
 impl ClickHouseToArrow for arrow::array::Date32Array {
@@ -190,10 +247,36 @@ impl ClickHouseToArrow for arrow::array::Date32Array {
                 .map(|i| Some(i.num_days_from_ce() - EPOCH_DAYS_FROM_CE)),
         )))
     }
+
+    fn to_block(
+        name: &str,
+        array: &dyn arrow::array::Array,
+        block: clickhouse_rs::Block,
+    ) -> clickhouse_rs::Block {
+        block.add_column::<Vec<Option<chrono::DateTime<_>>>>(
+            name,
+            array
+                .as_any()
+                .downcast_ref::<arrow::array::Date32Array>()
+                .unwrap()
+                .into_iter()
+                .map(|i| {
+                    i.map(|i| {
+                        let tz = chrono_tz::UTC;
+                        tz.from_local_datetime(&NaiveDateTime::new(
+                            NaiveDate::from_num_days_from_ce_opt(i + EPOCH_DAYS_FROM_CE).unwrap(),
+                            NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+                        ))
+                        .unwrap()
+                    })
+                })
+                .collect(),
+        )
+    }
 }
 
 macro_rules! timestamp_array_conversion {
-    ($arrow_array:tt, $timestamp_method:tt) => {
+    ($arrow_array:tt, $timestamp_method:tt, $denominator:literal) => {
         impl ClickHouseToArrow for arrow::array::$arrow_array {
             fn to_arrow(
                 column: &Column<Complex>,
@@ -205,11 +288,40 @@ macro_rules! timestamp_array_conversion {
                         .map(|i| Some(i.$timestamp_method())),
                 )))
             }
+
+            fn to_block(
+                name: &str,
+                array: &dyn arrow::array::Array,
+                block: clickhouse_rs::Block,
+            ) -> clickhouse_rs::Block {
+                block.add_column::<Vec<Option<chrono::DateTime<_>>>>(
+                    name,
+                    array
+                        .as_any()
+                        .downcast_ref::<arrow::array::$arrow_array>()
+                        .unwrap()
+                        .into_iter()
+                        .map(|i| {
+                            i.map(|i| {
+                                let tz = chrono_tz::UTC;
+                                tz.from_local_datetime(
+                                    &NaiveDateTime::from_timestamp_opt(
+                                        i / $denominator,
+                                        (i % $denominator) as u32,
+                                    )
+                                    .unwrap(),
+                                )
+                                .unwrap()
+                            })
+                        })
+                        .collect(),
+                )
+            }
         }
     };
 }
 
-timestamp_array_conversion!(TimestampSecondArray, timestamp);
-timestamp_array_conversion!(TimestampMillisecondArray, timestamp_millis);
-timestamp_array_conversion!(TimestampMicrosecondArray, timestamp_micros);
-timestamp_array_conversion!(TimestampNanosecondArray, timestamp_nanos);
+timestamp_array_conversion!(TimestampSecondArray, timestamp, 1000000000);
+timestamp_array_conversion!(TimestampMillisecondArray, timestamp_millis, 1000000);
+timestamp_array_conversion!(TimestampMicrosecondArray, timestamp_micros, 1000);
+timestamp_array_conversion!(TimestampNanosecondArray, timestamp_nanos, 1);

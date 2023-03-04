@@ -2,7 +2,7 @@ use futures::future::{BoxFuture, FutureExt};
 use std::collections::HashMap;
 
 use crate::compile::schema;
-use crate::compile::sql::create_table_as;
+use crate::compile::sql::{create_table_as, select_star_from};
 use crate::{
     ast::Ident,
     types,
@@ -52,9 +52,7 @@ pub async fn eval_params<'a>(
 ) -> Result<HashMap<Ident, SQLParam>> {
     let mut param_values = HashMap::new();
     for (name, param) in params {
-        eprintln!("EVALUATING PARAM: {:?} {:#?}", name, param);
         let value = eval(ctx, param).await?;
-        eprintln!("FINISHED EVALUATING PARAM: {:?} = {:?}", name, value);
         param_values.insert(
             name.clone(),
             SQLParam::new(name.clone(), value, &*param.type_.read()?),
@@ -119,26 +117,23 @@ pub fn eval<'a>(
                 expr,
                 inlined,
                 decl_name,
+                url,
                 ..
             }) => {
-                eprintln!("LOOKING AT KEY: {}. inlined? {}", key, inlined);
-                if !inlined {
-                    if let Some(value) = ctx.materializations.get(key) {
-                        eprintln!("ALREADY COMPUTED");
-                        return Ok(value.clone());
-                    }
+                if let (false, Some(value)) = (inlined, ctx.materializations.get(key)) {
+                    return Ok(value.clone());
                 }
 
                 let result = match (inlined, expr.expr.as_ref()) {
-                    (true, schema::Expr::SQL(sql, sql_url)) => {
+                    (true, schema::Expr::SQL(sql, _)) => {
                         let table_name = decl_name.into();
-                        let engine = ctx.sql_engine(sql_url.clone()).await?;
+                        let engine = ctx.sql_engine(url.clone()).await?;
 
                         if !engine.table_exists(&table_name).await? {
                             let query = create_table_as(table_name, sql.body.as_query()?, true);
                             let sql_params = eval_params(ctx, &sql.names.params).await?;
                             let _ = ctx
-                                .sql_engine(sql_url.clone())
+                                .sql_engine(url.clone())
                                 .await?
                                 .exec(&query, sql_params)
                                 .await?;
@@ -152,24 +147,29 @@ pub fn eval<'a>(
                     (
                         true,
                         schema::Expr::Materialize(schema::MaterializeExpr {
-                            decl_name,
-                            url: sql_url,
+                            decl_name: inner_decl,
                             ..
                         }),
                     ) => {
-                        eprintln!("It's an inlined materialize");
                         let table_name = decl_name.into();
-                        let engine = ctx.sql_engine(sql_url.clone()).await?;
+                        let engine = ctx.sql_engine(url.clone()).await?;
 
                         if !engine.table_exists(&table_name).await? {
                             eval(ctx, &expr).await?;
+
+                            let query =
+                                create_table_as(table_name, select_star_from(inner_decl), true);
+                            let _ = ctx
+                                .sql_engine(url.clone())
+                                .await?
+                                .exec(&query, HashMap::new())
+                                .await?;
                         }
+
                         return Ok(EMPTY_RELATION.clone());
                     }
-                    _ => {
-                        eprintln!("It's something else");
-                        eval(ctx, expr).await?
-                    }
+                    (true, _) => unreachable!("inlined materialization should be a SQL query or another materialized expressoin"),
+                    _ => eval(ctx, expr).await?,
                 };
 
                 Ok(ctx

@@ -153,7 +153,19 @@ pub fn select_no_from(
     )
 }
 
-pub fn select_star_from(relation: sqlast::TableFactor) -> sqlast::Query {
+impl Into<sqlast::TableFactor> for &Ident {
+    fn into(self) -> sqlast::TableFactor {
+        sqlast::TableFactor::Table {
+            name: sqlast::ObjectName(vec![sqlast::Located::new(self.into(), None)]),
+            alias: None,
+            args: None,
+            columns_definition: None,
+            with_hints: Vec::new(),
+        }
+    }
+}
+
+pub fn select_star_from<T: Into<sqlast::TableFactor>>(relation: T) -> sqlast::Query {
     select_from(
         vec![sqlast::SelectItem::Wildcard(WildcardAdditionalOptions {
             opt_exclude: None,
@@ -162,7 +174,7 @@ pub fn select_star_from(relation: sqlast::TableFactor) -> sqlast::Query {
             opt_replace: None,
         })],
         vec![sqlast::TableWithJoins {
-            relation,
+            relation: relation.into(),
             joins: Vec::new(),
         }],
     )
