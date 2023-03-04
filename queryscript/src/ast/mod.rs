@@ -69,7 +69,8 @@ impl SourceLocation {
                 r.start.line,
                 r.start.column,
                 r.end.column,
-                &lines[r.start.line as usize - 1..r.end.line as usize],
+                &lines
+                    [r.start.line as usize - 1..(std::cmp::min(r.end.line as usize, lines.len()))],
             ),
         };
 
