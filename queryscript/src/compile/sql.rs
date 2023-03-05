@@ -1524,7 +1524,7 @@ fn compile_select_item(
     // Construct a scope that includes the projection terms we've seen so far. We clone it so that
     // each term can be compiled in parallel with the exact set of projection terms that it's
     // allowed to see
-    let scope = mkref(scope.read()?.clone());
+    let scope = SQLScope::deep_copy(scope)?;
     scope.write()?.projection_terms = projection_terms.clone();
 
     Ok(match select_item {
