@@ -153,10 +153,20 @@ pub fn select_no_from(
     )
 }
 
-impl Into<sqlast::TableFactor> for &Ident {
-    fn into(self) -> sqlast::TableFactor {
+pub trait IntoTableFactor {
+    fn into_table_factor(self) -> sqlast::TableFactor;
+}
+
+impl IntoTableFactor for sqlast::TableFactor {
+    fn into_table_factor(self) -> sqlast::TableFactor {
+        self
+    }
+}
+
+impl IntoTableFactor for sqlast::Located<sqlast::Ident> {
+    fn into_table_factor(self) -> sqlast::TableFactor {
         sqlast::TableFactor::Table {
-            name: sqlast::ObjectName(vec![sqlast::Located::new(self.into(), None)]),
+            name: sqlast::ObjectName(vec![self]),
             alias: None,
             args: None,
             columns_definition: None,
@@ -165,7 +175,13 @@ impl Into<sqlast::TableFactor> for &Ident {
     }
 }
 
-pub fn select_star_from<T: Into<sqlast::TableFactor>>(relation: T) -> sqlast::Query {
+impl IntoTableFactor for &Ident {
+    fn into_table_factor(self) -> sqlast::TableFactor {
+        sqlast::Located::new(Into::<sqlast::Ident>::into(self), None).into_table_factor()
+    }
+}
+
+pub fn select_star_from<T: IntoTableFactor>(relation: T) -> sqlast::Query {
     select_from(
         vec![sqlast::SelectItem::Wildcard(WildcardAdditionalOptions {
             opt_exclude: None,
@@ -174,7 +190,7 @@ pub fn select_star_from<T: Into<sqlast::TableFactor>>(relation: T) -> sqlast::Qu
             opt_replace: None,
         })],
         vec![sqlast::TableWithJoins {
-            relation: relation.into(),
+            relation: relation.into_table_factor(),
             joins: Vec::new(),
         }],
     )
@@ -1898,13 +1914,7 @@ pub fn compile_sqlquery(
                             type_: SType::new_mono(type_.clone()),
                             expr: mkcref(Expr::native_sql(Arc::new(SQL {
                                 names: SQLNames::new(),
-                                body: SQLBody::Table(sqlast::TableFactor::Table {
-                                    name: sqlast::ObjectName(vec![cte.alias.name.clone()]),
-                                    alias: None,
-                                    args: None,
-                                    columns_definition: None,
-                                    with_hints: Vec::new(),
-                                }),
+                                body: SQLBody::Table(cte.alias.name.clone().into_table_factor()),
                             }))),
                         },
                     },
