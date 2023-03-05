@@ -3,7 +3,6 @@ version: "3.1"
 services:
   pg:
     image: postgres:15
-    restart: always
     environment:
       POSTGRES_PASSWORD: example
     ports:
@@ -21,6 +20,6 @@ services:
       nofile:
         soft: 262144
         hard: 262144
-#    volumes:
-#      - ./data/clickhouse:/var/lib/clickhouse/
-#      - ./logs/clickhouse:/var/log/clickhouse-server/
+    volumes:
+      - ./data/clickhouse:/var/lib/clickhouse/
+      - ./logs/clickhouse:/var/log/clickhouse-server/

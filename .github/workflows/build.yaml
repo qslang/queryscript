@@ -54,6 +54,26 @@ jobs:
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
 
+    services:
+      pg:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: example
+        ports:
+          - 5471:5432
+        volumes:
+          - ./data/postgres:/var/lib/postgresql/data
+
+      clickhouse:
+        image: clickhouse/clickhouse-server:23
+        env:
+          CLICKHOUSE_PASSWORD: example
+        ports:
+          - 5472:9000
+        volumes:
+          - ./data/clickhouse:/var/lib/clickhouse/
+          - ./logs/clickhouse:/var/log/clickhouse-server/
+
     env:
       RA_TARGET: ${{ matrix.target }}
 
@@ -131,10 +151,6 @@ jobs:
           restore-keys: |
             ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}-release-
             ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}
-
-      - uses: isbang/compose-action@v1.4.1
-        with:
-          compose-file: "./services/docker-compose.yml"
 
       - name: Make
         run: make all
