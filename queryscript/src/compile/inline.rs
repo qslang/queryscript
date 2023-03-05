@@ -261,6 +261,5 @@ pub async fn inline_params(expr: &Expr<CRef<MType>>) -> Result<Expr<CRef<MType>>
     let visitor = ParamInliner {
         context: BTreeMap::new(),
     };
-    eprintln!("FINAL EXPR BEFORE INLINING: {:#?}", expr);
     Ok(expr.visit(&visitor).await?)
 }

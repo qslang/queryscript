@@ -286,9 +286,6 @@ impl<T: 'static + Constrainable> CRef<T> {
         if !us.is_known()? || !them.is_known()? {
             us.union(&them)?;
         } else {
-            eprintln!("US: {:?}", us);
-            eprintln!("US KNOWN: {:?}", us.is_known());
-            eprintln!("THEM: {:?}", them);
             us.must()
                 .context(RuntimeSnafu {
                     loc: ErrorLocation::Unknown,
