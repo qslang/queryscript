@@ -44,6 +44,17 @@
                 backtrace: None,
             },
         ),
+        (
+            Some(
+                4,
+            ),
+            NoSuchEntry {
+                path: [
+                    "users",
+                ],
+                backtrace: None,
+            },
+        ),
     ],
     "decls": {},
     "queries": [],

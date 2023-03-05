@@ -59,6 +59,10 @@ impl SQLScope {
         Self::new(None)
     }
 
+    pub fn deep_copy(scope: &Ref<SQLScope>) -> Result<Ref<SQLScope>> {
+        Ok(mkref(scope.read()?.clone()))
+    }
+
     pub fn get_relation(&self, name: &Ident) -> Result<Option<(CRef<MType>, SourceLocation)>> {
         Ok(match self.relations.get(name) {
             Some((t, loc)) => Some((t.clone(), loc.clone())),

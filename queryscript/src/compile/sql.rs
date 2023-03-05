@@ -153,10 +153,20 @@ pub fn select_no_from(
     )
 }
 
-impl Into<sqlast::TableFactor> for &Ident {
-    fn into(self) -> sqlast::TableFactor {
+pub trait IntoTableFactor {
+    fn to_table_factor(self) -> sqlast::TableFactor;
+}
+
+impl IntoTableFactor for sqlast::TableFactor {
+    fn to_table_factor(self) -> sqlast::TableFactor {
+        self
+    }
+}
+
+impl IntoTableFactor for sqlast::Located<sqlast::Ident> {
+    fn to_table_factor(self) -> sqlast::TableFactor {
         sqlast::TableFactor::Table {
-            name: sqlast::ObjectName(vec![sqlast::Located::new(self.into(), None)]),
+            name: sqlast::ObjectName(vec![self]),
             alias: None,
             args: None,
             columns_definition: None,
@@ -165,7 +175,13 @@ impl Into<sqlast::TableFactor> for &Ident {
     }
 }
 
-pub fn select_star_from<T: Into<sqlast::TableFactor>>(relation: T) -> sqlast::Query {
+impl IntoTableFactor for &Ident {
+    fn to_table_factor(self) -> sqlast::TableFactor {
+        sqlast::Located::new(Into::<sqlast::Ident>::into(self), None).to_table_factor()
+    }
+}
+
+pub fn select_star_from<T: IntoTableFactor>(relation: T) -> sqlast::Query {
     select_from(
         vec![sqlast::SelectItem::Wildcard(WildcardAdditionalOptions {
             opt_exclude: None,
@@ -174,7 +190,7 @@ pub fn select_star_from<T: Into<sqlast::TableFactor>>(relation: T) -> sqlast::Qu
             opt_replace: None,
         })],
         vec![sqlast::TableWithJoins {
-            relation: relation.into(),
+            relation: relation.to_table_factor(),
             joins: Vec::new(),
         }],
     )
@@ -1524,7 +1540,7 @@ fn compile_select_item(
     // Construct a scope that includes the projection terms we've seen so far. We clone it so that
     // each term can be compiled in parallel with the exact set of projection terms that it's
     // allowed to see
-    let scope = mkref(scope.read()?.clone());
+    let scope = SQLScope::deep_copy(scope)?;
     scope.write()?.projection_terms = projection_terms.clone();
 
     Ok(match select_item {
@@ -1848,13 +1864,103 @@ pub async fn finish_sqlexpr(
 
 pub fn compile_sqlquery(
     compiler: Compiler,
-    schema: Ref<Schema>,
+    mut schema: Ref<Schema>,
     parent_scope: Option<Ref<SQLScope>>,
     loc: &SourceLocation,
     query: &sqlast::Query,
 ) -> Result<(Ref<SQLScope>, CRef<MType>, CRefSnippet<sqlast::Query>)> {
-    if query.with.is_some() {
-        return Err(CompileError::unimplemented(loc.clone(), "WITH"));
+    let mut with_clause: Option<CRef<CWrap<CSQLSnippet<sqlast::With>>>> = None;
+    if let Some(with) = &query.with {
+        if with.recursive {
+            return Err(CompileError::unimplemented(loc.clone(), "recursive CTE"));
+        }
+
+        let file = schema.read()?.file.clone();
+        schema = Schema::derive(schema)?;
+
+        let mut with_exprs = Vec::new();
+        let mut aliases = Vec::new();
+
+        for cte in with.cte_tables.iter() {
+            let scope = SQLScope::new(parent_scope.clone());
+            if cte.from.is_some() {
+                // I don't think the parser ever generates FROM expressions in CTEs...
+                return Err(CompileError::unimplemented(
+                    loc.clone(),
+                    "CTE with FROM clause",
+                ));
+            }
+
+            let (_, type_, expr) = compile_sqlquery(
+                compiler.clone(),
+                schema.clone(),
+                Some(scope),
+                loc,
+                &cte.query,
+            )?;
+
+            let name = Ident::from_located_sqlident(Some(file.clone()), cte.alias.name.clone());
+            match schema.write()?.expr_decls.entry(name.get().clone()) {
+                std::collections::btree_map::Entry::Occupied(_) => {
+                    return Err(CompileError::duplicate_entry(vec![name.clone()]))
+                }
+                std::collections::btree_map::Entry::Vacant(v) => v.insert(Located::new(
+                    Decl {
+                        public: false,
+                        extern_: false,
+                        is_arg: false,
+                        name: name.clone(),
+                        value: STypedExpr {
+                            type_: SType::new_mono(type_.clone()),
+                            expr: mkcref(Expr::native_sql(Arc::new(SQL {
+                                names: SQLNames::new(),
+                                body: SQLBody::Table(cte.alias.name.clone().to_table_factor()),
+                            }))),
+                        },
+                    },
+                    loc.clone(),
+                )),
+            };
+
+            aliases.push(cte.alias.clone());
+            with_exprs.push(expr);
+        }
+
+        let with_exprs = combine_crefs(with_exprs)?;
+        with_clause = Some(compiler.async_cref(casync!({
+            let with_exprs = with_exprs.await?;
+            let with_exprs = with_exprs.read()?;
+
+            let with_exprs = with_exprs
+                .iter()
+                .map(|e| cunwrap(e.clone()))
+                .collect::<Result<Vec<_>>>()?;
+
+            let mut names = CSQLNames::new();
+            let body = sqlast::With {
+                recursive: false,
+                cte_tables: aliases
+                    .into_iter()
+                    .zip(with_exprs.into_iter())
+                    .map(|(alias, expr)| {
+                        let SQLSnippet {
+                            names: expr_names,
+                            body,
+                        } = expr;
+
+                        names.extend(expr_names);
+
+                        sqlast::Cte {
+                            alias,
+                            query: Box::new(body),
+                            from: None,
+                        }
+                    })
+                    .collect(),
+            };
+
+            Ok(CSQLSnippet::wrap(names, body))
+        }))?);
     }
 
     let limit = match &query.limit {
@@ -1915,8 +2021,27 @@ pub fn compile_sqlquery(
             let loc = loc.clone();
             let compiler = compiler.clone();
             casync!({
+                let mut names = SQLNames::new();
+
+                let with = match with_clause {
+                    Some(with) => {
+                        let SQLSnippet {
+                            names: body_names,
+                            body,
+                        } = cunwrap(with.await?)?;
+                        names.extend(body_names);
+                        Some(body)
+                    }
+                    None => None,
+                };
+
                 let body = cunwrap(set_expr.await?)?;
-                let SQLSnippet { mut names, body } = body;
+                let SQLSnippet {
+                    names: body_names,
+                    body,
+                } = body;
+                names.extend(body_names);
+
                 let limit = match limit {
                     Some(limit) => Some(finish_sqlexpr(&loc, limit.expr, &mut names).await?),
                     None => None,
@@ -1941,7 +2066,7 @@ pub fn compile_sqlquery(
                 Ok(SQLSnippet::wrap(
                     names,
                     sqlast::Query {
-                        with: None,
+                        with,
                         body: Box::new(body),
                         order_by,
                         limit,
@@ -1970,13 +2095,13 @@ pub fn compile_setexpr(
             Ok((
                 scope,
                 type_,
-                compiler.async_cref(async move {
+                compiler.async_cref(casync!({
                     let (names, body) = cunwrap(select.await?)?;
                     Ok(SQLSnippet::wrap(
                         names,
                         sqlast::SetExpr::Select(Box::new(body)),
                     ))
-                })?,
+                }))?,
             ))
         }
         sqlast::SetExpr::Query(q) => {
@@ -1986,13 +2111,13 @@ pub fn compile_setexpr(
             Ok((
                 scope,
                 type_,
-                compiler.async_cref(async move {
+                compiler.async_cref(casync!({
                     let query = cunwrap(query.await?)?;
                     Ok(SQLSnippet::wrap(
                         query.names,
                         sqlast::SetExpr::Query(Box::new(query.body)),
                     ))
-                })?,
+                }))?,
             ))
         }
         sqlast::SetExpr::SetOperation {
@@ -2014,7 +2139,7 @@ pub fn compile_setexpr(
                 left_scope,
                 left_type,
                 compiler.async_cref({
-                    async move {
+                    casync!({
                         let left = cunwrap(left_set_expr.await?)?;
                         let right = cunwrap(right_set_expr.await?)?;
 
@@ -2037,7 +2162,7 @@ pub fn compile_setexpr(
                                 right: Box::new(right_body),
                             },
                         ))
-                    }
+                    })
                 })?,
             ))
         }
@@ -2072,7 +2197,7 @@ fn apply_sqlcast(
         .try_into()
         .context(TypesystemSnafu { loc: loc.clone() })?;
 
-    Ok(compiler.async_cref(async move {
+    Ok(compiler.async_cref(casync!({
         let final_type = arg.type_.await?;
         let final_expr = arg.sql.clone_inner().await?;
 
@@ -2093,7 +2218,7 @@ fn apply_sqlcast(
             names: final_expr.names,
             body: SQLBody::Expr(inner_expr),
         }))
-    })?)
+    }))?)
 }
 
 #[async_backtrace::framed]
@@ -2199,7 +2324,7 @@ pub fn schema_infer_load_fn(
     args: Vec<TypedNameAndExpr<CRef<MType>>>,
     inner_type: CRef<MType>,
 ) -> impl std::future::Future<Output = Result<()>> + Send + 'static {
-    async move {
+    casync!({
         let mut ctx = crate::runtime::Context::new(
             schema.read()?.folder.clone(),
             crate::runtime::SQLEngineType::DuckDB,
@@ -2229,7 +2354,7 @@ pub fn schema_infer_load_fn(
 
         inner_type.unify(&inferred_mtype)?;
         Ok(())
-    }
+    })
 }
 
 // This implementation is used to compile OrderByExprs that cannot refer to projection
@@ -2247,7 +2372,7 @@ impl CompileSQL for sqlast::OrderByExpr {
 
         let asc = self.asc.clone();
         let nulls_first = self.nulls_first.clone();
-        Ok(compiler.async_cref(async move {
+        Ok(compiler.async_cref(casync!({
             let ob = cunwrap(cexpr.await?)?;
             Ok(CSQLSnippet::wrap(
                 ob.names,
@@ -2257,7 +2382,7 @@ impl CompileSQL for sqlast::OrderByExpr {
                     nulls_first,
                 },
             ))
-        })?)
+        }))?)
     }
 }
 
