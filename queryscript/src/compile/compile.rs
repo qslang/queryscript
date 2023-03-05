@@ -1411,7 +1411,7 @@ pub fn compile_schema_entries(
     result
 }
 
-#[derive(Eq, PartialEq)]
+#[derive(Debug)]
 pub enum FnContext {
     Decl,
     Call,
@@ -1422,6 +1422,7 @@ pub fn compile_fn_body(
     schema: Ref<Schema>,
     loc: SourceLocation,
     def: &ast::FnDef,
+    precompiled_args: BTreeMap<Ident, TypedNameAndExpr<CRef<MType>>>,
     context: FnContext,
 ) -> Result<(CTypedExpr, Vec<Located<Ident>>)> {
     let mut def = def.clone();
@@ -1472,7 +1473,7 @@ pub fn compile_fn_body(
                     ))
                 }
             })?;
-        } else if context == FnContext::Call {
+        } else if matches!(context, FnContext::Call) {
             unknowns.insert(generic.get().clone(), unknown);
         }
     }
@@ -1483,12 +1484,33 @@ pub fn compile_fn_body(
         if schema.read()?.expr_decls.get(&arg.name).is_some() {
             return Err(CompileError::duplicate_entry(vec![arg.name.clone()]));
         }
-        let mut type_ = resolve_type(compiler.clone(), schema.clone(), &arg.type_)?;
-        if compile_body {
-            type_ = type_.substitute(&unknowns)?;
-        }
 
-        let stype = SType::new_mono(type_.clone());
+        let (value, type_) = match precompiled_args.get(arg.name.get()) {
+            Some(value) => (
+                STypedExpr {
+                    type_: SType::new_mono(value.type_.clone()),
+                    expr: mkcref(value.expr.as_ref().clone()),
+                },
+                value.type_.clone(),
+            ),
+            None => {
+                let mut type_ = resolve_type(compiler.clone(), schema.clone(), &arg.type_)?;
+                if compile_body {
+                    type_ = type_.substitute(&unknowns)?;
+                }
+
+                let stype = SType::new_mono(type_.clone());
+                (
+                    STypedExpr {
+                        type_: stype.clone(),
+                        expr: mkcref(Expr::ContextRef(arg.name.get().clone())),
+                    },
+                    type_,
+                )
+            }
+        };
+
+        let stype = value.type_.clone();
         schema.write()?.expr_decls.insert(
             arg.name.get().clone(),
             Located::new(
@@ -1497,10 +1519,7 @@ pub fn compile_fn_body(
                     extern_: true,
                     is_arg: true,
                     name: arg.name.clone(),
-                    value: STypedExpr {
-                        type_: stype.clone(),
-                        expr: mkcref(Expr::ContextRef(arg.name.get().clone())),
-                    },
+                    value,
                 },
                 loc.clone(),
             ),
@@ -1569,6 +1588,7 @@ pub fn compile_fn_body(
                 true,
             ),
             ast::FnBody::Expr(expr) => {
+                eprintln!("COMPILING FUNCTION EXPR: {:?}", expr);
                 (compile_expr(compiler.clone(), schema.clone(), expr)?, false)
             }
         };
@@ -1631,6 +1651,7 @@ fn compile_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
                 schema.clone(),
                 loc.clone(),
                 def,
+                BTreeMap::new(),
                 FnContext::Decl,
             )?;
 
