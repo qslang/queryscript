@@ -1443,6 +1443,11 @@ pub fn compile_fn_body(
     }
 
     let has_expr_body = matches!(def.body, ast::FnBody::Expr(_));
+
+    // TODO: We used to also compile_decls that do not have generics (i.e. def.generics.is_empty())
+    // but have disabled this because expressions may contain for loops, which could affect the type
+    // of the function. There is likely a better solution that captures loops/conditionals as some
+    // kind of generically typed value.
     let can_compile_decl = !has_expr_body;
 
     let compile_body = match context {

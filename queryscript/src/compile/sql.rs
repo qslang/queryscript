@@ -3315,7 +3315,7 @@ pub fn compile_sqlexpr(
                                 .map(|e| (e.name.clone(), e.clone()))
                                 .collect::<BTreeMap<_, _>>();
 
-                            let (compiled_body, generics) = compile_fn_body(
+                            let (compiled_body, _generics) = compile_fn_body(
                                 compiler.clone(),
                                 schema.clone(),
                                 loc.clone(),
@@ -3323,6 +3323,8 @@ pub fn compile_sqlexpr(
                                 arg_map,
                                 FnContext::Call,
                             )?;
+                            // NOTE: See comment in compile_fn_body() about why we don't
+                            // compile functions, even without generics.
                             /*
                             if generics.is_empty() {
                                 return Err(CompileError::internal(
