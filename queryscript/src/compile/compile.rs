@@ -1443,9 +1443,11 @@ pub fn compile_fn_body(
     }
 
     let has_expr_body = matches!(def.body, ast::FnBody::Expr(_));
+    let can_compile_decl = !has_expr_body;
+
     let compile_body = match context {
-        FnContext::Decl => def.generics.is_empty() || !has_expr_body,
-        FnContext::Call => !def.generics.is_empty() && has_expr_body,
+        FnContext::Decl => can_compile_decl,
+        FnContext::Call => !can_compile_decl,
     };
     let mut unknowns = BTreeMap::new();
     for generic in def.generics.iter() {

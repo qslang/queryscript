@@ -3323,12 +3323,14 @@ pub fn compile_sqlexpr(
                                 arg_map,
                                 FnContext::Call,
                             )?;
+                            /*
                             if generics.is_empty() {
                                 return Err(CompileError::internal(
                                     loc.clone(),
                                     "Non-generic function should have been compiled ahead of time",
                                 ));
-                            }
+                            } */
+
                             compiled_body.type_.unify(&func.type_)?;
                             compiled_body.expr.await?.read()?.clone()
                         }

@@ -45,9 +45,7 @@
         }],
         "let username": λ {
         	user_id Int64,
-        } -> [{
-        	name Utf8,
-        }],
+        } -> ?return?,
         "let users": [{
         	id Int32,
         	org_id Int32,
