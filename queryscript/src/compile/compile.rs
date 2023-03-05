@@ -1,3 +1,4 @@
+use snafu::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, LinkedList};
 use std::fmt;
 use std::fs;
@@ -1834,4 +1835,3 @@ mod tests {
         assert_eq!(*calls.lock().unwrap(), 2);
     }
 }
-use snafu::prelude::*;

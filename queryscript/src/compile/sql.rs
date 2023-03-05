@@ -1860,7 +1860,7 @@ pub fn compile_sqlquery(
         }
 
         let file = schema.read()?.file.clone();
-        let inner_schema = Schema::derive(schema)?;
+        schema = Schema::derive(schema)?;
 
         let mut with_exprs = Vec::new();
         let mut aliases = Vec::new();
@@ -1877,14 +1877,14 @@ pub fn compile_sqlquery(
 
             let (_, type_, expr) = compile_sqlquery(
                 compiler.clone(),
-                inner_schema.clone(),
+                schema.clone(),
                 Some(scope),
                 loc,
                 &cte.query,
             )?;
 
             let name = Ident::from_located_sqlident(Some(file.clone()), cte.alias.name.clone());
-            match inner_schema.write()?.expr_decls.entry(name.get().clone()) {
+            match schema.write()?.expr_decls.entry(name.get().clone()) {
                 std::collections::btree_map::Entry::Occupied(_) => {
                     return Err(CompileError::duplicate_entry(vec![name.clone()]))
                 }
@@ -1951,8 +1951,6 @@ pub fn compile_sqlquery(
 
             Ok(CSQLSnippet::wrap(names, body))
         }))?);
-
-        schema = inner_schema;
     }
 
     let limit = match &query.limit {
