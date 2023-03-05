@@ -51,6 +51,21 @@ jobs:
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
 
+    services:
+      pg:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: example
+        ports:
+          - 5471:5432
+
+      clickhouse:
+        image: clickhouse/clickhouse-server:23
+        env:
+          CLICKHOUSE_PASSWORD: example
+        ports:
+          - 5472:9000
+
     env:
       RA_TARGET: ${{ matrix.target }}
 
