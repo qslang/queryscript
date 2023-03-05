@@ -21,6 +21,7 @@ use crate::compile::inline::*;
 use crate::compile::schema::*;
 use crate::compile::scope::{AvailableReferences, SQLScope};
 use crate::compile::traverse::VisitSQL;
+use crate::types::Field;
 use crate::types::{number::parse_numeric_type, AtomicType, IntervalUnit, Type};
 use crate::{
     ast,
@@ -152,7 +153,19 @@ pub fn select_no_from(
     )
 }
 
-pub fn select_star_from(relation: sqlast::TableFactor) -> sqlast::Query {
+impl Into<sqlast::TableFactor> for &Ident {
+    fn into(self) -> sqlast::TableFactor {
+        sqlast::TableFactor::Table {
+            name: sqlast::ObjectName(vec![sqlast::Located::new(self.into(), None)]),
+            alias: None,
+            args: None,
+            columns_definition: None,
+            with_hints: Vec::new(),
+        }
+    }
+}
+
+pub fn select_star_from<T: Into<sqlast::TableFactor>>(relation: T) -> sqlast::Query {
     select_from(
         vec![sqlast::SelectItem::Wildcard(WildcardAdditionalOptions {
             opt_exclude: None,
@@ -161,7 +174,7 @@ pub fn select_star_from(relation: sqlast::TableFactor) -> sqlast::Query {
             opt_replace: None,
         })],
         vec![sqlast::TableWithJoins {
-            relation,
+            relation: relation.into(),
             joins: Vec::new(),
         }],
     )
@@ -219,7 +232,63 @@ pub fn create_table_as(
         collation: None,
         on_commit: None,
         on_cluster: None,
+        order_by: None,
     }
+}
+
+pub fn create_table(
+    name: sqlast::ObjectName,
+    fields: &Vec<Field>,
+    temporary: bool,
+) -> Result<sqlast::Statement> {
+    let columns = fields
+        .iter()
+        .map(|f| {
+            Ok(sqlast::ColumnDef {
+                name: sqlast::Located::new((&f.name).into(), None),
+                data_type: (&f.type_).try_into().context(TypesystemSnafu {
+                    loc: SourceLocation::Unknown,
+                })?,
+                collation: None,
+                options: if f.nullable {
+                    vec![sqlast::ColumnOptionDef {
+                        name: None,
+                        option: sqlast::ColumnOption::Null,
+                    }]
+                } else {
+                    vec![]
+                },
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(sqlast::Statement::CreateTable {
+        name,
+        query: None,
+        or_replace: true,
+        temporary,
+        external: false,
+        global: None,
+        if_not_exists: false,
+        transient: false,
+        columns,
+        constraints: Vec::new(),
+        hive_distribution: sqlast::HiveDistributionStyle::NONE,
+        hive_formats: None,
+        table_properties: Vec::new(),
+        with_options: Vec::new(),
+        file_format: None,
+        location: None,
+        without_rowid: false,
+        like: None,
+        clone: None,
+        engine: None,
+        default_charset: None,
+        collation: None,
+        on_commit: None,
+        on_cluster: None,
+        order_by: None,
+    })
 }
 
 pub fn with_table_alias(

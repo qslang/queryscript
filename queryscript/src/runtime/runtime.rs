@@ -2,7 +2,7 @@ use futures::future::{BoxFuture, FutureExt};
 use std::collections::HashMap;
 
 use crate::compile::schema;
-use crate::compile::sql::create_table_as;
+use crate::compile::sql::{create_table_as, select_star_from};
 use crate::{
     ast::Ident,
     types,
@@ -19,12 +19,18 @@ pub type Runtime = tokio::runtime::Runtime;
 
 #[cfg(feature = "multi-thread")]
 pub fn build() -> Result<Runtime> {
-    Ok(tokio::runtime::Builder::new_multi_thread().build()?)
+    Ok(tokio::runtime::Builder::new_multi_thread()
+        .enable_io()
+        .enable_time()
+        .build()?)
 }
 
 #[cfg(not(feature = "multi-thread"))]
 pub fn build() -> Result<Runtime> {
-    Ok(tokio::runtime::Builder::new_current_thread().build()?)
+    Ok(tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()?)
 }
 
 pub fn expensive<F, R>(f: F) -> R
@@ -111,39 +117,68 @@ pub fn eval<'a>(
                 expr,
                 inlined,
                 decl_name,
+                url,
                 ..
             }) => {
-                if let Some(value) = ctx.materializations.get(key) {
+                if let (false, Some(value)) = (inlined, ctx.materializations.get(key)) {
                     return Ok(value.clone());
                 }
 
-                let result = match (inlined, expr.expr.as_ref()) {
-                    (true, schema::Expr::SQL(sql, sql_url)) => {
-                        let table_name = decl_name.into();
-                        let engine = ctx.sql_engine(sql_url.clone())?;
+                if *inlined {
+                    let table_name = decl_name.into();
+                    let engine = ctx.sql_engine(url.clone()).await?;
 
-                        if !engine.table_exists(&table_name).await? {
-                            let query = create_table_as(table_name, sql.body.as_query()?, true);
-                            let sql_params = eval_params(ctx, &sql.names.params).await?;
-                            let _ = ctx
-                                .sql_engine(sql_url.clone())?
-                                .eval(&query, sql_params)
-                                .await?;
+                    if !engine.table_exists(&table_name).await? {
+                        match expr.expr.as_ref() {
+                            schema::Expr::SQL(sql, _) => {
+                                let query = create_table_as(table_name, sql.body.as_query()?, true);
+                                let sql_params = eval_params(ctx, &sql.names.params).await?;
+                                let _ = ctx
+                                    .sql_engine(url.clone())
+                                    .await?
+                                    .exec(&query, sql_params)
+                                    .await?;
+                            }
+                            schema::Expr::Materialize(schema::MaterializeExpr {
+                                decl_name: inner_decl,
+                                ..
+                            }) => {
+                                eval(ctx, &expr).await?;
+
+                                let query =
+                                    create_table_as(table_name, select_star_from(inner_decl), true);
+                                let _ = ctx
+                                    .sql_engine(url.clone())
+                                    .await?
+                                    .exec(&query, HashMap::new())
+                                    .await?;
+                            }
+                            _ => {
+                                let inner_type = expr.type_.read()?.clone();
+                                let result = eval(ctx, &expr).await?;
+
+                                let _ = ctx
+                                    .sql_engine(url.clone())
+                                    .await?
+                                    .load(&table_name, result, inner_type, true)
+                                    .await?;
+                            }
                         }
-
-                        // Don't stash the fact that we created the temporary table in the materialization index
-                        // NOTE: For performance sake, we could cache something here (that we created the temp
-                        // table), but for now we assume checking if the table exists is fast enough.
-                        return Ok(EMPTY_RELATION.clone());
                     }
-                    _ => eval(ctx, expr).await?,
-                };
 
-                Ok(ctx
-                    .materializations
-                    .entry(key.clone())
-                    .or_insert(result)
-                    .clone())
+                    // Don't stash the fact that we created the temporary table in the materialization index
+                    // NOTE: For performance sake, we could cache something here (that we created the temp
+                    // table), but for now we assume checking if the table exists is fast enough.
+                    Ok(EMPTY_RELATION.clone())
+                } else {
+                    let result = eval(ctx, expr).await?;
+
+                    Ok(ctx
+                        .materializations
+                        .entry(key.clone())
+                        .or_insert(result)
+                        .clone())
+                }
             }
             schema::Expr::FnCall(schema::FnCallExpr {
                 func,
@@ -170,10 +205,10 @@ pub fn eval<'a>(
                 let sql_params = eval_params(ctx, &names.params).await?;
                 let query = body.as_statement()?;
 
-                let engine = ctx.sql_engine(url.clone())?;
+                let engine = ctx.sql_engine(url.clone()).await?;
 
                 // TODO: This ownership model implies some necessary copying (below).
-                let mut rows = engine.eval(&query, sql_params).await?;
+                let mut rows = engine.query(&query, sql_params).await?;
 
                 // Before returning, we perform some runtime checks that might only be necessary in debug mode:
                 // - For expressions, validate that the result is a single row and column

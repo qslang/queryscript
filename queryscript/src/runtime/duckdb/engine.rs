@@ -16,13 +16,14 @@ use sqlparser::ast as sqlast;
 
 use crate::ast::Ident;
 use crate::compile::sql::{create_table_as, select_star_from};
-use crate::runtime::SQLEngineType;
+use crate::compile::ConnectionString;
 use crate::runtime::{
     self,
     error::{rt_unimplemented, Result},
     normalize::Normalizer,
     sql::{SQLEngine, SQLEnginePool, SQLParam},
 };
+use crate::runtime::{SQLEmbedded, SQLEngineType};
 use crate::types::Type;
 use crate::types::{arrow::ArrowRecordBatchRelation, Relation, Value};
 
@@ -78,8 +79,8 @@ impl Normalizer for DuckDBNormalizer {
         Some('"')
     }
 
-    fn params(&self) -> &HashMap<String, String> {
-        &self.params
+    fn param(&self, key: &str) -> Option<&str> {
+        self.params.get(key).map(|s| s.as_str())
     }
 }
 
@@ -127,6 +128,20 @@ pub struct DuckDBEngine {
 }
 
 impl DuckDBEngine {
+    fn new_conn(url: Option<Arc<crate::compile::ConnectionString>>) -> Result<Box<dyn SQLEngine>> {
+        use std::collections::hash_map::Entry;
+        let mut conns = DUCKDB_CONNS.lock().unwrap();
+        let wrapper = match conns.entry(url) {
+            Entry::Occupied(e) => e.into_mut(),
+            Entry::Vacant(e) => {
+                let conn_wrapper = ConnectionSingleton::new(e.key().clone())?;
+                e.insert(conn_wrapper)
+            }
+        };
+        let base_conn = wrapper.try_clone()?;
+        Ok(Box::new(DuckDBEngine::build(base_conn)))
+    }
+
     fn build(conn: ExclusiveConnection) -> DuckDBEngine {
         DuckDBEngine { conn }
     }
@@ -212,7 +227,7 @@ impl ArrowRecordBatchRelation {
 
 #[async_trait::async_trait]
 impl SQLEngine for DuckDBEngine {
-    async fn eval(
+    async fn query(
         &mut self,
         query: &sqlast::Statement,
         params: HashMap<Ident, SQLParam>,
@@ -222,6 +237,15 @@ impl SQLEngine for DuckDBEngine {
         // yield work). block_in_place() tells Tokio to expect this thread to spend a while working on
         // this stuff and use other threads for other work.
         runtime::expensive(|| self.eval_in_place(query, params))
+    }
+
+    async fn exec(
+        &mut self,
+        stmt: &sqlast::Statement,
+        params: HashMap<Ident, SQLParam>,
+    ) -> Result<()> {
+        self.query(stmt, params).await?;
+        Ok(())
     }
 
     async fn load(
@@ -254,13 +278,7 @@ impl SQLEngine for DuckDBEngine {
         )]
         .into_iter()
         .collect();
-        self.eval(&query, params).await?;
-        Ok(())
-    }
-
-    async fn create(&mut self) -> Result<()> {
-        // DuckDB will create the database if it doesn't exist.
-        let _ = self.conn.get_state();
+        self.query(&query, params).await?;
         Ok(())
     }
 
@@ -374,19 +392,22 @@ lazy_static! {
         Mutex::new(HashMap::new());
 }
 
+#[async_trait::async_trait]
 impl SQLEnginePool for DuckDBEngine {
-    fn new(url: Option<Arc<crate::compile::ConnectionString>>) -> Result<Box<dyn SQLEngine>> {
-        use std::collections::hash_map::Entry;
-        let mut conns = DUCKDB_CONNS.lock().unwrap();
-        let wrapper = match conns.entry(url) {
-            Entry::Occupied(e) => e.into_mut(),
-            Entry::Vacant(e) => {
-                let conn_wrapper = ConnectionSingleton::new(e.key().clone())?;
-                e.insert(conn_wrapper)
-            }
-        };
-        let base_conn = wrapper.try_clone()?;
-        Ok(Box::new(DuckDBEngine::build(base_conn)))
+    async fn new(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>> {
+        DuckDBEngine::new_conn(Some(url))
+    }
+
+    async fn create(url: Arc<ConnectionString>) -> Result<()> {
+        // DuckDB will create the database if it doesn't exist.
+        let _ = Self::new(url).await?;
+        Ok(())
+    }
+}
+
+impl SQLEmbedded for DuckDBEngine {
+    fn new_embedded() -> Result<Box<dyn SQLEngine>> {
+        DuckDBEngine::new_conn(None)
     }
 }
 

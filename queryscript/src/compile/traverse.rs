@@ -121,6 +121,7 @@ impl<V: SQLVisitor> VisitSQL<V> for Statement {
                 collation,
                 on_commit,
                 on_cluster,
+                order_by,
             } => Statement::CreateTable {
                 or_replace: *or_replace,
                 temporary: *temporary,
@@ -146,6 +147,7 @@ impl<V: SQLVisitor> VisitSQL<V> for Statement {
                 collation: collation.clone(),
                 on_commit: on_commit.clone(),
                 on_cluster: on_cluster.clone(),
+                order_by: order_by.visit_sql(visitor),
             },
 
             _ => self.clone(),

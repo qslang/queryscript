@@ -1,6 +1,6 @@
 use sqlparser::{ast as sqlast, ast::Located};
+use std::borrow::Cow;
 use std::cell::RefCell;
-use std::collections::HashMap;
 
 use super::error::RuntimeError;
 use crate::compile::traverse::{SQLVisitor, VisitSQL};
@@ -14,7 +14,11 @@ pub trait Normalizer {
             _ => true,
         }
     }
-    fn params(&self) -> &HashMap<String, String>;
+    fn param(&self, key: &str) -> Option<&str>;
+
+    fn preprocess<'a>(&self, stmt: &'a sqlast::Statement) -> Cow<'a, sqlast::Statement> {
+        Cow::Borrowed(stmt)
+    }
 
     fn normalize<'s>(
         &'s self,
@@ -24,6 +28,8 @@ pub trait Normalizer {
             normalizer: &self,
             errors: RefCell::new(Vec::new()),
         };
+
+        let stmt = self.preprocess(stmt);
         let mut result = MultiResult::new(stmt.visit_sql(&visitor));
         for e in visitor.errors.into_inner() {
             result.add_error(None, e);
@@ -60,13 +66,12 @@ where
             }
         }
 
-        let params = self.normalizer.params();
         if path.len() == 1 {
             let ident = &path[0];
-            if let Some(name) = params.get(&ident.value) {
+            if let Some(name) = self.normalizer.param(&ident.value) {
                 return Some(vec![Located::new(
                     sqlast::Ident {
-                        value: name.clone(),
+                        value: name.to_owned(),
                         quote_style: None,
                     },
                     ident.location().clone(),

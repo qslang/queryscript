@@ -7,6 +7,9 @@ pub mod sql;
 
 pub mod duckdb;
 
+#[cfg(feature = "clickhouse")]
+pub mod clickhouse;
+
 // NOTE: Datafusion is no longer in the repo, so this is technically dead code.
 // pub mod datafusion;
 

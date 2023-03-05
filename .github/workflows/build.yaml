@@ -4,7 +4,9 @@ name: Build
 on:
   workflow_dispatch:
   push:
-    branch: main
+    branches:
+      - "main"
+  pull_request:
 
 # Inspired by https://github.com/rust-lang/rust-analyzer/blob/master/.github/workflows/release.yaml
 env:
@@ -164,6 +166,3 @@ jobs:
       #            venv
       #          key:
       #            ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}-${{ github.run_id }}
-
-      - name: Run tests
-        run: make test

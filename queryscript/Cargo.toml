@@ -29,7 +29,8 @@ path = "bin/lsp.rs"
 required-features = ["lsp"]
 
 [features]
-default = ["cli", "duckdb-bundled"]
+default = ["cli", "all-engines"]
+all-engines = ["clickhouse", "duckdb-bundled"]
 multi-thread = ["tokio/rt-multi-thread"]
 serde = ["dep:serde", "arrow-schema/serde", "half/serde"]
 ts = ["serde", "dep:ts-rs"]
@@ -46,7 +47,10 @@ lsp = [
     "tower-lsp",
 ]
 backtraces = ["snafu/backtraces"]
+
+# Engines
 duckdb-bundled = ["duckdb/bundled"]
+clickhouse = ["dep:clickhouse-rs", "chrono-tz", "serde"]
 
 [dependencies]
 # This version is synchronized with duckdb-rs
@@ -80,6 +84,7 @@ serde = { version = "1", optional = true }
 serde_json = { version = "1", optional = true }
 snafu = { version = "0.7.3" }
 sqlparser = { path = "../sqlparser-rs", version = "0.31.0", package = "sqlparser-queryscript" }
+strum = { version = "0.24", features = ["derive"] }
 tabled = "0.10"
 tokio = "1.25"
 tower-lsp = { version = "0.17", optional = true }
@@ -89,12 +94,14 @@ url = "2.3.1"
 
 
 # -- ENGINES ---
-# TODO: We should put each database dependency runtime behind a feature flag
 # DuckDB.
 duckdb = { version = "0.6.1" }
 # These are duckdb dependencies that we access directly
 hashlink = { version = "0.8" }
 
+# ClickHouse
+clickhouse-rs = { version = "1.0.0-alpha.1", optional = true }
+chrono-tz = { version = "0.5.3", optional = true } # This must be in-sync with clickhouse-rs
 
 # -- CLI ---
 clap = { version = "4.0", features = ["derive"], optional = true }

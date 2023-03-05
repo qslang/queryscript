@@ -1,5 +1,6 @@
 use sqlparser::ast as sqlast;
 use std::{collections::HashMap, sync::Arc};
+use strum::{EnumIter, IntoEnumIterator};
 
 use super::error::Result;
 use crate::ast::Ident;
@@ -13,11 +14,17 @@ use async_trait::async_trait;
 /// the Rust compiler to ensure exclusive access.
 #[async_trait]
 pub trait SQLEngine: std::fmt::Debug + Send + Sync {
-    async fn eval(
+    async fn query(
         &mut self,
         query: &sqlast::Statement,
         params: HashMap<Ident, SQLParam>,
     ) -> Result<Arc<dyn Relation>>;
+
+    async fn exec(
+        &mut self,
+        stmt: &sqlast::Statement,
+        params: HashMap<Ident, SQLParam>,
+    ) -> Result<()>;
 
     async fn load(
         &mut self,
@@ -27,8 +34,6 @@ pub trait SQLEngine: std::fmt::Debug + Send + Sync {
         temporary: bool,
     ) -> Result<()>;
 
-    async fn create(&mut self) -> Result<()>;
-
     /// Ideally, this gets generalized and we use information schema tables. However, there's
     /// no standard way to tell what database we're currently in. We should generalize this function
     /// eventually.
@@ -37,8 +42,14 @@ pub trait SQLEngine: std::fmt::Debug + Send + Sync {
     fn engine_type(&self) -> SQLEngineType;
 }
 
+#[async_trait]
 pub trait SQLEnginePool {
-    fn new(url: Option<Arc<ConnectionString>>) -> Result<Box<dyn SQLEngine>>;
+    async fn create(url: Arc<ConnectionString>) -> Result<()>;
+    async fn new(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>>;
+}
+
+pub trait SQLEmbedded {
+    fn new_embedded() -> Result<Box<dyn SQLEngine>>;
 }
 
 #[derive(Debug, Clone)]
@@ -59,8 +70,9 @@ impl SQLParam {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, EnumIter)]
 pub enum SQLEngineType {
+    ClickHouse,
     DuckDB,
 }
 
@@ -68,6 +80,7 @@ impl SQLEngineType {
     pub fn from_name(name: &str) -> Result<SQLEngineType> {
         use SQLEngineType::*;
         Ok(match name.to_lowercase().as_str() {
+            "clickhouse" => ClickHouse,
             "duckdb" => DuckDB,
             name => {
                 return Err(crate::runtime::RuntimeError::unimplemented(
@@ -76,20 +89,40 @@ impl SQLEngineType {
             }
         })
     }
+
+    pub fn iterator() -> impl Iterator<Item = SQLEngineType> {
+        // This just avoids having to import strum::IntoEnumIterator everywhere
+        SQLEngineType::iter()
+    }
 }
 
 pub fn embedded_engine(kind: SQLEngineType) -> Box<dyn SQLEngine> {
     use SQLEngineType::*;
     match kind {
-        DuckDB => super::duckdb::DuckDBEngine::new(None),
+        DuckDB => super::duckdb::DuckDBEngine::new_embedded(),
+        o => panic!("Unsupported embedded engine: {:?}", o),
     }
     .expect("Failed to create embedded engine")
 }
 
-// TODO We should turn this into a real pool
-pub fn new_engine(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>> {
+// TODO We should turn this into a real pool (i.e. cache the state
+// globally somewhere)
+pub async fn create_database(url: Arc<ConnectionString>) -> Result<()> {
     use SQLEngineType::*;
     match url.engine_type() {
-        DuckDB => super::duckdb::DuckDBEngine::new(Some(url)),
+        ClickHouse => super::clickhouse::ClickHouseEngine::create(url),
+        DuckDB => super::duckdb::DuckDBEngine::create(url),
     }
+    .await
+}
+
+// TODO We should turn this into a real pool (i.e. cache the state
+// globally somewhere)
+pub async fn new_engine(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>> {
+    use SQLEngineType::*;
+    match url.engine_type() {
+        ClickHouse => super::clickhouse::ClickHouseEngine::new(url),
+        DuckDB => super::duckdb::DuckDBEngine::new(url),
+    }
+    .await
 }

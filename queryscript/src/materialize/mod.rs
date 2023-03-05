@@ -107,7 +107,11 @@ fn execute_create_view(
         eprintln!("Creating view \"{}\"", name);
         let sql_params = runtime::eval_params(&mut ctx, &params).await?;
 
-        let result = ctx.sql_engine(url.clone())?.eval(&query, sql_params).await;
+        let result = ctx
+            .sql_engine(url.clone())
+            .await?
+            .exec(&query, sql_params)
+            .await;
 
         completed_ref.unify(&mkcref(()))?;
         result?;
@@ -158,7 +162,7 @@ async fn process_view(
                                 runtime::eval(&mut ctx, &expr).await.context(RuntimeSnafu {
                                     loc: SourceLocation::Unknown,
                                 })?;
-                            let engine = ctx.sql_engine(Some(url)).context(RuntimeSnafu {
+                            let engine = ctx.sql_engine(Some(url)).await.context(RuntimeSnafu {
                                 loc: SourceLocation::Unknown,
                             })?;
 

@@ -166,9 +166,6 @@ jobs:
       #          key:
       #            ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}-${{ github.run_id }}
 
-      - name: Run tests
-        run: make test
-
       - name: Setup dist
         run: |
           mkdir -p dist

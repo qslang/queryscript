@@ -51,6 +51,13 @@ pub enum RuntimeError {
         backtrace: Option<Backtrace>,
     },
 
+    #[cfg(feature = "clickhouse")]
+    #[snafu(context(false))]
+    ClickHouseError {
+        source: clickhouse_rs::errors::Error,
+        backtrace: Option<Backtrace>,
+    },
+
     #[snafu(context(false))]
     IOError {
         source: std::io::Error,

@@ -1,3 +1,6 @@
+#[path = "../common/mod.rs"]
+mod common;
+
 #[cfg(test)]
 mod tests {
     use lazy_static::lazy_static;
@@ -17,31 +20,20 @@ mod tests {
         ast::{self, Ident, SourceLocation},
         compile::{self, Compiler, ConnectionString},
         materialize,
-        runtime::{self, sql::SQLEngineType, Context, ContextPool},
+        runtime::{
+            self,
+            sql::{create_database, SQLEngineType},
+            Context, ContextPool,
+        },
     };
+
+    use super::common::*;
 
     lazy_static! {
         static ref TEST_ROOT: PathBuf =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/materialize/");
         static ref GEN_ROOT: PathBuf =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/generated/materialize/");
-    }
-
-    fn get_engine_url(engine_type: SQLEngineType) -> String {
-        match engine_type {
-            SQLEngineType::DuckDB => "duckdb://db.duckdb".to_string(),
-        }
-    }
-
-    fn show_views_query(engine_type: SQLEngineType) -> sqlparser::ast::Statement {
-        sqlparser::parser::Parser::parse_sql(
-            &sqlparser::dialect::GenericDialect {},
-            match engine_type {
-                SQLEngineType::DuckDB => "SELECT name FROM sqlite_master WHERE type = 'view'",
-            },
-        )
-        .unwrap()
-        .swap_remove(0)
     }
 
     trait MustString {
@@ -123,6 +115,13 @@ mod tests {
         Ok(ret)
     }
 
+    // TODO: This should be smarter...
+    fn replace_url(p: &PathBuf, url: &str) {
+        let mut contents = std::fs::read_to_string(p).unwrap();
+        contents = contents.replace("duckdb://db.duckdb", url);
+        std::fs::write(p, contents).unwrap();
+    }
+
     fn run_test_dir(
         rt: &tokio::runtime::Runtime,
         engine_type: SQLEngineType,
@@ -130,7 +129,10 @@ mod tests {
         mode: TestMode,
     ) {
         let test_suffix = test_dir.strip_prefix(&*TEST_ROOT).unwrap();
-        let target_dir = GEN_ROOT.join(test_suffix).join(&format!("{:?}", mode));
+        let target_dir = GEN_ROOT
+            .join(test_suffix)
+            .join(&format!("{:?}", mode))
+            .join(&format!("{:?}", engine_type));
 
         // Delete and recreate target_dir
         let _ = std::fs::remove_dir_all(&target_dir); // Don't care if this errors
@@ -142,7 +144,10 @@ mod tests {
         }
 
         let folder = Some(target_dir.must_string());
-        let ctx_pool = ContextPool::new(folder.clone(), engine_type);
+        let ctx_pool = ContextPool::new(
+            folder.clone(),
+            SQLEngineType::DuckDB, /*embedded engine*/
+        );
 
         let conn_url = get_engine_url(engine_type);
         let conn_str =
@@ -152,13 +157,14 @@ mod tests {
 
         // Re-initialize the database
         let mut ctx = ctx_pool.get();
-        rt.block_on(async { ctx.sql_engine(Some(conn_str.clone()))?.create().await })
+        rt.block_on(async { create_database(conn_str.clone()).await })
             .unwrap();
 
         let compiler = Compiler::new().unwrap();
 
         // Then, save the "data.qs" file into the database
         let data_file = target_dir.join("data.qs");
+        replace_url(&data_file, &conn_url);
         let data_schema = compiler
             .compile_schema_from_file(&data_file)
             .as_result()
@@ -170,6 +176,7 @@ mod tests {
 
         // Next, parse, the schema and then modify it depending on the mode
         let schema_file = target_dir.join("schema.qs");
+        replace_url(&schema_file, &conn_url);
         let view_schema = build_schema(&compiler, mode, &schema_file).unwrap();
         rt.block_on(async { materialize::save_views(&ctx_pool, view_schema.clone()).await })
             .unwrap();
@@ -206,8 +213,9 @@ mod tests {
         let actual_view_names = rt
             .block_on({
                 async {
-                    ctx.sql_engine(Some(conn_str.clone()))?
-                        .eval(&show_views_query(engine_type), HashMap::new())
+                    ctx.sql_engine(Some(conn_str.clone()))
+                        .await?
+                        .query(&show_views_query(engine_type), HashMap::new())
                         .await
                 }
             })
@@ -256,5 +264,10 @@ mod tests {
     #[test]
     fn test_materialize_duckdb() {
         test_materialize(SQLEngineType::DuckDB)
+    }
+
+    #[test]
+    fn test_materialize_clickhouse() {
+        test_materialize(SQLEngineType::ClickHouse)
     }
 }

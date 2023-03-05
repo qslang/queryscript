@@ -3,18 +3,17 @@
 // mimic that engines' semantics. A secondary (stretch) goal is to make the semantics
 // identical across engines, which we could test here as well.
 
-use std::pin::Pin;
-
-use futures::{future::FutureExt, Future};
 use parquet::arrow::arrow_writer::ArrowWriter;
 use parquet::file::properties::WriterProperties;
 use snafu::prelude::*;
 use sqllogictest::{DBOutput, DB};
 
 use queryscript::ast::SourceLocation;
-use queryscript::runtime;
+use queryscript::runtime::{self, SQLEngineType};
 use queryscript::types::{arrow::ArrowRecordBatchRelation, Value};
 use queryscript::{compile, compile::error::RuntimeSnafu};
+
+use super::common::get_engine_url;
 
 pub struct DuckDB {
     conn: duckdb::Connection,
@@ -45,74 +44,67 @@ impl DB for DuckDB {
 pub struct QueryScript {
     compiler: compile::Compiler,
     schema: compile::SchemaRef,
+    rt: tokio::runtime::Runtime,
 }
 
 impl QueryScript {
-    pub fn new(schema: compile::SchemaRef) -> QueryScript {
+    pub fn new(rt: tokio::runtime::Runtime, schema: compile::SchemaRef) -> QueryScript {
         QueryScript {
             compiler: compile::Compiler::new().unwrap(),
             schema,
+            rt,
         }
     }
 }
 
-impl sqllogictest::AsyncDB for QueryScript {
+impl sqllogictest::DB for QueryScript {
     type Error = compile::error::CompileError;
 
     fn engine_name(&self) -> &'static str {
         "queryscript"
     }
 
-    fn run<'life0, 'life1, 'async_trait>(
-        &'life0 mut self,
-        sql: &'life1 str,
-    ) -> Pin<Box<dyn Future<Output = Result<DBOutput, Self::Error>> + Send + 'async_trait>>
-    where
-        Self: 'async_trait,
-        'life0: 'async_trait,
-        'life1: 'async_trait,
-    {
+    fn run(&mut self, sql: &str) -> Result<DBOutput, Self::Error> {
         let query = format!("{};", sql);
-        async move {
-            // NOTE: We should work out a way to compile queries against a
-            // schema without adding it to the schema's persistent list of expressions
-            let starting_num_exprs = self.schema.read()?.exprs.len();
-            self.compiler
-                .compile_string(self.schema.clone(), &query)
-                .as_result()?;
+        // NOTE: We should work out a way to compile queries against a
+        // schema without adding it to the schema's persistent list of expressions
+        let starting_num_exprs = self.schema.read()?.exprs.len();
+        self.compiler
+            .compile_string(self.schema.clone(), &query)
+            .as_result()?;
 
-            let num_exprs = self.schema.read()?.exprs.len();
-            if num_exprs == starting_num_exprs {
-                return Err(compile::error::CompileError::internal(
-                    SourceLocation::Unknown,
-                    "no query to run",
-                ));
-            }
+        let num_exprs = self.schema.read()?.exprs.len();
+        if num_exprs == starting_num_exprs {
+            return Err(compile::error::CompileError::internal(
+                SourceLocation::Unknown,
+                "no query to run",
+            ));
+        }
 
-            let expr = self.schema.read()?.exprs[num_exprs - 1]
-                .to_runtime_type()
-                .context(RuntimeSnafu {
-                    loc: SourceLocation::Unknown,
-                })?;
-
-            let mut ctx = runtime::Context::new(
-                self.schema.read()?.folder.clone(),
-                runtime::SQLEngineType::DuckDB,
-            );
-
-            let value = runtime::eval(&mut ctx, &expr).await.context(RuntimeSnafu {
+        let expr = self.schema.read()?.exprs[num_exprs - 1]
+            .to_runtime_type()
+            .context(RuntimeSnafu {
                 loc: SourceLocation::Unknown,
             })?;
 
-            match value {
-                Value::Relation(relation) => Ok(relation.as_ref().into_db_output()),
-                _ => Err(compile::error::CompileError::internal(
-                    SourceLocation::Unknown,
-                    "query did not return a relation",
-                )),
-            }
+        let mut ctx = runtime::Context::new(
+            self.schema.read()?.folder.clone(),
+            runtime::SQLEngineType::DuckDB,
+        );
+
+        let value = self.rt.block_on(async move {
+            runtime::eval(&mut ctx, &expr).await.context(RuntimeSnafu {
+                loc: SourceLocation::Unknown,
+            })
+        })?;
+
+        match value {
+            Value::Relation(relation) => Ok(relation.as_ref().into_db_output()),
+            _ => Err(compile::error::CompileError::internal(
+                SourceLocation::Unknown,
+                "query did not return a relation",
+            )),
         }
-        .boxed()
     }
 }
 
@@ -137,12 +129,13 @@ impl<W: std::io::Write> std::ops::Drop for SafeWriter<W> {
     }
 }
 
-pub fn duckdb_serialize(
+pub fn serialize_db(
     conn: &duckdb::Connection,
     target_dir: &std::path::PathBuf,
+    engine_type: SQLEngineType,
 ) -> compile::error::Result<compile::SchemaRef> {
     let compiler = compile::Compiler::new().expect("Failed to instantiate compiler");
-    let schema_path = duckdb_write_tables(conn, target_dir).context(RuntimeSnafu {
+    let schema_path = write_tables(conn, target_dir, engine_type).context(RuntimeSnafu {
         loc: SourceLocation::Unknown,
     })?;
 
@@ -153,11 +146,20 @@ pub fn duckdb_serialize(
     Ok(schema.unwrap())
 }
 
-fn duckdb_write_tables(
+fn write_tables(
     conn: &duckdb::Connection,
     target_dir: &std::path::PathBuf,
+    engine_type: SQLEngineType,
 ) -> runtime::error::Result<std::path::PathBuf> {
     let mut schema_stmts = Vec::new();
+
+    let conn_url = get_engine_url(engine_type);
+    match engine_type {
+        SQLEngineType::DuckDB => { /* no need to import */ }
+        _ => {
+            schema_stmts.push(format!("import '{}';", conn_url));
+        }
+    }
 
     // Ensure the tables show up in show tables
     let mut show_tables = conn.prepare("SHOW TABLES")?;
@@ -191,11 +193,18 @@ fn duckdb_write_tables(
         writer.close()?;
 
         // TODO: We should be able to serialize the type here and avoid schema inference
-        schema_stmts.push(format!("let {table} = load('{table}.parquet');"));
+        match engine_type {
+            SQLEngineType::DuckDB => {
+                schema_stmts.push(format!("export let {table} = load('{table}.parquet');"));
+            }
+            SQLEngineType::ClickHouse => {
+                schema_stmts.push(format!("export mat(db) {table} = load('{table}.parquet');"));
+            }
+        }
     }
 
     let schema_contents = schema_stmts.join("\n");
-    let schema_path = target_dir.join("schema.qs");
+    let schema_path = target_dir.join(format!("schema_{:?}.qs", engine_type));
     std::fs::write(&schema_path, schema_contents)?;
 
     Ok(schema_path)
