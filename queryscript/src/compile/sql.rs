@@ -1884,6 +1884,7 @@ pub fn compile_sqlquery(
             )?;
 
             let name = Ident::from_located_sqlident(Some(file.clone()), cte.alias.name.clone());
+            // XXX We should throw a compiler error for a duplicate here
             inner_schema.write()?.expr_decls.insert(
                 name.get().clone(),
                 Located::new(
@@ -1896,10 +1897,13 @@ pub fn compile_sqlquery(
                             type_: SType::new_mono(type_.clone()),
                             expr: mkcref(Expr::native_sql(Arc::new(SQL {
                                 names: SQLNames::new(),
-                                body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(vec![cte
-                                    .alias
-                                    .name
-                                    .clone()])),
+                                body: SQLBody::Table(sqlast::TableFactor::Table {
+                                    name: sqlast::ObjectName(vec![cte.alias.name.clone()]),
+                                    alias: None,
+                                    args: None,
+                                    columns_definition: None,
+                                    with_hints: Vec::new(),
+                                }),
                             }))),
                         },
                     },
