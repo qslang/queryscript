@@ -154,17 +154,17 @@ pub fn select_no_from(
 }
 
 pub trait IntoTableFactor {
-    fn into_table_factor(self) -> sqlast::TableFactor;
+    fn to_table_factor(self) -> sqlast::TableFactor;
 }
 
 impl IntoTableFactor for sqlast::TableFactor {
-    fn into_table_factor(self) -> sqlast::TableFactor {
+    fn to_table_factor(self) -> sqlast::TableFactor {
         self
     }
 }
 
 impl IntoTableFactor for sqlast::Located<sqlast::Ident> {
-    fn into_table_factor(self) -> sqlast::TableFactor {
+    fn to_table_factor(self) -> sqlast::TableFactor {
         sqlast::TableFactor::Table {
             name: sqlast::ObjectName(vec![self]),
             alias: None,
@@ -176,8 +176,8 @@ impl IntoTableFactor for sqlast::Located<sqlast::Ident> {
 }
 
 impl IntoTableFactor for &Ident {
-    fn into_table_factor(self) -> sqlast::TableFactor {
-        sqlast::Located::new(Into::<sqlast::Ident>::into(self), None).into_table_factor()
+    fn to_table_factor(self) -> sqlast::TableFactor {
+        sqlast::Located::new(Into::<sqlast::Ident>::into(self), None).to_table_factor()
     }
 }
 
@@ -190,7 +190,7 @@ pub fn select_star_from<T: IntoTableFactor>(relation: T) -> sqlast::Query {
             opt_replace: None,
         })],
         vec![sqlast::TableWithJoins {
-            relation: relation.into_table_factor(),
+            relation: relation.to_table_factor(),
             joins: Vec::new(),
         }],
     )
@@ -1914,7 +1914,7 @@ pub fn compile_sqlquery(
                             type_: SType::new_mono(type_.clone()),
                             expr: mkcref(Expr::native_sql(Arc::new(SQL {
                                 names: SQLNames::new(),
-                                body: SQLBody::Table(cte.alias.name.clone().into_table_factor()),
+                                body: SQLBody::Table(cte.alias.name.clone().to_table_factor()),
                             }))),
                         },
                     },
