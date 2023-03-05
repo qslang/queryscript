@@ -1849,7 +1849,7 @@ pub async fn finish_sqlexpr(
 pub fn compile_sqlquery(
     compiler: Compiler,
     mut schema: Ref<Schema>,
-    mut parent_scope: Option<Ref<SQLScope>>,
+    parent_scope: Option<Ref<SQLScope>>,
     loc: &SourceLocation,
     query: &sqlast::Query,
 ) -> Result<(Ref<SQLScope>, CRef<MType>, CRefSnippet<sqlast::Query>)> {
@@ -1860,13 +1860,13 @@ pub fn compile_sqlquery(
         }
 
         let file = schema.read()?.file.clone();
-        let inner_scope = SQLScope::new(parent_scope.clone());
         let inner_schema = Schema::derive(schema)?;
 
         let mut with_exprs = Vec::new();
         let mut aliases = Vec::new();
 
         for cte in with.cte_tables.iter() {
+            let scope = SQLScope::new(parent_scope.clone());
             if cte.from.is_some() {
                 // I don't think the parser ever generates FROM expressions in CTEs...
                 return Err(CompileError::unimplemented(
@@ -1878,20 +1878,21 @@ pub fn compile_sqlquery(
             let (_, type_, expr) = compile_sqlquery(
                 compiler.clone(),
                 inner_schema.clone(),
-                Some(SQLScope::deep_copy(&inner_scope)?),
+                Some(scope),
                 loc,
                 &cte.query,
             )?;
 
             let name = Ident::from_located_sqlident(Some(file.clone()), cte.alias.name.clone());
-            // XXX We should throw a compiler error for a duplicate here
-            inner_schema.write()?.expr_decls.insert(
-                name.get().clone(),
-                Located::new(
+            match inner_schema.write()?.expr_decls.entry(name.get().clone()) {
+                std::collections::btree_map::Entry::Occupied(_) => {
+                    return Err(CompileError::duplicate_entry(vec![name.clone()]))
+                }
+                std::collections::btree_map::Entry::Vacant(v) => v.insert(Located::new(
                     Decl {
                         public: false,
-                        extern_: true,
-                        is_arg: true,
+                        extern_: false,
+                        is_arg: false,
                         name: name.clone(),
                         value: STypedExpr {
                             type_: SType::new_mono(type_.clone()),
@@ -1908,8 +1909,8 @@ pub fn compile_sqlquery(
                         },
                     },
                     loc.clone(),
-                ),
-            );
+                )),
+            };
 
             aliases.push(cte.alias.clone());
             with_exprs.push(expr);
@@ -1951,7 +1952,6 @@ pub fn compile_sqlquery(
             Ok(CSQLSnippet::wrap(names, body))
         }))?);
 
-        parent_scope = Some(inner_scope.clone());
         schema = inner_schema;
     }
 

@@ -1,4 +1,3 @@
-use snafu::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, LinkedList};
 use std::fmt;
 use std::fs;
