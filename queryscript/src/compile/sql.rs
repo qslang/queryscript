@@ -601,7 +601,6 @@ pub fn intern_cref_placeholder(
 ) -> Result<CTypedSQL> {
     let type_ = te.type_.clone();
     let sql = te.expr.clone().then(move |expr: Ref<Expr<CRef<MType>>>| {
-        eprintln!("INTERNING {:?}", expr);
         let te = te.clone();
         let sqlexpr: SQL<CRef<MType>> = intern_placeholder(
             compiler.clone(),
@@ -2639,7 +2638,6 @@ fn expand_foreach(
     } else {
         let mut ret = vec![];
         let range = &ranges[0];
-        eprintln!("range: {:?}", range);
         match range.range.as_ref() {
             sqlast::Expr::Array(sqlast::Array { elem, .. }) => {
                 for e in elem.iter() {

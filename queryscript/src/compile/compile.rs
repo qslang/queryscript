@@ -1588,7 +1588,6 @@ pub fn compile_fn_body(
                 true,
             ),
             ast::FnBody::Expr(expr) => {
-                eprintln!("COMPILING FUNCTION EXPR: {:?}", expr);
                 (compile_expr(compiler.clone(), schema.clone(), expr)?, false)
             }
         };
