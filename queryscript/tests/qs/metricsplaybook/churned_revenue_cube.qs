@@ -1,10 +1,7 @@
 import * from data;
 
 
-let date_slices = ['month', 'day'];
-let metric_slices = ['segment', 'channel', 'plan_type'];
-
-fn metrics_cube<R, S>(/*date_slices [text], metric_slices [text],*/ source R) {
+fn metrics_cube<R, S>(date_slices [text], metric_slices [text], source R) {
   WITH cte_grouping_sets AS (
     select
       for slice in date_slices {
@@ -95,4 +92,8 @@ let prep =
           m.activity = 'customer_churn_committed'
 ;
 
-metrics_cube(/*date_slices, metric_slices,*/ prep);
+let date_slices = ['month', 'day'];
+let metric_slices = ['segment', 'channel', 'plan_type'];
+
+metrics_cube(['month', 'day'], metric_slices, prep);
+metrics_cube(['day'], ['plan_type'], prep);

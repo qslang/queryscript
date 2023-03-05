@@ -77,3 +77,23 @@ select
     end as "foo"
 from users
 ;
+
+-- Functions
+
+fn loop_fixed(fields [text]) {
+    SELECT
+        for f in fields {
+            f"{f}"
+        }
+    FROM users
+}
+loop_fixed(['id']);
+
+fn loop_generic<R>(fields [text], t R) {
+    SELECT
+        for f in fields {
+            f"{f}"
+        }
+    FROM t
+}
+loop_generic(['id', 'org_id'], users);

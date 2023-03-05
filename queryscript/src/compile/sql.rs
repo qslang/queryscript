@@ -512,7 +512,7 @@ pub fn compile_reference(
             // Turn the top level reference into a SQL placeholder, and return
             // a path accessing it
             let (placeholder_name, placeholder) =
-                intern_nonsql_placeholder(compiler.clone(), "param", &top_level_ref)?;
+                intern_nonsql_placeholder(compiler.clone(), "param_ref", &top_level_ref)?;
             let mut full_name = vec![placeholder_name.clone()];
             full_name.extend(remainder.clone().into_iter().map(|n| n.to_sqlident()));
 
@@ -625,7 +625,7 @@ pub fn compile_sqlarg(
     expr: &sqlast::Expr,
 ) -> Result<CTypedSQL> {
     let compiled = compile_sqlexpr(compiler.clone(), schema.clone(), scope.clone(), loc, expr)?;
-    intern_cref_placeholder(compiler.clone(), "param".to_string(), compiled)
+    intern_cref_placeholder(compiler.clone(), "param_arg".to_string(), compiled)
 }
 
 pub type CSQLNames = SQLNames<CRef<MType>>;
@@ -3303,19 +3303,36 @@ pub fn compile_sqlexpr(
                     let func_expr = func.expr.unwrap_schema_entry().await?;
                     let compiled_func_expr = match func_expr {
                         Expr::UncompiledFn(def) => {
-                            let (compiled_body, generics) = compile_fn_body(
+                            if variadic_args.len() > 0 {
+                                return Err(CompileError::unimplemented(
+                                    loc.clone(),
+                                    "variadic arguments for user defined generic functions",
+                                ));
+                            }
+
+                            let arg_map = args
+                                .iter()
+                                .map(|e| (e.name.clone(), e.clone()))
+                                .collect::<BTreeMap<_, _>>();
+
+                            let (compiled_body, _generics) = compile_fn_body(
                                 compiler.clone(),
                                 schema.clone(),
                                 loc.clone(),
                                 &def,
+                                arg_map,
                                 FnContext::Call,
                             )?;
+                            // NOTE: See comment in compile_fn_body() about why we don't
+                            // compile functions, even without generics.
+                            /*
                             if generics.is_empty() {
                                 return Err(CompileError::internal(
                                     loc.clone(),
                                     "Non-generic function should have been compiled ahead of time",
                                 ));
-                            }
+                            } */
+
                             compiled_body.type_.unify(&func.type_)?;
                             compiled_body.expr.await?.read()?.clone()
                         }
