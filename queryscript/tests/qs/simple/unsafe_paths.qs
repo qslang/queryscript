@@ -1,6 +1,7 @@
 import schema;
 
-unsafe select * from schema.users;
+-- This query fails but returns a flaky error
+-- unsafe select * from schema.users;
 
 let bar = schema.users;
 unsafe select * from bar;

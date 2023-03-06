@@ -54,7 +54,7 @@ clickhouse = ["dep:clickhouse-rs", "chrono-tz", "serde"]
 
 [dependencies]
 # This version is synchronized with duckdb-rs
-arrow = { version = "28", default-features = false, features = [
+arrow = { version = "34", default-features = false, features = [
     "csv",
     "ffi",
     "json",
@@ -62,10 +62,10 @@ arrow = { version = "28", default-features = false, features = [
 ] }
 # We don't import this directly (rather, through "arrow"), but need the serde feature
 # to be propagated through to it.
-arrow-schema = { version = "28" }
-arrow-buffer = { version = "28" }
-arrow-cast = { version = "28" }
-parquet = { version = "28" }
+arrow-schema = { version = "34" }
+arrow-buffer = { version = "34" }
+arrow-cast = { version = "34" }
+parquet = { version = "34" }
 
 async-backtrace = "0.2"
 
@@ -95,7 +95,7 @@ url = "2.3.1"
 
 # -- ENGINES ---
 # DuckDB.
-duckdb = { version = "0.6.1" }
+duckdb = { version = "0.7.1" }
 # These are duckdb dependencies that we access directly
 hashlink = { version = "0.8" }
 

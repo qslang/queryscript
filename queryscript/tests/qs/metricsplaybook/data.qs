@@ -9,6 +9,8 @@ type ContractStream {
 	activity text,
 	revenue_impact double,
 	plan_type text,
+    activity_occurrence bigint,
+    activity_repeated_at timestamp,
 }
 type DimCustomer {
 	id bigint,
@@ -22,9 +24,11 @@ let src_dim_customer [DimCustomer] = load('raw_csvs/src_dim_customer.csv');
 
 export mat contract_stream =
 	select
-		*,
-		row_number() over(partition by customer_id, activity order by timestamp asc) as activity_occurrence,
-		lead(timestamp, 1) over(partition by customer_id, activity order by timestamp asc) as activity_repeated_at
+		*
+        REPLACE (
+            row_number() over(partition by customer_id, activity order by timestamp asc) as activity_occurrence,
+            lead(timestamp, 1) over(partition by customer_id, activity order by timestamp asc) as activity_repeated_at
+        )
 	from
 		src_contract_stream;
 

@@ -11,4 +11,5 @@ fn main() {
     println!("cargo:rerun-if-changed=src/runtime/duckdb/engine.rs");
     println!("cargo:rerun-if-changed=src/runtime/duckdb/duckdb-extra.cc");
     println!("cargo:rerun-if-changed=include/duckdb-extra.hpp");
+    println!("cargo:rerun-if-changed=include/duckdb.hpp");
 }

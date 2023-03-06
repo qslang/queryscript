@@ -246,6 +246,18 @@ pub enum AtomicType {
     /// child fields may be respectively "entries", "key", and "value", but this is
     /// not enforced.
     Map(Box<Field>, bool),
+    /// A run-end encoding (REE) is a variation of run-length encoding (RLE). These
+    /// encodings are well-suited for representing data containing sequences of the
+    /// same value, called runs. Each run is represented as a value and an integer giving
+    /// the index in the array where the run ends.
+    ///
+    /// A run-end encoded array has no buffers by itself, but has two child arrays. The
+    /// first child array, called the run ends array, holds either 16, 32, or 64-bit
+    /// signed integers. The actual values of each run are held in the second child array.
+    ///
+    /// These child arrays are prescribed the standard names of "run_ends" and "values"
+    /// respectively.
+    RunEndEncoded(Box<Field>, Box<Field>),
     */
 }
 
@@ -346,9 +358,8 @@ impl TryFrom<&ArrowDataType> for Type {
                 Type::List(Box::new(f.data_type().try_into()?))
             }
             Struct(fields) => fields.try_into()?,
-            Union(..) | Dictionary(..) | Map(..) | Time32(..) | Duration(..) => {
-                return ts_unimplemented!("type {:?}", &t)
-            }
+            Union(..) | Dictionary(..) | Map(..) | Time32(..) | Duration(..)
+            | RunEndEncoded(..) => return ts_unimplemented!("type {:?}", &t),
         })
     }
 }
