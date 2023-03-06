@@ -381,7 +381,6 @@ impl ConnectionSingleton {
 
         conn.execute("INSTALL httpfs", [])?;
         conn.execute("LOAD httpfs", [])?;
-
         Ok(Self(ExclusiveConnection::new(conn)))
     }
 

@@ -157,9 +157,8 @@ impl LoadFileFn {
                     reader.collect::<Result<Vec<RecordBatch>, ArrowError>>()
                 }
                 Format::Json => {
-                    let reader = arrow::json::ReaderBuilder::new()
-                        .with_schema(self.schema.clone())
-                        .build(fd)?;
+                    let reader = arrow::json::RawReaderBuilder::new(self.schema.clone())
+                        .build(std::io::BufReader::new(fd))?;
 
                     reader.collect::<Result<Vec<RecordBatch>, ArrowError>>()
                 }
@@ -234,12 +233,9 @@ impl LoadFileFn {
                     schema.as_ref().try_into()?
                 }
                 Format::Json => {
-                    let reader = arrow::json::ReaderBuilder::new()
-                        .infer_schema(Some(100))
-                        .build(fd)?;
-
-                    let schema = reader.schema();
-                    schema.as_ref().try_into()?
+                    let mut reader = std::io::BufReader::new(fd);
+                    let schema = arrow::json::reader::infer_json_schema(&mut reader, Some(100))?;
+                    (&schema).try_into()?
                 }
                 Format::Parquet => {
                     let reader =
