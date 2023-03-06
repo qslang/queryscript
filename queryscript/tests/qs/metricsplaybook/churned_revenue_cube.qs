@@ -95,5 +95,8 @@ let prep =
 let date_slices = ['month', 'day'];
 let metric_slices = ['segment', 'channel', 'plan_type'];
 
-SELECT COUNT(*) FROM metrics_cube(['month', 'day'], metric_slices, prep);
-SELECT COUNT(*) FROM metrics_cube(['day'], ['plan_type'], prep);
+let e1 = metrics_cube(['month', 'day'], metric_slices, prep);
+let e2 = metrics_cube(['day'], ['plan_type'], prep);
+
+SELECT COUNT(*) FROM e1;
+SELECT COUNT(*) FROM e2;
