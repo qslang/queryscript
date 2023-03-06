@@ -1,24 +1,5 @@
 {
-    "compile_errors": [
-        (
-            None,
-            RuntimeError {
-                source: DuckDBError {
-                    source: DuckDBFailure(
-                        Error {
-                            code: Unknown,
-                            extended_code: 1,
-                        },
-                        Some(
-                            "Catalog Error: Schema with name schema does not exist!\nLINE 1: SELECT * FROM \"schema\".\"users\" LIMIT 0\n                      ^",
-                        ),
-                    ),
-                    backtrace: None,
-                },
-                loc: Unknown,
-            },
-        ),
-    ],
+    "compile_errors": [],
     "decls": {
         "let bar": [{
         	id Int32,
@@ -29,12 +10,6 @@
         "let baz": Int64,
     },
     "queries": [
-        Err(
-            StringError {
-                what: "Unknown type cannot exist at runtime (?unsafe expr?)",
-                backtrace: None,
-            },
-        ),
         Ok(
             TypedValue {
                 type_: List(

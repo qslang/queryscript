@@ -275,7 +275,8 @@ impl<'a, T: ArrowArray> List for &'a T {
                         .collect(),
                 )
             }
-            Union(..) | Dictionary(..) | Map(..) | Time32(..) | Duration(..) => {
+            Union(..) | Dictionary(..) | Map(..) | Time32(..) | Duration(..)
+            | RunEndEncoded(..) => {
                 panic!("unsupported array type {:?}", T::data_type(self))
             }
         };

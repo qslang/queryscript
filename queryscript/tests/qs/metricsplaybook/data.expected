@@ -37,6 +37,11 @@
         	activity Utf8,
         	revenue_impact Float64,
         	plan_type Utf8,
+        	activity_occurrence Int64,
+        	activity_repeated_at Timestamp(
+            Microsecond,
+            None,
+        ),
         }],
         "let src_dim_customer": [{
         	id Int64,
@@ -57,6 +62,11 @@
         	activity Utf8,
         	revenue_impact Float64,
         	plan_type Utf8,
+        	activity_occurrence Int64,
+        	activity_repeated_at Timestamp(
+            Microsecond,
+            None,
+        ),
         },
         "type DimCustomer": {
         	id Int64,

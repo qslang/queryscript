@@ -69,7 +69,7 @@ fn n_to_last_round(n bigint) {
 }
 
 -- Teams that showed up in the playoffs the most
-SELECT full_name(team) full_name, COUNT(*) total FROM all_series GROUP BY 1 ORDER BY 2 DESC LIMIT 10;
+SELECT full_name(team) full_name, COUNT(*) total FROM all_series GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 10;
 
 -- Teams that showed up in the finals the most
 SELECT full_name(team) full_name, COUNT(*) total FROM all_series

@@ -376,8 +376,11 @@ impl ConnectionSingleton {
 
         // This allows us to use JSON functions (e.g. json_extract_string). It should only need to be run once
         // while establishing a new connection.
-        conn.execute("INSTALL JSON", [])?;
-        conn.execute("LOAD JSON", [])?;
+        conn.execute("INSTALL json", [])?;
+        conn.execute("LOAD json", [])?;
+
+        conn.execute("INSTALL httpfs", [])?;
+        conn.execute("LOAD httpfs", [])?;
 
         Ok(Self(ExclusiveConnection::new(conn)))
     }

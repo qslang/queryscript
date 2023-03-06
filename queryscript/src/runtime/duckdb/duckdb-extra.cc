@@ -25,6 +25,9 @@ Value *duckdb_create_pointer(uint32_t *value)
     return (Value *)new duckdb::Value(val);
 }
 
+// This is not defined in duckdb.hpp anymore, but it is referenced below
+class BuiltinFunctions;
+
 // These declarations are copied from duckdb.cpp (the file included within duckdb-rs,
 // pinned to version 0.6.0). They are re-declared here so that we can reference them
 // in the redeclaration of the arrow_scan function as arrow_scan_qs.
@@ -38,18 +41,12 @@ namespace duckdb
     //===--------------------------------------------------------------------===//
     // Arrow Variable Size Types
     //===--------------------------------------------------------------------===//
-    enum class ArrowVariableSizeType : uint8_t
-    {
-        FIXED_SIZE = 0,
-        NORMAL = 1,
-        SUPER_SIZE = 2
-    };
+    enum class ArrowVariableSizeType : uint8_t { FIXED_SIZE = 0, NORMAL = 1, SUPER_SIZE = 2 };
 
     //===--------------------------------------------------------------------===//
     // Arrow Time/Date Types
     //===--------------------------------------------------------------------===//
-    enum class ArrowDateTimeType : uint8_t
-    {
+    enum class ArrowDateTimeType : uint8_t {
         MILLISECONDS = 0,
         MICROSECONDS = 1,
         NANOSECONDS = 2,
@@ -58,10 +55,9 @@ namespace duckdb
         MONTHS = 5
     };
 
-    struct ArrowConvertData
-    {
-        ArrowConvertData(LogicalType type) : dictionary_type(type){};
-        ArrowConvertData(){};
+    struct ArrowConvertData {
+        ArrowConvertData(LogicalType type) : dictionary_type(type) {};
+        ArrowConvertData() {};
 
         //! Hold type of dictionary
         LogicalType dictionary_type;
@@ -143,7 +139,9 @@ void init_arrow_scan(uint32_t *connection_ptr)
     // This code is mirrored from duckdb_register_table_function
     auto con = (duckdb::Connection *)connection_ptr;
     con->context->RunFunctionInTransaction([&]() {
-        auto &catalog = duckdb::Catalog::GetCatalog(*con->context);
-        catalog.CreateTableFunction(*con->context, &tf_info);
+		auto &catalog = duckdb::Catalog::GetSystemCatalog(*con->context);
+
+		// create the function in the catalog
+		catalog.CreateTableFunction(*con->context, &tf_info);
     });
 }
