@@ -65,6 +65,12 @@ jobs:
           CLICKHOUSE_PASSWORD: example
         ports:
           - 5472:9000
+      http:
+        image: halverneus/static-file-server
+        ports:
+          - 5473:8080
+        volumes:
+          - queryscript/tests/qs:/web
 
     env:
       RA_TARGET: ${{ matrix.target }}

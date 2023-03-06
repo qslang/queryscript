@@ -17,13 +17,14 @@ use sqlparser::ast as sqlast;
 use crate::ast::Ident;
 use crate::compile::sql::{create_table_as, select_star_from};
 use crate::compile::ConnectionString;
+use crate::runtime::functions::{Format, LazyFileRelation};
 use crate::runtime::{
     self,
     error::{rt_unimplemented, Result},
     normalize::Normalizer,
-    sql::{SQLEngine, SQLEnginePool, SQLParam},
+    sql::{LazySQLParam, SQLEngine, SQLEnginePool},
 };
-use crate::runtime::{SQLEmbedded, SQLEngineType};
+use crate::runtime::{SQLEmbedded, SQLEngineType, SQLParam};
 use crate::types::Type;
 use crate::types::{arrow::ArrowRecordBatchRelation, Relation, Value};
 
@@ -85,12 +86,18 @@ impl Normalizer for DuckDBNormalizer {
 }
 
 #[derive(Debug, Clone)]
-pub struct ArrowRelation {
-    pub relation: Arc<dyn Relation>,
-    pub schema: ArrowSchemaRef,
+pub enum ReplacementRelation {
+    Arrow {
+        data: Arc<dyn Relation>,
+        schema: ArrowSchemaRef,
+    },
+    File {
+        file_path: String,
+        format: Format,
+    },
 }
 
-type RelationMap = HashMap<String, ArrowRelation>;
+type RelationMap = HashMap<String, ReplacementRelation>;
 
 struct LocalRelations(HashSet<String>, Arc<Mutex<RelationMap>>);
 
@@ -149,6 +156,7 @@ impl DuckDBEngine {
     fn eval_in_place(
         &mut self,
         query: &sqlast::Statement,
+        file_loads: HashMap<Ident, ReplacementRelation>,
         params: HashMap<Ident, SQLParam>,
     ) -> Result<Arc<dyn Relation>> {
         // The code below works by (globally within the connection) installing a replacement
@@ -160,6 +168,11 @@ impl DuckDBEngine {
         let mut scalar_params = Vec::new();
 
         let mut relation_params = LocalRelations::new(conn_state.relations.clone());
+
+        for key in file_loads.keys() {
+            relation_params.insert(key.to_string());
+        }
+
         for (key, param) in params.iter() {
             match &param.value {
                 Value::Relation(_) => {
@@ -181,13 +194,20 @@ impl DuckDBEngine {
         {
             let relations = &mut conn_state.relations.lock()?;
 
+            for (key, param) in file_loads.into_iter() {
+                relations.insert(
+                    normalizer.params.get(&key.to_string()).unwrap().clone(),
+                    param,
+                );
+            }
+
             for (key, param) in params.iter() {
                 match &param.value {
                     Value::Relation(r) => {
                         relations.insert(
                             normalizer.params.get(&key.to_string()).unwrap().clone(),
-                            ArrowRelation {
-                                relation: r.clone(),
+                            ReplacementRelation::Arrow {
+                                data: r.clone(),
                                 schema: Arc::new((&param.type_).try_into()?),
                             },
                         );
@@ -230,19 +250,46 @@ impl SQLEngine for DuckDBEngine {
     async fn query(
         &mut self,
         query: &sqlast::Statement,
-        params: HashMap<Ident, SQLParam>,
+        params: HashMap<Ident, LazySQLParam>,
     ) -> Result<Arc<dyn Relation>> {
+        let mut unresolved_params = HashMap::new();
+        let mut file_loads = HashMap::new();
+        for (name, param) in params.into_iter() {
+            // DuckDB has the ability to load files directly, which we take advantage of
+            // so that we get HTTP and S3 support for free, and also take advantage of its
+            // performance optimizations (e.g. RANGE HTTP queries based on parquet file metadata)
+            if let Some(file_load) = param.value.as_any().downcast_ref::<LazyFileRelation>() {
+                // The state in file_load is very small (just a few strings), so this should be an irrelevant clone.
+                file_loads.insert(
+                    name,
+                    ReplacementRelation::File {
+                        file_path: file_load
+                            .file_path
+                            .clone()
+                            .into_os_string()
+                            .into_string()
+                            .unwrap(),
+                        format: file_load.format.clone(),
+                    },
+                );
+            } else {
+                unresolved_params.insert(name, param);
+            }
+        }
+
+        let resolved_params = runtime::resolve_params(unresolved_params).await?;
+
         // We call block_in_place here because DuckDB may perform computationally expensive work,
         // and it's not hooked into the async coroutines that the runtime uses (and therefore cannot
         // yield work). block_in_place() tells Tokio to expect this thread to spend a while working on
         // this stuff and use other threads for other work.
-        runtime::expensive(|| self.eval_in_place(query, params))
+        runtime::expensive(|| self.eval_in_place(query, file_loads, resolved_params))
     }
 
     async fn exec(
         &mut self,
         stmt: &sqlast::Statement,
-        params: HashMap<Ident, SQLParam>,
+        params: HashMap<Ident, LazySQLParam>,
     ) -> Result<()> {
         self.query(stmt, params).await?;
         Ok(())
@@ -270,9 +317,9 @@ impl SQLEngine for DuckDBEngine {
         );
         let params = vec![(
             param_name.into(),
-            SQLParam {
+            LazySQLParam {
                 name: param_name.into(),
-                value,
+                value: value.into(),
                 type_,
             },
         )]
@@ -375,9 +422,16 @@ impl ConnectionSingleton {
         }?;
 
         // This allows us to use JSON functions (e.g. json_extract_string). It should only need to be run once
-        // while establishing a new connection.
+        // while establishing a new connection. On my (Mac M1) laptop, it takes about 500ms.
+        //
+        // TODO: Ideally, we could statically bundle these into the distribution. As of now, DuckDB stashes these
+        // in the user's home directory and will downloaod them (from S3) if they're not present. Luckily, because
+        // we only instantiate one connection per unique DuckDB URL, this code only runs once (usually on startup).
         conn.execute("INSTALL json", [])?;
         conn.execute("LOAD json", [])?;
+
+        conn.execute("INSTALL parquet", [])?;
+        conn.execute("LOAD parquet", [])?;
 
         conn.execute("INSTALL httpfs", [])?;
         conn.execute("LOAD httpfs", [])?;
@@ -413,8 +467,8 @@ impl SQLEmbedded for DuckDBEngine {
     }
 }
 
-unsafe fn cast_relation_data(data: *mut u32) -> &'static ArrowRelation {
-    &*(data as *const ArrowRelation)
+unsafe fn cast_relation_data(data: *mut u32) -> &'static ReplacementRelation {
+    &*(data as *const ReplacementRelation)
 }
 
 #[no_mangle]
@@ -436,30 +490,57 @@ pub unsafe extern "C" fn replacement_scan_callback(
         None => return,
     };
 
-    let fn_name = CString::new("arrow_scan_qs").unwrap();
-    cffi::duckdb_replacement_scan_set_function_name(info, fn_name.as_ptr());
-    unsafe {
-        let get_data_fn = cppffi::get_create_stream_fn();
+    match &relation {
+        ReplacementRelation::Arrow { .. } => {
+            let fn_name = CString::new("arrow_scan_qs").unwrap();
+            cffi::duckdb_replacement_scan_set_function_name(info, fn_name.as_ptr());
+            unsafe {
+                let get_data_fn = cppffi::get_create_stream_fn();
 
-        let mut data_ptr =
-            cppffi::duckdb_create_pointer(relation as *const _ as *mut u32) as cffi::duckdb_value;
-        let mut get_data_ptr = cppffi::duckdb_create_pointer(get_data_fn) as cffi::duckdb_value;
-        let mut get_schema_ptr =
-            cppffi::duckdb_create_pointer(get_schema as *mut u32) as cffi::duckdb_value;
-        cffi::duckdb_replacement_scan_add_parameter(info, data_ptr);
-        cffi::duckdb_replacement_scan_add_parameter(info, get_data_ptr);
-        cffi::duckdb_replacement_scan_add_parameter(info, get_schema_ptr);
-        cffi::duckdb_destroy_value(&mut data_ptr);
-        cffi::duckdb_destroy_value(&mut get_data_ptr);
-        cffi::duckdb_destroy_value(&mut get_schema_ptr);
-    }
+                let mut data_ptr = cppffi::duckdb_create_pointer(relation as *const _ as *mut u32)
+                    as cffi::duckdb_value;
+                let mut get_data_ptr =
+                    cppffi::duckdb_create_pointer(get_data_fn) as cffi::duckdb_value;
+                let mut get_schema_ptr =
+                    cppffi::duckdb_create_pointer(get_schema as *mut u32) as cffi::duckdb_value;
+                cffi::duckdb_replacement_scan_add_parameter(info, data_ptr);
+                cffi::duckdb_replacement_scan_add_parameter(info, get_data_ptr);
+                cffi::duckdb_replacement_scan_add_parameter(info, get_schema_ptr);
+                cffi::duckdb_destroy_value(&mut data_ptr);
+                cffi::duckdb_destroy_value(&mut get_data_ptr);
+                cffi::duckdb_destroy_value(&mut get_schema_ptr);
+            }
+        }
+        ReplacementRelation::File { file_path, format } => {
+            let file_name = CString::new(file_path.as_str()).unwrap();
+
+            // TODO: We could theoretically run without schema inference here
+            let fn_name = CString::new(match format {
+                Format::Csv => "read_csv_auto",
+                Format::Json => "read_json_auto",
+                Format::Parquet => "read_parquet",
+            })
+            .unwrap();
+
+            cffi::duckdb_replacement_scan_set_function_name(info, fn_name.as_ptr());
+            let mut fname_ptr = cffi::duckdb_create_varchar(file_name.as_ptr());
+            cffi::duckdb_replacement_scan_add_parameter(info, fname_ptr);
+            cffi::duckdb_destroy_value(&mut fname_ptr);
+        }
+    };
 }
 
 #[no_mangle]
 pub extern "C" fn get_schema(data: *mut u32, schema_ptr: *mut u32) {
     let relation = unsafe { cast_relation_data(data) };
 
-    let schema_c = FFI_ArrowSchema::try_from(relation.schema.as_ref());
+    let schema = match &relation {
+        ReplacementRelation::Arrow { schema, .. } => schema,
+        _ => unreachable!(
+            "should only be in get_schema() if we have data for a replacement relation"
+        ),
+    };
+    let schema_c = FFI_ArrowSchema::try_from(schema.as_ref());
     let schema_c = match schema_c {
         Ok(s) => s,
         Err(e) => {
@@ -476,7 +557,13 @@ pub extern "C" fn get_schema(data: *mut u32, schema_ptr: *mut u32) {
 // into an FFI_ArrowArrayStream
 fn rust_build_array_stream(data: *mut u32, fields: &CxxVector<CxxString>, dest: *mut u32) {
     let relation = unsafe { cast_relation_data(data) };
-    let mut batch_reader = VecRecordBatchReader::new(relation.clone());
+
+    let (schema, data )= match &relation{
+        ReplacementRelation::Arrow { schema, data } => (schema.clone(), data.clone()),
+        _ => unreachable!("should only be in rust_build_array_stream() if we have data for a replacement relation"),
+    };
+
+    let mut batch_reader = VecRecordBatchReader::new(schema, data);
 
     let schema = batch_reader.schema();
     let field_map = schema
@@ -502,14 +589,16 @@ fn rust_build_array_stream(data: *mut u32, fields: &CxxVector<CxxString>, dest: 
 // We need an object that implements arrow::record_batch::RecordBatchReader to run the iteration
 // for the FFI_ArrowArrayStream
 struct VecRecordBatchReader {
-    data: ArrowRelation,
+    schema: ArrowSchemaRef,
+    data: Arc<dyn Relation>,
     idx: usize,
     projection: Option<Vec<usize>>,
 }
 
 impl VecRecordBatchReader {
-    pub fn new(data: ArrowRelation) -> VecRecordBatchReader {
+    pub fn new(schema: ArrowSchemaRef, data: Arc<dyn Relation>) -> VecRecordBatchReader {
         VecRecordBatchReader {
+            schema,
             data,
             idx: 0,
             projection: None,
@@ -531,7 +620,7 @@ impl Iterator for VecRecordBatchReader {
     fn next(
         &mut self,
     ) -> Option<Result<arrow::record_batch::RecordBatch, arrow::error::ArrowError>> {
-        let rbs = &self.data.relation;
+        let rbs = &self.data;
         if self.idx >= rbs.num_batches() {
             None
         } else {
@@ -548,7 +637,7 @@ impl Iterator for VecRecordBatchReader {
 
 impl arrow::record_batch::RecordBatchReader for VecRecordBatchReader {
     fn schema(&self) -> arrow::datatypes::SchemaRef {
-        self.data.schema.clone()
+        self.schema.clone()
     }
 }
 

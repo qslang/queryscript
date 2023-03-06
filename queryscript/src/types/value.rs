@@ -74,6 +74,49 @@ pub enum Value {
     Fn(Arc<dyn FnValue>),
 }
 
+#[async_trait]
+pub trait LazyValue: std::fmt::Debug + Send + LazyValueClone {
+    async fn get(&mut self) -> crate::runtime::Result<Value>;
+}
+
+// See https://stackoverflow.com/questions/30353462/how-to-clone-a-struct-storing-a-boxed-trait-object
+pub trait LazyValueClone {
+    fn clone_box(&self) -> Box<dyn LazyValue>;
+    fn as_any(&self) -> &dyn Any;
+}
+
+impl<T> LazyValueClone for T
+where
+    T: 'static + LazyValue + Clone,
+{
+    fn clone_box(&self) -> Box<dyn LazyValue> {
+        Box::new(self.clone())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Clone for Box<dyn LazyValue> {
+    fn clone(&self) -> Box<dyn LazyValue> {
+        self.clone_box()
+    }
+}
+
+#[async_trait]
+impl LazyValue for Option<Value> {
+    async fn get(&mut self) -> crate::runtime::Result<Value> {
+        Ok(self.take().expect("lazy value already consumed"))
+    }
+}
+
+impl Into<Box<dyn LazyValue>> for Value {
+    fn into(self) -> Box<dyn LazyValue> {
+        Box::new(Some(self))
+    }
+}
+
 pub trait Record: fmt::Debug + Send + Sync {
     fn schema(&self) -> Vec<Field>;
     fn as_any(&self) -> &dyn Any;
@@ -97,7 +140,7 @@ pub trait FnValue: fmt::Debug + DynClone + Send + Sync {
         &'a self,
         ctx: &'a mut crate::runtime::Context,
         args: Vec<Value>,
-    ) -> BoxFuture<'a, crate::runtime::Result<Value>>;
+    ) -> BoxFuture<'a, crate::runtime::Result<Box<dyn LazyValue>>>;
     fn fn_type(&self) -> FnType;
     fn as_any(&self) -> &dyn Any;
 }

@@ -23,3 +23,10 @@ services:
     volumes:
       - ./data/clickhouse:/var/lib/clickhouse/
       - ./logs/clickhouse:/var/log/clickhouse-server/
+
+  http:
+    image: halverneus/static-file-server
+    ports:
+      - 5473:8080
+    volumes:
+      - ../queryscript/tests/qs:/web

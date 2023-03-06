@@ -1,22 +1,32 @@
 use arrow::{
     datatypes::{DataType as ArrowDataType, Schema as ArrowSchema},
     error::ArrowError,
-    record_batch::{RecordBatch, RecordBatchReader},
+    record_batch::{RecordBatch as ArrowRecordBatch, RecordBatchReader},
 };
 use async_trait::async_trait;
 use futures::future::{BoxFuture, FutureExt};
-use std::path::{Path as FilePath, PathBuf as FilePathBuf};
-use std::sync::Arc;
+use sqlparser::ast as sqlast;
+use std::{any::Any, collections::HashMap, sync::Arc};
+use std::{
+    path::{Path as FilePath, PathBuf as FilePathBuf},
+    sync::Mutex,
+};
 
-use crate::compile::schema;
 use crate::{
-    types,
-    types::{arrow::ArrowRecordBatchRelation, FnValue, Value},
+    compile::{
+        schema::{self, Ident},
+        sql::{select_limit_0, select_star_from},
+    },
+    types::{
+        self, arrow::ArrowRecordBatchRelation, value::RecordBatch, Field, FnValue, LazyValue,
+        LazyValueClone, Relation, Type, TypesystemError, Value,
+    },
 };
 
 use super::{
+    embedded_engine,
     error::{fail, Result, RuntimeError},
-    runtime, Context,
+    runtime, Context, LazySQLParam, SQLEngineType,
 };
 
 type TypeRef = schema::Ref<types::Type>;
@@ -46,7 +56,11 @@ impl QSFn {
 
 #[async_trait]
 impl FnValue for QSFn {
-    fn execute(&self, ctx: &mut Context, args: Vec<Value>) -> BoxFuture<Result<Value>> {
+    fn execute(
+        &self,
+        ctx: &mut Context,
+        args: Vec<Value>,
+    ) -> BoxFuture<Result<Box<dyn LazyValue>>> {
         let mut new_ctx = ctx.clone();
         let type_ = self.type_.clone();
         let body = self.body.clone();
@@ -63,7 +77,7 @@ impl FnValue for QSFn {
                     .insert(type_.args[i].name.clone(), args[i].clone());
             }
 
-            runtime::eval(&mut new_ctx, &body).await
+            runtime::eval_lazy(&mut new_ctx, &body).await
         }
         .boxed()
     }
@@ -78,7 +92,7 @@ impl FnValue for QSFn {
 }
 
 #[derive(Clone, Debug)]
-enum Format {
+pub enum Format {
     Json,
     Csv,
     Parquet,
@@ -86,7 +100,7 @@ enum Format {
 
 #[derive(Clone, Debug)]
 pub struct LoadFileFn {
-    schema: Arc<ArrowSchema>,
+    schema: Arc<Vec<Field>>,
 }
 
 impl LoadFileFn {
@@ -97,9 +111,9 @@ impl LoadFileFn {
         };
 
         let mut schema = None;
-        if let ArrowDataType::List(dt) = ret_type.as_ref().try_into()? {
-            if let ArrowDataType::Struct(s) = dt.data_type() {
-                schema = Some(Arc::new(ArrowSchema::new(s.clone())));
+        if let Type::List(dt) = ret_type.as_ref() {
+            if let Type::Record(s) = dt.as_ref() {
+                schema = Some(Arc::new(s.clone()));
             }
         }
 
@@ -130,77 +144,27 @@ impl LoadFileFn {
         }
     }
 
-    pub async fn load(
-        &self,
-        _ctx: &Context,
-        file_path: &FilePath,
-        format: Option<String>,
-    ) -> Result<Value> {
-        let format_type = Self::derive_format(file_path, &format);
-
-        let records = runtime::expensive(move || {
-            let fd = std::fs::File::open(file_path)?;
-
-            // NOTES:
-            // - This reads the entire file into memory, and then operates over it. We could
-            //   instead implement the Relation attribute for each Reader (or for Iterator<Item=RecordBatch>).
-            // - DataFusion implements an async reader for non-files (i.e. streams that are already async) by reading
-            //   newline delimited chunks of the file. We could do something like that to leverage async file reading.
-            // - The parquet library actually supports async reading, which we could do in a separate branch
-            let records = Arc::new(match format_type {
-                Format::Csv => {
-                    let reader = arrow::csv::ReaderBuilder::new()
-                        .has_header(true)
-                        .with_schema(self.schema.clone())
-                        .build(fd)?;
-
-                    reader.collect::<Result<Vec<RecordBatch>, ArrowError>>()
-                }
-                Format::Json => {
-                    let reader = arrow::json::RawReaderBuilder::new(self.schema.clone())
-                        .build(std::io::BufReader::new(fd))?;
-
-                    reader.collect::<Result<Vec<RecordBatch>, ArrowError>>()
-                }
-                Format::Parquet => {
-                    let reader =
-                        parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(fd)?
-                            .build()?;
-
-                    if reader.schema() != self.schema {
-                        return fail!(
-                            "Parquet file {:?} has a different schema than the target variable's type",
-                            file_path
-                        );
-                    }
-
-                    reader.collect::<Result<Vec<RecordBatch>, ArrowError>>()
-                }
-            }? as Vec<RecordBatch>);
-
-            Ok::<Arc<Vec<_>>, RuntimeError>(records)
-        })?;
-
-        Ok(Value::Relation(ArrowRecordBatchRelation::new(
-            self.schema.clone(),
-            records,
-        )))
-    }
-
     fn parse_args(ctx: &Context, args: Vec<Value>) -> Result<(FilePathBuf, Option<String>)> {
         if args.len() != 2 {
             return fail!("load expects exactly 2 arguments");
         }
 
+        let file_path = match &args[0] {
+            Value::Utf8(s) => s,
+            _ => return fail!("load expects its first argument to be a string"),
+        };
+
+        let is_remote = match url::Url::parse(file_path) {
+            Ok(url) => url.scheme() != "file",
+            Err(_) => false,
+        };
+
         let mut path_buf = FilePathBuf::new();
-        if let Some(folder) = &ctx.folder {
+        if let (false, Some(folder)) = (is_remote, &ctx.folder) {
             path_buf.push(folder.clone());
         }
 
-        match &args[0] {
-            Value::Utf8(s) => path_buf.push(s),
-            _ => return fail!("load expects its first argument to be a string"),
-        };
+        path_buf.push(file_path);
 
         let format = match &args[1] {
             Value::Utf8(s) => Some(s.clone()),
@@ -215,36 +179,21 @@ impl LoadFileFn {
         ctx: &Context,
         args: Vec<Value>,
     ) -> crate::runtime::Result<crate::types::Type> {
-        let (file_path, format) = Self::parse_args(ctx, args)?;
-        let file_path = &*file_path;
-        let format_type = Self::derive_format(file_path, &format);
+        let (path_buf, format) = Self::parse_args(ctx, args)?;
+        let format = Self::derive_format(&path_buf, &format);
+        let mut lazy_value = LazyFileRelation {
+            schema: None,
+            file_path: path_buf,
+            format,
+            schema_only: true,
+        };
 
-        runtime::expensive(move || {
-            let fd = std::fs::File::open(file_path)?;
+        let relation = match lazy_value.get().await? {
+            Value::Relation(r) => r,
+            _ => unreachable!("load should return a relation"),
+        };
 
-            Ok(crate::types::Type::List(Box::new(match format_type {
-                Format::Csv => {
-                    let reader = arrow::csv::ReaderBuilder::new()
-                        .infer_schema(Some(100))
-                        .has_header(true)
-                        .build(fd)?;
-
-                    let schema = reader.schema();
-                    schema.as_ref().try_into()?
-                }
-                Format::Json => {
-                    let mut reader = std::io::BufReader::new(fd);
-                    let schema = arrow::json::reader::infer_json_schema(&mut reader, Some(100))?;
-                    (&schema).try_into()?
-                }
-                Format::Parquet => {
-                    let reader =
-                        parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(fd)?;
-                    let schema = reader.schema();
-                    schema.as_ref().try_into()?
-                }
-            })))
-        })
+        Ok(Type::List(Box::new(Type::Record(relation.schema()))))
     }
 }
 
@@ -254,11 +203,17 @@ impl FnValue for LoadFileFn {
         &'a self,
         ctx: &'a mut Context,
         args: Vec<Value>,
-    ) -> BoxFuture<'a, Result<Value>> {
-        let us = self.clone();
+    ) -> BoxFuture<'a, Result<Box<dyn LazyValue>>> {
+        let schema = self.schema.clone();
         async move {
             let (path_buf, format) = Self::parse_args(ctx, args)?;
-            us.load(ctx, &*path_buf, format).await
+            let format = Self::derive_format(&path_buf, &format);
+            Ok(Box::new(LazyFileRelation {
+                schema: Some(schema),
+                file_path: path_buf,
+                format,
+                schema_only: false,
+            }) as Box<dyn LazyValue>)
         }
         .boxed()
     }
@@ -270,11 +225,9 @@ impl FnValue for LoadFileFn {
                 type_: types::Type::Atom(types::AtomicType::Utf8),
                 nullable: false,
             }],
-            ret: Box::new(
-                (&self.schema.fields)
-                    .try_into()
-                    .expect("Failed to convert function type back"),
-            ),
+            ret: Box::new(Type::List(Box::new(Type::Record(
+                self.schema.as_ref().clone(),
+            )))),
         }
     }
 
@@ -282,6 +235,46 @@ impl FnValue for LoadFileFn {
         self
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct LazyFileRelation {
+    pub schema: Option<Arc<Vec<Field>>>,
+    pub file_path: FilePathBuf,
+    pub format: Format,
+    pub schema_only: bool,
+}
+
+#[async_trait]
+impl LazyValue for LazyFileRelation {
+    async fn get(&mut self) -> Result<Value> {
+        let table_name = Ident::from("__qs_inference");
+        let mut params = HashMap::new();
+        params.insert(
+            table_name.clone(),
+            LazySQLParam::new(
+                table_name.clone(),
+                self.clone_box(),
+                &crate::types::Type::Atom(crate::types::AtomicType::Null),
+            ),
+        );
+
+        let mut query = select_star_from(&table_name);
+        if self.schema_only {
+            query = select_limit_0(query);
+        }
+        let query = sqlast::Statement::Query(Box::new(query));
+        let mut engine = embedded_engine(SQLEngineType::DuckDB);
+
+        let mut relation = engine.query(&query, params).await?;
+
+        if let Some(schema) = &self.schema {
+            relation = relation.try_cast(schema.as_ref())?;
+        }
+
+        Ok(Value::Relation(relation))
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct IdentityFn {
     type_: types::FnType,
@@ -304,8 +297,8 @@ impl FnValue for IdentityFn {
         &'a self,
         _ctx: &'a mut Context,
         args: Vec<Value>,
-    ) -> BoxFuture<'a, Result<Value>> {
-        async move { Ok(args.into_iter().next().unwrap()) }.boxed()
+    ) -> BoxFuture<'a, Result<Box<dyn LazyValue>>> {
+        async move { Ok(args.into_iter().next().unwrap().into()) }.boxed()
     }
 
     fn fn_type(&self) -> types::FnType {

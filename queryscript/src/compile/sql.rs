@@ -1965,37 +1965,27 @@ pub fn compile_sqlquery(
 
     let limit = match &query.limit {
         Some(limit) => {
-            let expr = compile_sqlexpr(
-                compiler.clone(),
-                schema.clone(),
-                SQLScope::empty(),
+            let expr = coerce_into(
+                &compiler,
                 loc,
-                &limit,
+                compile_sqlarg(
+                    compiler.clone(),
+                    schema.clone(),
+                    SQLScope::empty(),
+                    loc,
+                    &limit,
+                )?,
+                resolve_global_atom(compiler.clone(), "bigint")?,
             )?;
-            expr.type_
-                .unify(&resolve_global_atom(compiler.clone(), "bigint")?)?;
 
             Some(expr)
         }
         None => None,
     };
 
-    let offset = match &query.offset {
-        Some(offset) => {
-            let expr = compile_sqlexpr(
-                compiler.clone(),
-                schema.clone(),
-                SQLScope::empty(),
-                loc,
-                &offset.value,
-            )?;
-            expr.type_
-                .unify(&resolve_global_atom(compiler.clone(), "bigint")?)?;
-
-            Some((expr, offset.rows.clone()))
-        }
-        None => None,
-    };
+    let offset = query
+        .offset
+        .compile_sql(&compiler, &schema, &SQLScope::empty(), loc)?;
 
     if query.fetch.is_some() {
         return Err(CompileError::unimplemented(loc.clone(), "FETCH"));
@@ -2043,17 +2033,20 @@ pub fn compile_sqlquery(
                 names.extend(body_names);
 
                 let limit = match limit {
-                    Some(limit) => Some(finish_sqlexpr(&loc, limit.expr, &mut names).await?),
+                    Some(limit) => {
+                        let limit = limit.sql.await?;
+                        let limit = limit.read()?.clone();
+                        names.extend(limit.names);
+                        Some(limit.body.as_expr()?)
+                    }
                     None => None,
                 };
 
-                let offset = match offset {
-                    Some((offset, rows)) => Some(sqlparser::ast::Offset {
-                        value: finish_sqlexpr(&loc, offset.expr, &mut names).await?,
-                        rows,
-                    }),
-                    None => None,
-                };
+                let SQLSnippet {
+                    body: offset,
+                    names: offset_names,
+                } = cunwrap(offset.await?)?;
+                names.extend(offset_names);
 
                 let (ob_names, order_by) = cunwrap(compiled_order_by.await?)?;
                 names.extend(ob_names);
@@ -2221,7 +2214,6 @@ fn apply_sqlcast(
     }))?)
 }
 
-#[async_backtrace::framed]
 fn coerce_all(
     compiler: &Compiler,
     op: &sqlparser::ast::BinaryOperator,
@@ -2276,6 +2268,23 @@ fn coerce_all(
     }
 
     Ok((target, ret))
+}
+
+fn coerce_into(
+    compiler: &Compiler,
+    loc: &SourceLocation,
+    arg: CTypedSQL,
+    target_type: CRef<MType>,
+) -> Result<CTypedSQL> {
+    let (_, mut args) = coerce_all(
+        compiler,
+        &sqlast::BinaryOperator::Eq,
+        loc,
+        vec![arg],
+        Some(target_type),
+    )?;
+
+    Ok(args.swap_remove(0))
 }
 
 pub fn unify_all<T, C, I>(mut iter: I, unknown_debug_name: &str) -> Result<CRef<T>>
@@ -2518,6 +2527,45 @@ impl CompileSQL for sqlast::LoopRange {
                 sqlast::LoopRange { item, range: body },
             ))
         })
+    }
+}
+
+impl CompileSQL for sqlast::Offset {
+    fn compile_sql(
+        &self,
+        compiler: &Compiler,
+        schema: &Ref<Schema>,
+        scope: &Ref<SQLScope>,
+        loc: &SourceLocation,
+    ) -> Result<CRefSnippet<Self>> {
+        let expr = compile_sqlarg(
+            compiler.clone(),
+            schema.clone(),
+            scope.clone(),
+            loc,
+            &self.value,
+        )?;
+
+        let expr = coerce_into(
+            compiler,
+            loc,
+            expr,
+            resolve_global_atom(compiler.clone(), "bigint")?,
+        )?;
+        let rows = self.rows.clone();
+        compiler.async_cref(casync!({
+            let expr = expr.sql.await?;
+            let expr = expr.read()?.clone();
+            let SQLSnippet { names, body } = expr;
+
+            Ok(CSQLSnippet::wrap(
+                names,
+                sqlast::Offset {
+                    value: body.as_expr()?,
+                    rows: rows,
+                },
+            ))
+        }))
     }
 }
 

@@ -10,9 +10,15 @@
     },
     "queries": [
         Err(
-            ArrowError {
-                source: CsvError(
-                    "incorrect number of fields for line 1, expected 1 got more than 1",
+            DuckDBError {
+                source: DuckDBFailure(
+                    Error {
+                        code: Unknown,
+                        extended_code: 1,
+                    },
+                    Some(
+                        "Binder Error: Table \"orders\" does not have a column named \"bool_value\"\nLINE 1: SELECT \"MAX\"(\"orders\".\"bool_value\") AS \"MAX(bool_val...\n                     ^",
+                    ),
                 ),
                 backtrace: None,
             },

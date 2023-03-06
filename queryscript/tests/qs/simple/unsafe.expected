@@ -133,14 +133,14 @@
                             Field {
                                 name: "id",
                                 type_: Atom(
-                                    Int32,
+                                    UInt64,
                                 ),
                                 nullable: true,
                             },
                             Field {
                                 name: "org_id",
                                 type_: Atom(
-                                    Int32,
+                                    UInt64,
                                 ),
                                 nullable: true,
                             },
@@ -161,7 +161,7 @@
                             Field {
                                 name: "user_id",
                                 type_: Atom(
-                                    Int32,
+                                    UInt64,
                                 ),
                                 nullable: true,
                             },
@@ -175,7 +175,7 @@
                             Field {
                                 name: "ts",
                                 type_: Atom(
-                                    Utf8,
+                                    Date32,
                                 ),
                                 nullable: true,
                             },
@@ -205,7 +205,7 @@
                             Field {
                                 name: "id",
                                 type_: Atom(
-                                    Int32,
+                                    UInt64,
                                 ),
                                 nullable: true,
                             },
@@ -223,14 +223,14 @@
                             Field {
                                 name: "id",
                                 type_: Atom(
-                                    Int32,
+                                    UInt64,
                                 ),
                                 nullable: true,
                             },
                             Field {
                                 name: "org_id",
                                 type_: Atom(
-                                    Int32,
+                                    UInt64,
                                 ),
                                 nullable: true,
                             },

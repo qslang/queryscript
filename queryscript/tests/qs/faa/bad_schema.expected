@@ -10,8 +10,16 @@
     },
     "queries": [
         Err(
-            StringError {
-                what: "Parquet file \"tests/qs/faa/data/aircraft_models.parquet\" has a different schema than the target variable's type",
+            DuckDBError {
+                source: DuckDBFailure(
+                    Error {
+                        code: Unknown,
+                        extended_code: 1,
+                    },
+                    Some(
+                        "Binder Error: Table \"aircraft_models\" does not have a column named \"number_value\"\nLINE 1: SELECT \"MAX\"(\"aircraft_models\".\"number_value\") AS \"M...\n                     ^",
+                    ),
+                ),
                 backtrace: None,
             },
         ),

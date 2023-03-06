@@ -12,15 +12,15 @@
     ],
     "decls": {
         "let events": External<[{
+        	user_id UInt64,
         	description Utf8,
-        	ts Utf8,
-        	user_id Int64,
+        	ts Date32,
         }]>,
         "let users": External<[{
-        	active Boolean,
-        	id Int64,
+        	id UInt64,
+        	org_id UInt64,
         	name Utf8,
-        	org_id Int64,
+        	active Boolean,
         }]>,
     },
     "queries": [

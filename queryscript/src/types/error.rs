@@ -16,6 +16,12 @@ pub enum TypesystemError {
         backtrace: Option<Backtrace>,
     },
 
+    #[snafu(context(false))]
+    RuntimeError {
+        source: Box<crate::runtime::RuntimeError>,
+        backtrace: Option<Backtrace>,
+    },
+
     #[snafu(display("Failed to parse as number: {}", val))]
     NumericParseError {
         val: String,
