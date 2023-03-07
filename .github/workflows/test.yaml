@@ -179,13 +179,8 @@ jobs:
       #          key:
       #            ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}-${{ github.run_id }}
 
-      - name: Copy test files
-        run: cp -r ./queryscript/tests/qs /tmp/
-
       - name: Start services
         run: /usr/bin/docker compose -f services/docker-compose.yml up -d
-        env:
-          QS_HTTP_TEST_DIR: /tmp/qs
 
       - name: Run tests
         run: make test
