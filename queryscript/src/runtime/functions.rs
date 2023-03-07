@@ -1,31 +1,20 @@
-use arrow::{
-    datatypes::{DataType as ArrowDataType, Schema as ArrowSchema},
-    error::ArrowError,
-    record_batch::{RecordBatch as ArrowRecordBatch, RecordBatchReader},
-};
 use async_trait::async_trait;
 use futures::future::{BoxFuture, FutureExt};
 use sqlparser::ast as sqlast;
-use std::{any::Any, collections::HashMap, sync::Arc};
-use std::{
-    path::{Path as FilePath, PathBuf as FilePathBuf},
-    sync::Mutex,
-};
+use std::path::{Path as FilePath, PathBuf as FilePathBuf};
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     compile::{
         schema::{self, Ident},
         sql::{select_limit_0, select_star_from},
     },
-    types::{
-        self, arrow::ArrowRecordBatchRelation, value::RecordBatch, Field, FnValue, LazyValue,
-        LazyValueClone, Relation, Type, TypesystemError, Value,
-    },
+    types::{self, Field, FnValue, LazyValue, LazyValueClone, Type, Value},
 };
 
 use super::{
     embedded_engine,
-    error::{fail, Result, RuntimeError},
+    error::{fail, Result},
     runtime, Context, LazySQLParam, SQLEngineType,
 };
 

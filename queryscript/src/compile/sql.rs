@@ -2008,7 +2008,6 @@ pub fn compile_sqlquery(
             let compiled_order_by =
                 compile_order_by(&compiler, &schema, &scope, loc, &query.order_by)?;
 
-            let loc = loc.clone();
             let compiler = compiler.clone();
             casync!({
                 let mut names = SQLNames::new();
