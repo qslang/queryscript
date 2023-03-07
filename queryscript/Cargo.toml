@@ -95,7 +95,7 @@ url = "2.3.1"
 
 # -- ENGINES ---
 # DuckDB.
-duckdb = { version = "0.7.3", package = "duckdb-queryscript", features=["json", "httpfs", "parquet"] }
+duckdb = { path = "../duckdb-rs", version = "0.7.3", package = "duckdb-queryscript", features=["json", "httpfs", "parquet"] }
 # These are duckdb dependencies that we access directly
 hashlink = { version = "0.8" }
 
