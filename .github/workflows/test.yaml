@@ -112,9 +112,6 @@ jobs:
           submodules: true
           lfs: true
 
-      #      - name: Start services
-      #        run: /usr/bin/docker compose -f services/docker-compose.yml up -d
-
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -181,6 +178,9 @@ jobs:
       #            venv
       #          key:
       #            ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}-${{ github.run_id }}
+
+      - name: Start services
+        run: /usr/bin/docker compose -f services/docker-compose.yml up -d
 
       - name: Run tests
         run: make test
