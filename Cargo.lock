@@ -949,8 +949,6 @@ checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
 [[package]]
 name = "duckdb"
 version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aed949102c3efdcfdef9d00542dcd34549dff102f6a61537bcfd78534dd027db"
 dependencies = [
  "arrow",
  "cast",
@@ -1510,11 +1508,12 @@ checksum = "201de327520df007757c1f0adce6e827fe8562fbc28bfd9c15571c66ca1f5f79"
 [[package]]
 name = "libduckdb-sys"
 version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "418e710926ff3fca20f9f865ebb44dd8d1dbab74ddf0b5d93408bcc278d6d050"
 dependencies = [
+ "autocfg",
  "cc",
  "pkg-config",
+ "serde",
+ "serde_json",
  "vcpkg",
 ]
 
