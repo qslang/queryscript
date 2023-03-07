@@ -7,8 +7,8 @@ services:
       POSTGRES_PASSWORD: example
     ports:
       - 5471:5432
-    volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+        #    volumes:
+        #      - ./data/postgres:/var/lib/postgresql/data
 
   clickhouse:
     image: clickhouse/clickhouse-server:23
@@ -19,7 +19,15 @@ services:
     ulimits:
       nofile:
         soft: 262144
-        hard: 262144
+        hard:
+          262144
+          #    volumes:
+          #      - ./data/clickhouse:/var/lib/clickhouse/
+          #      - ./logs/clickhouse:/var/log/clickhouse-server/
+
+  http:
+    image: halverneus/static-file-server
+    ports:
+      - 5473:8080
     volumes:
-      - ./data/clickhouse:/var/lib/clickhouse/
-      - ./logs/clickhouse:/var/log/clickhouse-server/
+      - ${QS_HTTP_TEST_DIR:-../queryscript/tests/qs}:/web

@@ -107,10 +107,10 @@
                 	foo ?field?,
                 },
                 rhs: {
-                	active Boolean,
-                	id Int64,
+                	id UInt64,
+                	org_id UInt64,
                 	name Utf8,
-                	org_id Int64,
+                	active Boolean,
                 },
                 backtrace: None,
             },
@@ -122,10 +122,10 @@
                     source: CoercionError {
                         types: [
                             {
-                            	active Boolean,
-                            	id Int64,
+                            	id UInt64,
+                            	org_id UInt64,
                             	name Utf8,
-                            	org_id Int64,
+                            	active Boolean,
                             },
                             Int64,
                         ],

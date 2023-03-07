@@ -18,14 +18,14 @@
                             Field {
                                 name: "id",
                                 type_: Atom(
-                                    Int32,
+                                    UInt64,
                                 ),
                                 nullable: true,
                             },
                             Field {
                                 name: "org_id",
                                 type_: Atom(
-                                    Int32,
+                                    UInt64,
                                 ),
                                 nullable: true,
                             },

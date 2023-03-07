@@ -5,7 +5,7 @@ use strum::{EnumIter, IntoEnumIterator};
 use super::error::Result;
 use crate::ast::Ident;
 use crate::compile::ConnectionString;
-use crate::types::{Relation, Type, Value};
+use crate::types::{LazyValue, Relation, Type, Value};
 
 use async_trait::async_trait;
 
@@ -17,13 +17,13 @@ pub trait SQLEngine: std::fmt::Debug + Send + Sync {
     async fn query(
         &mut self,
         query: &sqlast::Statement,
-        params: HashMap<Ident, SQLParam>,
+        params: HashMap<Ident, LazySQLParam>,
     ) -> Result<Arc<dyn Relation>>;
 
     async fn exec(
         &mut self,
         stmt: &sqlast::Statement,
-        params: HashMap<Ident, SQLParam>,
+        params: HashMap<Ident, LazySQLParam>,
     ) -> Result<()>;
 
     async fn load(
@@ -53,20 +53,35 @@ pub trait SQLEmbedded {
 }
 
 #[derive(Debug, Clone)]
+pub struct LazySQLParam {
+    pub name: Ident,
+    pub value: Box<dyn LazyValue>,
+    pub type_: Type,
+}
+
+#[derive(Debug, Clone)]
 pub struct SQLParam {
     pub name: Ident,
     pub value: Value,
     pub type_: Type,
 }
 
-impl SQLParam {
-    pub fn new(name: Ident, value: Value, type_: &Type) -> SQLParam {
-        SQLParam {
+impl LazySQLParam {
+    pub fn new(name: Ident, value: Box<dyn LazyValue>, type_: &Type) -> LazySQLParam {
+        LazySQLParam {
             name,
             value,
             type_: type_.clone(), // TODO: We should make this a reference that lives as long as
                                   // the SQLParam
         }
+    }
+
+    pub async fn get(mut self) -> Result<SQLParam> {
+        Ok(SQLParam {
+            name: self.name,
+            value: self.value.get().await?,
+            type_: self.type_,
+        })
     }
 }
 

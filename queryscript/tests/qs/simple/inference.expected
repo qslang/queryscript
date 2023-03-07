@@ -2,15 +2,15 @@
     "compile_errors": [],
     "decls": {
         "let events": External<[{
+        	user_id UInt64,
         	description Utf8,
-        	ts Utf8,
-        	user_id Int64,
+        	ts Date32,
         }]>,
         "let users": External<[{
-        	active Boolean,
-        	id Int64,
+        	id UInt64,
+        	org_id UInt64,
         	name Utf8,
-        	org_id Int64,
+        	active Boolean,
         }]>,
     },
     "queries": [
@@ -20,16 +20,16 @@
                     Record(
                         [
                             Field {
-                                name: "active",
+                                name: "id",
                                 type_: Atom(
-                                    Boolean,
+                                    UInt64,
                                 ),
                                 nullable: true,
                             },
                             Field {
-                                name: "id",
+                                name: "org_id",
                                 type_: Atom(
-                                    Int64,
+                                    UInt64,
                                 ),
                                 nullable: true,
                             },
@@ -41,16 +41,16 @@
                                 nullable: true,
                             },
                             Field {
-                                name: "org_id",
+                                name: "active",
                                 type_: Atom(
-                                    Int64,
+                                    Boolean,
                                 ),
                                 nullable: true,
                             },
                         ],
                     ),
                 ),
-                value: "| active | id | name | org_id |\n|--------|----|------|--------|\n| true   | 1  | Foo  | 1      |\n| false  | 2  | Bar  | 1      |",
+                value: "| id | org_id | name | active |\n|----|--------|------|--------|\n| 1  | 1      | Foo  | true   |\n| 2  | 1      | Bar  | false  |",
             },
         ),
         Ok(
@@ -58,6 +58,13 @@
                 type_: List(
                     Record(
                         [
+                            Field {
+                                name: "user_id",
+                                type_: Atom(
+                                    UInt64,
+                                ),
+                                nullable: true,
+                            },
                             Field {
                                 name: "description",
                                 type_: Atom(
@@ -68,21 +75,14 @@
                             Field {
                                 name: "ts",
                                 type_: Atom(
-                                    Utf8,
-                                ),
-                                nullable: true,
-                            },
-                            Field {
-                                name: "user_id",
-                                type_: Atom(
-                                    Int64,
+                                    Date32,
                                 ),
                                 nullable: true,
                             },
                         ],
                     ),
                 ),
-                value: "| description | ts         | user_id |\n|-------------|------------|---------|\n| Loren Ipsum | 2020-01-01 | 1       |\n| Foo Bar     | 2020-01-02 | 1       |\n| Bing Baz    | 2020-01-03 | 2       |\n| Woo Hoo     | 2020-01-04 | 2       |",
+                value: "| user_id | description | ts         |\n|---------|-------------|------------|\n| 1       | Loren Ipsum | 2020-01-01 |\n| 1       | Foo Bar     | 2020-01-02 |\n| 2       | Bing Baz    | 2020-01-03 |\n| 2       | Woo Hoo     | 2020-01-04 |",
             },
         ),
     ],

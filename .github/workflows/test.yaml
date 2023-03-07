@@ -51,20 +51,26 @@ jobs:
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
 
-    services:
-      pg:
-        image: postgres:15
-        env:
-          POSTGRES_PASSWORD: example
-        ports:
-          - 5471:5432
-
-      clickhouse:
-        image: clickhouse/clickhouse-server:23
-        env:
-          CLICKHOUSE_PASSWORD: example
-        ports:
-          - 5472:9000
+    #    services:
+    #      pg:
+    #        image: postgres:15
+    #        env:
+    #          POSTGRES_PASSWORD: example
+    #        ports:
+    #          - 5471:5432
+    #
+    #      clickhouse:
+    #        image: clickhouse/clickhouse-server:23
+    #        env:
+    #          CLICKHOUSE_PASSWORD: example
+    #        ports:
+    #          - 5472:9000
+    #      http:
+    #        image: halverneus/static-file-server
+    #        ports:
+    #          - 5473:8080
+    #        volumes:
+    #          - /home/runner/work/queryscript/queryscript/tests/qs:/web
 
     env:
       RA_TARGET: ${{ matrix.target }}
@@ -172,6 +178,9 @@ jobs:
       #            venv
       #          key:
       #            ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}-${{ github.run_id }}
+
+      - name: Start services
+        run: /usr/bin/docker compose -f services/docker-compose.yml up -d
 
       - name: Run tests
         run: make test

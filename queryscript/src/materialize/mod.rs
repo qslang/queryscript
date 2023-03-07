@@ -105,7 +105,7 @@ fn execute_create_view(
         }
 
         eprintln!("Creating view \"{}\"", name);
-        let sql_params = runtime::eval_params(&mut ctx, &params).await?;
+        let sql_params = runtime::eval_params_lazy(&mut ctx, &params).await?;
 
         let result = ctx
             .sql_engine(url.clone())

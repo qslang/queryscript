@@ -8,8 +8,8 @@ use crate::{
     ast::Ident,
     compile::{sql::create_table, ConnectionString},
     runtime::{
-        error::rt_unimplemented, normalize::Normalizer, Result, SQLEngine, SQLEnginePool,
-        SQLEngineType, SQLParam,
+        error::rt_unimplemented, normalize::Normalizer, resolve_params, LazySQLParam, Result,
+        SQLEngine, SQLEnginePool, SQLEngineType, SQLParam,
     },
     types::{
         arrow::{ArrowRecordBatchRelation, EmptyRelation},
@@ -124,9 +124,9 @@ impl SQLEngine for ClickHouseEngine {
     async fn query(
         &mut self,
         query: &sqlast::Statement,
-        params: HashMap<Ident, SQLParam>,
+        params: HashMap<Ident, LazySQLParam>,
     ) -> Result<Arc<dyn Relation>> {
-        self.check_params(&params)?;
+        self.check_params(&resolve_params(params).await?)?;
 
         let query = ClickHouseNormalizer::new().normalize(query).as_result()?;
         let query_string = format!("{}", query);
@@ -154,9 +154,9 @@ impl SQLEngine for ClickHouseEngine {
     async fn exec(
         &mut self,
         stmt: &sqlast::Statement,
-        params: HashMap<Ident, SQLParam>,
+        params: HashMap<Ident, LazySQLParam>,
     ) -> Result<()> {
-        self.check_params(&params)?;
+        self.check_params(&resolve_params(params).await?)?;
 
         let stmt = ClickHouseNormalizer::new().normalize(stmt).as_result()?;
         let query_string = format!("{}", stmt);

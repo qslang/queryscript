@@ -2,23 +2,23 @@
     "compile_errors": [],
     "decls": {
         "let complex_expr": [{
-        	id Int64,
-        	org_id Int64,
+        	id UInt64,
+        	org_id UInt64,
         	name Utf8,
         	active Boolean,
         	id > 0 OR active Boolean,
-        	max_user Int64,
+        	max_user UInt64,
         }],
         "let events": External<[{
+        	user_id UInt64,
         	description Utf8,
-        	ts Utf8,
-        	user_id Int64,
+        	ts Date32,
         }]>,
         "let users": External<[{
-        	active Boolean,
-        	id Int64,
+        	id UInt64,
+        	org_id UInt64,
         	name Utf8,
-        	org_id Int64,
+        	active Boolean,
         }]>,
     },
     "queries": [
@@ -30,14 +30,14 @@
                             Field {
                                 name: "id",
                                 type_: Atom(
-                                    Int64,
+                                    UInt64,
                                 ),
                                 nullable: true,
                             },
                             Field {
                                 name: "org_id",
                                 type_: Atom(
-                                    Int64,
+                                    UInt64,
                                 ),
                                 nullable: true,
                             },
@@ -65,7 +65,7 @@
                             Field {
                                 name: "max_user",
                                 type_: Atom(
-                                    Int64,
+                                    UInt64,
                                 ),
                                 nullable: true,
                             },

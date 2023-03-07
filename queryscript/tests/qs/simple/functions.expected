@@ -2,15 +2,15 @@
     "compile_errors": [],
     "decls": {
         "let events": External<[{
+        	user_id UInt64,
         	description Utf8,
-        	ts Utf8,
-        	user_id Int64,
+        	ts Date32,
         }]>,
         "let users": External<[{
-        	active Boolean,
-        	id Int64,
+        	id UInt64,
+        	org_id UInt64,
         	name Utf8,
-        	org_id Int64,
+        	active Boolean,
         }]>,
     },
     "queries": [
@@ -22,7 +22,7 @@
                             Field {
                                 name: "min(id)",
                                 type_: Atom(
-                                    Int64,
+                                    UInt64,
                                 ),
                                 nullable: true,
                             },
@@ -40,7 +40,7 @@
                             Field {
                                 name: "max(id)",
                                 type_: Atom(
-                                    Int64,
+                                    UInt64,
                                 ),
                                 nullable: true,
                             },
@@ -134,7 +134,7 @@
                                 name: "ARRAY_AGG(id)",
                                 type_: List(
                                     Atom(
-                                        Int64,
+                                        UInt64,
                                     ),
                                 ),
                                 nullable: true,
