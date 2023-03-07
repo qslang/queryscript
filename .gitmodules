@@ -3,4 +3,4 @@
 	url = https://github.com/qscl/sqlparser-rs.git
 [submodule "duckdb-rs"]
 	path = duckdb-rs
-	url = git@github.com:qscl/duckdb-rs.git
+	url = https://github.com/qscl/duckdb-rs.git
