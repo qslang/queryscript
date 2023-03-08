@@ -421,20 +421,6 @@ impl ConnectionSingleton {
             None => Connection::open_in_memory(),
         }?;
 
-        // This allows us to use JSON functions (e.g. json_extract_string). It should only need to be run once
-        // while establishing a new connection. On my (Mac M1) laptop, it takes about 500ms.
-        //
-        // TODO: Ideally, we could statically bundle these into the distribution. As of now, DuckDB stashes these
-        // in the user's home directory and will downloaod them (from S3) if they're not present. Luckily, because
-        // we only instantiate one connection per unique DuckDB URL, this code only runs once (usually on startup).
-        conn.execute("INSTALL json", [])?;
-        conn.execute("LOAD json", [])?;
-
-        conn.execute("INSTALL parquet", [])?;
-        conn.execute("LOAD parquet", [])?;
-
-        conn.execute("INSTALL httpfs", [])?;
-        conn.execute("LOAD httpfs", [])?;
         Ok(Self(ExclusiveConnection::new(conn)))
     }
 
