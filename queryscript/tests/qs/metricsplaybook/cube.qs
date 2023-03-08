@@ -1,4 +1,4 @@
-export fn metrics_cube<R>(date_slices [text], metric_slices [text], source R) {
+export fn metrics_cube<R, S>(date_slices [text], metric_slices [text], source R, metric_fn S, metric_name string) {
   WITH cte_grouping_sets AS (
     select
       for slice in date_slices {
@@ -19,10 +19,10 @@ export fn metrics_cube<R>(date_slices [text], metric_slices [text], source R) {
       -- null as metric_denominators,
 
       -- TODO: Display metric calculation (need an expr->to->string type thing?)
-      'sum(revenue_impact)' as metric_calculation,
+      'TODO' as metric_calculation,
 
       -- TODO: Accept metric calculation as an input
-      sum(revenue_impact) as metric_value
+      metric_fn(f"{metric_name}") as metric_value
     from
       source
     where timestamp between '2014-01-01'::timestamp and current_date() + interval 365 day

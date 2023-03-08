@@ -23,6 +23,8 @@ let churned_revenue_cube = metrics_cube(
     ['month', 'day'],
     ['segment', 'channel', 'plan_type'],
     activity_filter('customer_churn_committed'),
+    sum,
+    'revenue_impact',
 );
 SELECT COUNT(*) FROM churned_revenue_cube;
 
@@ -30,6 +32,8 @@ let new_revenue_cube = metrics_cube(
     ['month', 'day'],
     ['segment', 'channel', 'plan_type'],
     activity_filter('new_contract_started'),
+    sum,
+    'revenue_impact',
 );
 SELECT COUNT(*) FROM new_revenue_cube;
 
@@ -37,4 +41,6 @@ let contraction_revenue_cube = metrics_cube(
     ['month', 'day'],
     ['segment', 'channel', 'plan_type'],
     activity_filter('contraction_contract_started'),
+    sum,
+    'revenue_impact',
 );
