@@ -17,7 +17,7 @@
                         extended_code: 1,
                     },
                     Some(
-                        "Binder Error: Table \"orders\" does not have a column named \"bool_value\"\nLINE 1: SELECT \"MAX\"(\"orders\".\"bool_value\") AS \"MAX(bool_val...\n                     ^",
+                        "Binder Error: Table \"orders\" does not have a column named \"bool_value\"\nLINE 1: SELECT \"max\"(\"orders\".\"bool_value\") AS \"MAX(bool_val...\n                     ^",
                     ),
                 ),
                 backtrace: None,

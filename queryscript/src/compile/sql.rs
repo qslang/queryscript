@@ -3257,7 +3257,6 @@ pub fn compile_sqlexpr(
                 let compiler = compiler.clone();
                 let schema = schema.clone();
                 let loc = loc.clone();
-                let name = name.clone();
                 let type_ = type_.clone();
                 casync!({
                     let arg_exprs = arg_exprs
@@ -3389,7 +3388,7 @@ pub fn compile_sqlexpr(
                     let (fn_kind, fn_body) = match compiled_func_expr {
                         Expr::NativeFn(_) => (FnKind::Native, None),
                         Expr::Fn(FnExpr { body, .. }) => match body {
-                            FnBody::SQLBuiltin => (FnKind::SQLBuiltin, None),
+                            FnBody::SQLBuiltin(name) => (FnKind::SQLBuiltin(name.clone()), None),
                             FnBody::Expr(expr) => (FnKind::Expr, Some(expr.clone())),
                         },
                         _ => {
@@ -3416,7 +3415,7 @@ pub fn compile_sqlexpr(
                     let should_lift = if compiler.allow_inlining()? {
                         matches!(fn_kind, FnKind::Native)
                     } else {
-                        !matches!(fn_kind, FnKind::SQLBuiltin)
+                        !matches!(fn_kind, FnKind::SQLBuiltin(..))
                     };
                     let lift = can_lift && should_lift;
 
@@ -3500,7 +3499,7 @@ pub fn compile_sqlexpr(
                                 }
 
                                 let name = match fn_kind {
-                                    FnKind::SQLBuiltin => name,
+                                    FnKind::SQLBuiltin(sql_name) => (&sql_name).into(),
                                     _ => {
                                         // Note that this branch will only be matched in the case
                                         // of a native function that couldn't be lifted (i.e.

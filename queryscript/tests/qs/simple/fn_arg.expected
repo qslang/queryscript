@@ -1,0 +1,53 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let bar": ∀ "R" λ {
+        	value "R",
+        } -> "R",
+        "let foo": [{
+        	revenue_impact Int64,
+        }],
+        "let metrics_cube": ∀ "__Return", "R", "S" λ {
+        	source "R",
+        	metric_fn "S",
+        } -> "__Return",
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "metric_value",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| metric_value |\n|--------------|\n| 2            |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "metric_value",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| metric_value |\n|--------------|\n| 1            |",
+            },
+        ),
+    ],
+}
