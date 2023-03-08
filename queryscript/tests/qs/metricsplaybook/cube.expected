@@ -1,0 +1,11 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let metrics_cube": ∀ "__Return", "R" λ {
+        	date_slices [Utf8],
+        	metric_slices [Utf8],
+        	source "R",
+        } -> "__Return",
+    },
+    "queries": [],
+}
