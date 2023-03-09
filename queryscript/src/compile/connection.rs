@@ -1,10 +1,9 @@
 use snafu::prelude::*;
-use sqlparser::ast as sqlast;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use url::Url;
 
-use crate::ast::{self, Ident, Located, SourceLocation, ToSqlIdent};
+use crate::ast::{self, Ident, Located, SourceLocation};
 use crate::runtime::SQLEngineType;
 
 use super::compile::ExternalTypeRank;
@@ -14,7 +13,7 @@ use super::inference::mkcref;
 use super::schema::{
     CRef, Decl, Entry, Expr, MType, SQLBody, SQLNames, SQLSnippet, SType, STypedExpr,
 };
-use super::sql::select_limit_0;
+use super::sql::{select_limit_0, IntoTableFactor};
 use super::{
     error::{Result, RuntimeSnafu},
     schema::{DeclMap, ExprEntry},
@@ -152,13 +151,7 @@ impl ConnectionSchema {
                 let expr_type =
                     CRef::new_unknown(&format!("connection {:?} -> {}", &self.url, &ident));
 
-                let body = SQLBody::Table(sqlast::TableFactor::Table {
-                    name: sqlast::ObjectName(vec![ident.to_sqlident()]),
-                    alias: None,
-                    args: None,
-                    columns_definition: None,
-                    with_hints: Vec::new(),
-                });
+                let body = SQLBody::Table(ident.to_table_factor());
 
                 let resolve = schema_infer_expr_fn(
                     None,

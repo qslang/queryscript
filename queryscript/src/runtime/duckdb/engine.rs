@@ -306,13 +306,7 @@ impl SQLEngine for DuckDBEngine {
 
         let query = create_table_as(
             table.clone(),
-            select_star_from(sqlast::TableFactor::Table {
-                name: sqlast::ObjectName(vec![sqlast::Located::new(param_name.into(), None)]),
-                alias: None,
-                args: None,
-                columns_definition: None,
-                with_hints: vec![],
-            }),
+            select_star_from(&Ident::from(param_name)),
             temporary,
         );
         let params = vec![(

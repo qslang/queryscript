@@ -169,7 +169,6 @@ impl IntoTableFactor for sqlast::Located<sqlast::Ident> {
             name: sqlast::ObjectName(vec![self]),
             alias: None,
             args: None,
-            columns_definition: None,
             with_hints: Vec::new(),
         }
     }
@@ -778,7 +777,6 @@ impl CompileSQL for sqlast::TableFactor {
                 name,
                 alias,
                 args,
-                columns_definition,
                 with_hints,
             } => {
                 let loc = path_location(&name.0.to_path(file.clone()));
@@ -792,13 +790,6 @@ impl CompileSQL for sqlast::TableFactor {
 
                 if with_hints.len() > 0 {
                     return Err(CompileError::unimplemented(loc.clone(), "WITH hints"));
-                }
-
-                if columns_definition.is_some() {
-                    return Err(CompileError::unimplemented(
-                        loc.clone(),
-                        "redshift table alias definition",
-                    ));
                 }
 
                 // TODO: This currently assumes that table references always come from outside
@@ -851,7 +842,6 @@ impl CompileSQL for sqlast::TableFactor {
                             columns: Vec::new(),
                         }),
                         args: None,
-                        columns_definition: None,
                         with_hints: Vec::new(),
                     },
                 )

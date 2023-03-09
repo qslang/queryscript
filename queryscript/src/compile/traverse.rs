@@ -658,15 +658,12 @@ impl<V: SQLVisitor> VisitSQL<V> for TableFactor {
                 name,
                 alias,
                 args,
-                columns_definition,
                 with_hints,
             } => {
-                assert!(columns_definition.is_none());
                 Table {
                     name: name.visit_sql(visitor),
                     alias: alias.clone(), // Do not visit the alias -- changing it can bork the type
                     args: args.visit_sql(visitor),
-                    columns_definition: None, // We do not support columns definition
                     with_hints: with_hints.visit_sql(visitor),
                 }
             }

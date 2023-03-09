@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use super::sql::IntoTableFactor;
+
 pub struct ContextInliner {
     context: BTreeMap<Ident, Arc<Expr<CRef<MType>>>>,
 }
@@ -172,16 +174,7 @@ impl Visitor<CRef<MType>> for ParamInliner {
                             if can_inline_tables {
                                 context.insert(
                                     name.clone(),
-                                    SQLBody::Table(sqlast::TableFactor::Table {
-                                        alias: None,
-                                        name: sqlast::ObjectName(vec![sqlast::Located::new(
-                                            decl_name.into(),
-                                            None,
-                                        )]),
-                                        args: None,
-                                        columns_definition: None,
-                                        with_hints: vec![],
-                                    }),
+                                    SQLBody::Table(decl_name.to_table_factor()),
                                 );
                                 inlined = true;
                             }
