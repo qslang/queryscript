@@ -1024,7 +1024,7 @@ impl<V: Visitor<schema::CRef<schema::MType>> + Sync> Visit<V, schema::CRef<schem
             Expr::Fn(FnExpr { inner_schema, body }) => Expr::Fn(FnExpr {
                 inner_schema: inner_schema.clone(),
                 body: match body {
-                    FnBody::SQLBuiltin => FnBody::SQLBuiltin,
+                    FnBody::SQLBuiltin(name) => FnBody::SQLBuiltin(name.clone()),
                     FnBody::Expr(expr) => FnBody::Expr(Arc::new(expr.visit(visitor).await?)),
                 },
             }),

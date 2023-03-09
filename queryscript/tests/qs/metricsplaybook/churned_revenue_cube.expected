@@ -1,6 +1,33 @@
 {
     "compile_errors": [],
     "decls": {
+        "let activity_filter": λ {
+        	activity_type Utf8,
+        } -> [{
+        	customer_id Int64,
+        	segment Utf8,
+        	channel Utf8,
+        	cohort Utf8,
+        	timestamp Timestamp(
+            Microsecond,
+            None,
+        ),
+        	revenue_impact Float64,
+        	activity Utf8,
+        	plan_type Utf8,
+        }],
+        "let churned_revenue_cube": [{
+        	metric_model Utf8,
+        	is_snapshot_reliant_metric Boolean,
+        	anchor_date Utf8,
+        	date_grain Utf8,
+        	metric_date Date32,
+        	slice_object Utf8,
+        	slice_dimension Utf8,
+        	slice_value Utf8,
+        	metric_calculation Utf8,
+        	metric_value Float64,
+        }],
         "let contract_stream": [{
         	id Int64,
         	customer_id Int64,
@@ -17,7 +44,18 @@
             None,
         ),
         }],
-        "let date_slices": [Utf8],
+        "let contraction_revenue_cube": [{
+        	metric_model Utf8,
+        	is_snapshot_reliant_metric Boolean,
+        	anchor_date Utf8,
+        	date_grain Utf8,
+        	metric_date Date32,
+        	slice_object Utf8,
+        	slice_dimension Utf8,
+        	slice_value Utf8,
+        	metric_calculation Utf8,
+        	metric_value Float64,
+        }],
         "let dim_customer": [{
         	id Int64,
         	segment Utf8,
@@ -28,7 +66,7 @@
         ),
         	cohort Utf8,
         }],
-        "let e1": [{
+        "let expansion_contract_started": [{
         	metric_model Utf8,
         	is_snapshot_reliant_metric Boolean,
         	anchor_date Utf8,
@@ -40,36 +78,24 @@
         	metric_calculation Utf8,
         	metric_value Float64,
         }],
-        "let e2": [{
-        	metric_model Utf8,
-        	is_snapshot_reliant_metric Boolean,
-        	anchor_date Utf8,
-        	date_grain Utf8,
-        	metric_date Date32,
-        	slice_object Utf8,
-        	slice_dimension Utf8,
-        	slice_value Utf8,
-        	metric_calculation Utf8,
-        	metric_value Float64,
-        }],
-        "let metric_slices": [Utf8],
         "let metrics_cube": ∀ "__Return", "R", "S" λ {
         	date_slices [Utf8],
         	metric_slices [Utf8],
         	source "R",
+        	metric_fn "S",
+        	metric_name Utf8,
         } -> "__Return",
-        "let prep": [{
-        	customer_id Int64,
-        	segment Utf8,
-        	channel Utf8,
-        	cohort Utf8,
-        	timestamp Timestamp(
-            Microsecond,
-            None,
-        ),
-        	revenue_impact Float64,
-        	activity Utf8,
-        	plan_type Utf8,
+        "let new_revenue_cube": [{
+        	metric_model Utf8,
+        	is_snapshot_reliant_metric Boolean,
+        	anchor_date Utf8,
+        	date_grain Utf8,
+        	metric_date Date32,
+        	slice_object Utf8,
+        	slice_dimension Utf8,
+        	slice_value Utf8,
+        	metric_calculation Utf8,
+        	metric_value Float64,
         }],
     },
     "queries": [
@@ -106,7 +132,43 @@
                         ],
                     ),
                 ),
-                value: "| COUNT(*) |\n|----------|\n| 264      |",
+                value: "| COUNT(*) |\n|----------|\n| 276      |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "COUNT(*)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| COUNT(*) |\n|----------|\n| 249      |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "COUNT(*)",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| COUNT(*) |\n|----------|\n| 257      |",
             },
         ),
     ],

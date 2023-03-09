@@ -837,7 +837,7 @@ pub type SQL<TypeRef> = SQLSnippet<TypeRef, SQLBody>;
 
 #[derive(Debug, Clone)]
 pub enum FnKind {
-    SQLBuiltin,
+    SQLBuiltin(Ident),
     Native,
     Expr,
 }
@@ -847,14 +847,14 @@ pub enum FnBody<TypeRef>
 where
     TypeRef: Clone + fmt::Debug + Send + Sync,
 {
-    SQLBuiltin,
+    SQLBuiltin(Ident),
     Expr(Arc<Expr<TypeRef>>),
 }
 
 impl FnBody<CRef<MType>> {
     pub fn to_runtime_type(&self) -> runtime::error::Result<FnBody<Ref<Type>>> {
         Ok(match self {
-            FnBody::SQLBuiltin => FnBody::SQLBuiltin,
+            FnBody::SQLBuiltin(name) => FnBody::SQLBuiltin(name.clone()),
             FnBody::Expr(e) => FnBody::Expr(Arc::new(e.to_runtime_type()?)),
         })
     }

@@ -1607,7 +1607,7 @@ pub fn compile_fn_body(
                 _ => Expr::Fn(FnExpr {
                     inner_schema: schema.clone(),
                     body: if is_sql {
-                        FnBody::SQLBuiltin
+                        FnBody::SQLBuiltin(def.name.get().clone())
                     } else {
                         FnBody::Expr(Arc::new(expr.clone()))
                     },
