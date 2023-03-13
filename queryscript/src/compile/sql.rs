@@ -361,6 +361,7 @@ pub fn compile_sqlreference(
                     names: CSQLNames::from_unbound(&sqlpath),
                     body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
                 })));
+                eprintln!("1 ADDING UNBOUND {:?}", expr);
                 compiler.run_on_symbol::<ExprEntry>(
                     path[0].clone(),
                     SymbolKind::Field,
@@ -431,6 +432,7 @@ pub fn compile_sqlreference(
                     names: CSQLNames::from_unbound(&sqlpath),
                     body: SQLBody::Expr(sqlast::Expr::CompoundIdentifier(sqlpath.clone())),
                 })));
+                eprintln!("ADDING UNBOUND {:?}", expr);
                 compiler.run_on_symbol::<ExprEntry>(
                     path[1].clone(),
                     SymbolKind::Value,
