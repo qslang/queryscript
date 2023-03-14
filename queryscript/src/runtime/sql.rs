@@ -26,6 +26,9 @@ pub trait SQLEngine: std::fmt::Debug + Send + Sync {
         params: HashMap<Ident, LazySQLParam>,
     ) -> Result<()>;
 
+    /// Convert the statement into a query, assuming there are no parameters
+    async fn compile(&mut self, query: &sqlast::Statement) -> Result<String>;
+
     async fn load(
         &mut self,
         table: &sqlast::ObjectName,

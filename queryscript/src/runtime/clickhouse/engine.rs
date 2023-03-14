@@ -121,6 +121,10 @@ impl SQLEnginePool for ClickHouseEngine {
 
 #[async_trait::async_trait]
 impl SQLEngine for ClickHouseEngine {
+    async fn compile(&mut self, query: &sqlast::Statement) -> Result<String> {
+        todo!()
+    }
+
     async fn query(
         &mut self,
         query: &sqlast::Statement,
