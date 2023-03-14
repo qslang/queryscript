@@ -40,7 +40,13 @@ serde = [
     "half/serde",
 ]
 ts = ["serde", "dep:ts-rs"]
-cli = ["clap", "home", "rustyline", "backtraces"]
+cli = [
+    "clap",
+    "home",
+    "rustyline",
+    "backtraces",
+    "serde",      # XXX we should have a separate mode for this
+]
 lsp = [
     "multi-thread",
     "tokio/io-util",

@@ -55,6 +55,13 @@ pub enum CompileError {
         loc: ErrorLocation,
     },
 
+    #[cfg(feature = "serde")]
+    JSONError {
+        source: serde_json::Error,
+        backtrace: Option<Backtrace>,
+        loc: ErrorLocation,
+    },
+
     #[snafu(display("Unimplemented: {}", what))]
     Unimplemented {
         what: String,
@@ -278,6 +285,7 @@ impl PrettyError for CompileError {
             CompileError::TypesystemError { loc, .. } => loc.clone(),
             CompileError::RuntimeError { loc, .. } => loc.clone(),
             CompileError::FsError { loc, .. } => loc.clone(),
+            CompileError::JSONError { loc, .. } => loc.clone(),
             CompileError::Unimplemented { loc, .. } => loc.clone(),
             CompileError::MissingArg { path, .. } => path_location(path),
             CompileError::DuplicateEntry { path, .. } => path_location(path),

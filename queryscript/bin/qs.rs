@@ -1,11 +1,15 @@
 use clap::Parser;
 use colored::Colorize;
+use queryscript::ast::Ident;
+use queryscript::compile::SchemaRef;
 use snafu::{prelude::*, whatever};
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
 use queryscript::compile;
 use queryscript::error::*;
+use queryscript::integrations::dbt::print_hacky_parse;
 use queryscript::materialize;
 use queryscript::parser;
 use queryscript::parser::error::PrettyError;
@@ -57,6 +61,7 @@ enum Mode {
     Compile,
     Parse,
     Save,
+    HackyParse,
 }
 
 fn main() {
@@ -84,7 +89,9 @@ fn main_result() -> Result<(), QSError> {
         }
     }
 
-    let mode = if cli.compile {
+    let mode = if cli.hacky_parse {
+        Mode::HackyParse
+    } else if cli.compile {
         Mode::Compile
     } else if cli.parse {
         Mode::Parse
@@ -104,7 +111,7 @@ fn main_result() -> Result<(), QSError> {
 
             let compiler = compile::Compiler::new_with_config(compile::CompilerConfig {
                 allow_inlining: !cli.no_inlining,
-                hacky_parse: cli.hacky_parse,
+                hacky_parse: matches!(mode, Mode::HackyParse),
                 ..Default::default()
             })?;
             match run_file(
@@ -237,17 +244,26 @@ fn run_file(
 
     let ctx_pool =
         queryscript::runtime::ContextPool::new(schema.read()?.folder.clone(), engine_type);
-    if matches!(mode, Mode::Compile) {
-        if execute.is_none() {
-            println!("{:#?}", schema);
-        } else {
-            println!("{:#?}", schema.read()?.exprs.first().unwrap());
+
+    match mode {
+        Mode::Compile => {
+            if execute.is_none() {
+                println!("{:#?}", schema);
+            } else {
+                println!("{:#?}", schema.read()?.exprs.first().unwrap());
+            }
+            return Ok(());
         }
-        return Ok(());
-    } else if matches!(mode, Mode::Save) {
-        rt.block_on(async { materialize::save_views(&ctx_pool, schema).await })?;
-        return Ok(());
-    }
+        Mode::Save => {
+            rt.block_on(async { materialize::save_views(&ctx_pool, schema).await })?;
+            return Ok(());
+        }
+        Mode::HackyParse => {
+            print_hacky_parse(schema)?;
+            return Ok(());
+        }
+        _ => {}
+    };
 
     let locked_schema = schema.read()?;
     let mut ctx = ctx_pool.get();
