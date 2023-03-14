@@ -46,6 +46,10 @@ struct Cli {
     /// Save the exported views back to the original database
     #[arg(long)]
     save: bool,
+
+    /// Skip schema inference and parse everything as unsafe
+    #[arg(long)]
+    hacky_parse: bool,
 }
 
 enum Mode {
@@ -100,6 +104,7 @@ fn main_result() -> Result<(), QSError> {
 
             let compiler = compile::Compiler::new_with_config(compile::CompilerConfig {
                 allow_inlining: !cli.no_inlining,
+                hacky_parse: cli.hacky_parse,
                 ..Default::default()
             })?;
             match run_file(

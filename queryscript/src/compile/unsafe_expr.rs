@@ -116,8 +116,9 @@ pub fn compile_unsafe_expr(
         expr_type.clone(),
     );
 
-    compiler.add_external_type(resolve, expr_type.clone(), ExternalTypeRank::UnsafeExpr)?;
-
+    if !compiler.hacky_parse()? {
+        compiler.add_external_type(resolve, expr_type.clone(), ExternalTypeRank::UnsafeExpr)?;
+    }
     Ok(CTypedExpr {
         type_: mkcref(MType::Generic(Located::new(
             ExternalType::new(&loc, vec![expr_type])?,

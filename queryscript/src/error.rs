@@ -26,6 +26,13 @@ pub enum QSError {
         file: Option<String>,
     },
 
+    #[cfg(feature = "serde")]
+    #[snafu(context(false))]
+    JSONError {
+        source: serde_json::Error,
+        backtrace: Option<Backtrace>,
+    },
+
     #[snafu(whatever, display("{message}"))]
     Whatever {
         message: String,

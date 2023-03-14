@@ -32,7 +32,13 @@ required-features = ["lsp"]
 default = ["cli", "all-engines"]
 all-engines = ["clickhouse", "duckdb-bundled"]
 multi-thread = ["tokio/rt-multi-thread"]
-serde = ["dep:serde", "arrow-schema/serde", "half/serde"]
+serde = [
+    "dep:serde",
+    "serde_json",
+    "sqlparser/serde",
+    "arrow-schema/serde",
+    "half/serde",
+]
 ts = ["serde", "dep:ts-rs"]
 cli = ["clap", "home", "rustyline", "backtraces"]
 lsp = [
@@ -80,7 +86,7 @@ half = { version = "2.1" }
 lazy_static = "1.4.0"
 object_store = "0.5.0"
 regex = { version = "1", optional = true }
-serde = { version = "1", optional = true }
+serde = { version = "1", optional = true, features = ["rc"] }
 serde_json = { version = "1", optional = true }
 snafu = { version = "0.7.3" }
 sqlparser = { path = "../sqlparser-rs", version = "0.32.0", package = "sqlparser-queryscript" }
@@ -95,13 +101,17 @@ url = "2.3.1"
 
 # -- ENGINES ---
 # DuckDB.
-duckdb = { path = "../duckdb-rs", version = "0.7.5", package = "duckdb-queryscript", features=["json", "httpfs", "parquet"] }
+duckdb = { path = "../duckdb-rs", version = "0.7.5", package = "duckdb-queryscript", features = [
+    "json",
+    "httpfs",
+    "parquet",
+] }
 # These are duckdb dependencies that we access directly
 hashlink = { version = "0.8" }
 
 # ClickHouse
 clickhouse-rs = { version = "1.0.0-alpha.1", optional = true }
-chrono-tz = { version = "0.5.3", optional = true } # This must be in-sync with clickhouse-rs
+chrono-tz = { version = "0.5.3", optional = true }             # This must be in-sync with clickhouse-rs
 
 # -- CLI ---
 clap = { version = "4.0", features = ["derive"], optional = true }

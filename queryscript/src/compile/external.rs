@@ -65,13 +65,6 @@ pub fn schema_infer_expr_fn(
         validate_inferred_type(&inferred_type)?;
         let inferred_mtype = mkcref(MType::from_runtime_type(&inferred_type)?);
 
-        /*
-               let inferred_mtype = mkcref(MType::List(Located::new(
-                   mkcref(MType::Record(Located::new(vec![], SourceLocation::Unknown))),
-                   SourceLocation::Unknown,
-               )));
-        */
-        eprintln!("INFERRED TYPE: {:?}", inferred_mtype);
         inner_type.unify(&inferred_mtype)?;
         Ok(())
     }

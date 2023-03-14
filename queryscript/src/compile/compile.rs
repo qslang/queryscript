@@ -112,6 +112,7 @@ pub trait OnSchema {
 pub struct CompilerConfig {
     pub allow_native: bool,
     pub allow_inlining: bool,
+    pub hacky_parse: bool,
     pub on_symbol: Option<Box<dyn OnSymbol + Send + Sync>>,
     pub on_schema: Option<Box<dyn OnSchema + Send + Sync>>,
 }
@@ -121,6 +122,7 @@ impl Default for CompilerConfig {
         CompilerConfig {
             allow_native: false,
             allow_inlining: true,
+            hacky_parse: false,
             on_symbol: None,
             on_schema: None,
         }
@@ -218,6 +220,10 @@ impl Compiler {
 
     pub fn allow_inlining(&self) -> Result<bool> {
         Ok(self.data.read()?.config.allow_inlining)
+    }
+
+    pub fn hacky_parse(&self) -> Result<bool> {
+        Ok(self.data.read()?.config.hacky_parse)
     }
 
     pub fn on_symbol(
@@ -875,7 +881,7 @@ fn compile_expr(compiler: Compiler, schema: Ref<Schema>, expr: &ast::Expr) -> Re
         },
     );
 
-    if expr.is_unsafe {
+    if expr.is_unsafe || compiler.hacky_parse()? {
         compile_unsafe_expr(compiler, schema, &expr.body, &loc)
     } else {
         Ok(match &expr.body {
