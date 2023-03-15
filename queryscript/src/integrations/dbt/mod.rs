@@ -89,7 +89,8 @@ pub fn gather_dbt_candidates(decls: &DeclMap<STypedExpr>) -> Result<HashSet<Iden
 
 pub fn print_hacky_parse(schema: SchemaRef) -> Result<(), CompileError> {
     // First, gather all decl names that are referenceable in the schema
-    let referenceable_names = {
+    /*
+    let mut referenceable_names = {
         let mut names = HashSet::new();
         for name in schema.read()?.expr_decls.keys() {
             names.insert(name.clone());
@@ -100,7 +101,12 @@ pub fn print_hacky_parse(schema: SchemaRef) -> Result<(), CompileError> {
         names
     };
 
+    for c in candidates.iter() {
+        // We still want to return refs for these
+        referenceable_names.remove(c);
+    } */
     let candidates = gather_dbt_candidates(&schema.read()?.expr_decls)?;
+    let referenceable_names = HashSet::new();
 
     let mut exprs = Vec::new();
     for (name, decl) in schema.read()?.expr_decls.iter() {
@@ -150,7 +156,6 @@ impl<'a> SQLVisitor for NameCollector<'a> {
                 let ident = name.0[0].get().into();
                 if !self.referenceable_names.contains(&ident) {
                     // We _may_ want to emit refs() here, but I think we can get away with just declaring the dependencies
-                    /*
                     let ret = sqlast::Located::new(
                         sqlast::Ident {
                             value: format!("{{{{ ref('{}') }}}}", &ident),
@@ -159,10 +164,9 @@ impl<'a> SQLVisitor for NameCollector<'a> {
                         None,
                     )
                     .to_table_factor();
-                     */
                     self.names.borrow_mut().insert(ident);
-                    // Some(ret)
-                    None
+                    Some(ret)
+                    // None
                 } else {
                     None
                 }

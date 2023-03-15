@@ -111,7 +111,7 @@ fn main_result() -> Result<(), QSError> {
 
             let compiler = compile::Compiler::new_with_config(compile::CompilerConfig {
                 allow_inlining: !cli.no_inlining,
-                hacky_parse: matches!(mode, Mode::HackyParse),
+                hacky_parse: false, /* matches!(mode, Mode::HackyParse) XXX REMOVE?*/
                 ..Default::default()
             })?;
             match run_file(

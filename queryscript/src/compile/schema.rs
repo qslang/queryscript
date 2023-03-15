@@ -1311,21 +1311,11 @@ impl Schema {
     pub fn get_and_check<E: Entry>(
         &self,
         ident: &Ident,
-        check_visibility: bool,
-        full_path: &ast::Path,
+        check_visibility: bool, // XXX Remove this param
+        full_path: &ast::Path,  // XXX Remove this param
     ) -> Result<Option<&Located<Decl<E>>>> {
         match self.get_decls::<E>().get(ident) {
-            Some(decl) => {
-                if check_visibility && !decl.public {
-                    return Err(CompileError::wrong_kind(
-                        full_path.clone(),
-                        "public",
-                        E::kind(),
-                    ));
-                } else {
-                    Ok(Some(decl))
-                }
-            }
+            Some(decl) => Ok(Some(decl)),
             None => Ok(None),
         }
     }
