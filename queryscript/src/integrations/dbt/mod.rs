@@ -11,7 +11,8 @@ use crate::{
         traverse::{SQLVisitor, VisitSQL},
         CompileError, SchemaRef,
     },
-    runtime::RuntimeError,
+    materialize::gather_materialize_candidates,
+    runtime::{normalize, RuntimeError},
     types::Type,
 };
 
@@ -32,10 +33,13 @@ fn process_expr(
     expr: &Expr<Ref<Type>>,
 ) -> Result<SimpleExpr, RuntimeError> {
     Ok(match expr {
-        Expr::SQL(expr, _) => {
-            let snippet = expr.body.as_query()?;
+        Expr::SQL(expr, url) => {
+            let url = url.clone().expect("all exported decls should have a URL");
+            let snippet = expr.body.as_statement()?;
             let names = NameCollector::new(referenceable_names);
-            let snippet = snippet.visit_sql(&names);
+
+            let normalized = normalize(url.engine_type(), &snippet)?;
+            let snippet = normalized.visit_sql(&names);
 
             SimpleExpr {
                 name: name.clone(),
@@ -63,28 +67,7 @@ fn process_decl(
 }
 
 pub fn gather_dbt_candidates(decls: &DeclMap<STypedExpr>) -> Result<HashSet<Ident>, CompileError> {
-    let mut ret = HashSet::new();
-    for (name, decl) in decls.iter() {
-        if !decl.public {
-            continue;
-        }
-
-        let expr = decl.value.expr.must().context(RuntimeSnafu {
-            loc: decl.location().clone(),
-        })?;
-        let expr = expr.read()?.to_runtime_type().context(RuntimeSnafu {
-            loc: decl.location().clone(),
-        })?;
-
-        match &expr {
-            Expr::SQL(..) | Expr::Materialize(..) => {
-                ret.insert(name.clone());
-            }
-            _ => continue,
-        }
-    }
-
-    Ok(ret)
+    Ok(gather_materialize_candidates(decls)?.into_keys().collect())
 }
 
 pub fn print_hacky_parse(schema: SchemaRef) -> Result<(), CompileError> {

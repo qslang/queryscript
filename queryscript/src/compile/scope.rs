@@ -189,7 +189,6 @@ impl SQLScope {
             let compiler = compiler.clone();
             casync!({
                 let mut names = names.clone();
-                eprintln!("NAMES: {:?}", names);
                 for (relation, (type_, _)) in &relations {
                     names.unbound.remove(&vec![relation.clone()]);
                     let rowtype = get_rowtype(compiler.clone(), type_.clone())?.await?;
@@ -205,7 +204,6 @@ impl SQLScope {
                         _ => {}
                     };
                 }
-                eprintln!("FINAL NAMES: {:?}", names);
                 Ok(mkcref(names))
             })
         })

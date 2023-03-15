@@ -284,12 +284,6 @@ impl ArrowRecordBatchRelation {
 
 #[async_trait::async_trait]
 impl SQLEngine for DuckDBEngine {
-    async fn compile(&mut self, query: &sqlast::Statement) -> Result<String> {
-        let (query_string, resolved_params, _, _) = self.prepare(query, HashMap::new()).await?;
-        assert!(resolved_params.is_empty());
-        Ok(query_string)
-    }
-
     async fn query(
         &mut self,
         query: &sqlast::Statement,
@@ -458,6 +452,11 @@ impl SQLEnginePool for DuckDBEngine {
         // DuckDB will create the database if it doesn't exist.
         let _ = Self::new(url).await?;
         Ok(())
+    }
+
+    fn normalize(query: &sqlast::Statement) -> Result<sqlast::Statement> {
+        let normalizer = DuckDBNormalizer::new(&[], &HashSet::new());
+        normalizer.normalize(&query).as_result()
     }
 }
 
