@@ -1,6 +1,8 @@
 use snafu::prelude::*;
 use std::{cell::RefCell, collections::HashSet};
 
+use pyo3::prelude::*;
+
 use crate::{
     ast,
     ast::{sqlast, SourceLocation, ToPath},
@@ -17,14 +19,23 @@ use crate::{
 };
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[pyclass]
+#[derive(Clone)]
 pub struct SimpleExpr {
-    pub name: Ident,
+    #[pyo3(get, set)]
+    pub name: String,
+    #[pyo3(get, set)]
     pub code: String,
+    #[pyo3(get, set)]
     pub materialized: Option<String>,
-    pub deps: Vec<Ident>,
+    #[pyo3(get, set)]
+    pub deps: Vec<String>,
 }
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[pyclass]
+#[derive(Clone)]
 pub struct SimpleSchema {
+    #[pyo3(get, set)]
     pub exprs: Vec<SimpleExpr>,
 }
 
@@ -43,10 +54,15 @@ fn process_expr(
             let snippet = normalized.visit_sql(&names);
 
             SimpleExpr {
-                name: name.clone(),
+                name: name.into(),
                 code: snippet.to_string(),
                 materialized: Some("view".to_string()),
-                deps: names.names.take().into_iter().collect(),
+                deps: names
+                    .names
+                    .take()
+                    .into_iter()
+                    .map(|i| (&i).into())
+                    .collect(),
             }
         }
         Expr::Materialize(MaterializeExpr { expr, .. }) => {
@@ -74,6 +90,7 @@ pub fn gather_dbt_candidates(decls: &DeclMap<STypedExpr>) -> Result<HashSet<Iden
     Ok(gather_materialize_candidates(decls)?.into_keys().collect())
 }
 
+// XXX DELETE
 pub fn print_hacky_parse(schema: SchemaRef) -> Result<(), CompileError> {
     // First, gather all decl names that are referenceable in the schema
     /*
@@ -116,6 +133,26 @@ pub fn print_hacky_parse(schema: SchemaRef) -> Result<(), CompileError> {
     );
 
     Ok(())
+}
+
+pub fn extract_metadata(schema: SchemaRef) -> Result<SimpleSchema, CompileError> {
+    let candidates = gather_dbt_candidates(&schema.read()?.expr_decls)?;
+    let referenceable_names = HashSet::new();
+
+    let mut exprs = Vec::new();
+    for (name, decl) in schema.read()?.expr_decls.iter() {
+        if !candidates.contains(name) {
+            continue;
+        }
+
+        exprs.push(
+            process_decl(&referenceable_names, name, decl).context(RuntimeSnafu {
+                loc: decl.location().clone(),
+            })?,
+        );
+    }
+
+    Ok(SimpleSchema { exprs })
 }
 
 struct NameCollector<'a> {

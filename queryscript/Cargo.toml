@@ -31,15 +31,6 @@ required-features = ["lsp"]
 [features]
 default = ["cli", "all-engines"]
 all-engines = ["clickhouse", "duckdb-bundled"]
-multi-thread = ["tokio/rt-multi-thread"]
-serde = [
-    "dep:serde",
-    "serde_json",
-    "sqlparser/serde",
-    "arrow-schema/serde",
-    "half/serde",
-]
-ts = ["serde", "dep:ts-rs"]
 cli = [
     "clap",
     "home",
@@ -47,6 +38,7 @@ cli = [
     "backtraces",
     "serde",      # XXX we should have a separate mode for this
 ]
+dbt = ["py"]
 lsp = [
     "multi-thread",
     "tokio/io-util",
@@ -58,7 +50,18 @@ lsp = [
     "serde",
     "tower-lsp",
 ]
+
 backtraces = ["snafu/backtraces"]
+multi-thread = ["tokio/rt-multi-thread"]
+py = ["pyo3"]
+serde = [
+    "dep:serde",
+    "serde_json",
+    "sqlparser/serde",
+    "arrow-schema/serde",
+    "half/serde",
+]
+ts = ["serde", "dep:ts-rs"]
 
 # Engines
 duckdb-bundled = ["duckdb/bundled"]
@@ -91,6 +94,7 @@ futures = "0.3"
 half = { version = "2.1" }
 lazy_static = "1.4.0"
 object_store = "0.5.0"
+pyo3 = { version = "0.18.1", features = ["anyhow"], optional = true }
 regex = { version = "1", optional = true }
 serde = { version = "1", optional = true, features = ["rc"] }
 serde_json = { version = "1", optional = true }

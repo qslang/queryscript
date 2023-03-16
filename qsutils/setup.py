@@ -26,6 +26,7 @@ extras_require = {
         "flake8-isort",
         "IPython",
         "isort==5.10.1",
+        "maturin",
         "pre-commit",
         "pytest",
         "twine",

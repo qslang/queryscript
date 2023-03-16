@@ -3,3 +3,7 @@
 members = [
     "queryscript",
 ]
+
+exclude = [
+    "py",
+]
