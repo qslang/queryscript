@@ -1,16 +1,11 @@
 use clap::Parser;
 use colored::Colorize;
-use queryscript::ast::Ident;
-use queryscript::compile::SchemaRef;
 use snafu::{prelude::*, whatever};
-use std::collections::BTreeMap;
-use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
 use queryscript::compile;
 use queryscript::error::*;
-use queryscript::integrations::dbt::print_hacky_parse;
 use queryscript::materialize;
 use queryscript::parser;
 use queryscript::parser::error::PrettyError;
@@ -51,14 +46,6 @@ struct Cli {
     /// Save the exported views back to the original database
     #[arg(long)]
     save: bool,
-
-    /// Parse into a simpler data structure for consumption by DBT
-    #[arg(long)]
-    hacky_parse: bool,
-
-    /// Underlying connection string aliased by DBT
-    #[arg(long)]
-    dbt_alias: Option<String>,
 }
 
 enum Mode {
@@ -66,7 +53,6 @@ enum Mode {
     Compile,
     Parse,
     Save,
-    HackyParse,
 }
 
 fn main() {
@@ -94,9 +80,7 @@ fn main_result() -> Result<(), QSError> {
         }
     }
 
-    let mode = if cli.hacky_parse {
-        Mode::HackyParse
-    } else if cli.compile {
+    let mode = if cli.compile {
         Mode::Compile
     } else if cli.parse {
         Mode::Parse
@@ -114,15 +98,8 @@ fn main_result() -> Result<(), QSError> {
                 file: file.to_string(),
             })?;
 
-            let mut import_aliases = BTreeMap::new();
-            if let Some(alias) = cli.dbt_alias {
-                import_aliases.insert(Ident::from("dbt"), alias.clone());
-            }
-
             let compiler = compile::Compiler::new_with_config(compile::CompilerConfig {
                 allow_inlining: !cli.no_inlining,
-                hacky_parse: false, /* matches!(mode, Mode::HackyParse) XXX REMOVE?*/
-                import_aliases,
                 ..Default::default()
             })?;
             match run_file(
@@ -267,10 +244,6 @@ fn run_file(
         }
         Mode::Save => {
             rt.block_on(async { materialize::save_views(&ctx_pool, schema).await })?;
-            return Ok(());
-        }
-        Mode::HackyParse => {
-            print_hacky_parse(schema)?;
             return Ok(());
         }
         _ => {}

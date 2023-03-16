@@ -1109,15 +1109,11 @@ pub trait Entry: Clone {
     fn kind() -> &'static str;
     fn run_on_info(&self) -> Option<(SymbolKind, CRef<SType>)>;
 
-    // XXX if convert this to get_entry() or something like that, we won't need
-    // two separate implementations?
     fn get_map(schema: &Schema) -> &DeclMap<Self>;
     fn get_conn_decl(
         _compiler: &super::Compiler,
         _schema: &mut ConnectionSchema,
         _ident: &Located<Ident>,
-        _check_visibility: bool,
-        _full_path: &ast::Path,
     ) -> Result<Option<Located<Decl<Self>>>> {
         Ok(None)
     }
@@ -1162,10 +1158,8 @@ impl Entry for ExprEntry {
         compiler: &super::Compiler,
         schema: &mut ConnectionSchema,
         ident: &Located<Ident>,
-        check_visibility: bool,
-        full_path: &ast::Path,
     ) -> Result<Option<Located<Decl<Self>>>> {
-        schema.get_decl(compiler, ident, check_visibility, full_path)
+        schema.get_decl(compiler, ident)
     }
 }
 
@@ -1231,21 +1225,12 @@ impl Importer {
         &self,
         compiler: &super::Compiler,
         ident: &Located<Ident>,
-        check_visibility: bool,
-        full_path: &ast::Path,
     ) -> Result<Option<Located<Decl<E>>>> {
         Ok(match &self {
-            Importer::Schema(schema) => schema
-                .read()?
-                .get_and_check(ident, check_visibility, full_path)?
-                .cloned(),
-            Importer::Connection(schema) => E::get_conn_decl(
-                compiler,
-                &mut *schema.write()?,
-                ident,
-                check_visibility,
-                full_path,
-            )?,
+            Importer::Schema(schema) => schema.read()?.get_and_check(ident)?.cloned(),
+            Importer::Connection(schema) => {
+                E::get_conn_decl(compiler, &mut *schema.write()?, ident)?
+            }
         })
     }
 
@@ -1308,12 +1293,7 @@ impl Schema {
         E::get_map(self)
     }
 
-    pub fn get_and_check<E: Entry>(
-        &self,
-        ident: &Ident,
-        check_visibility: bool, // XXX Remove this param
-        full_path: &ast::Path,  // XXX Remove this param
-    ) -> Result<Option<&Located<Decl<E>>>> {
+    pub fn get_and_check<E: Entry>(&self, ident: &Ident) -> Result<Option<&Located<Decl<E>>>> {
         match self.get_decls::<E>().get(ident) {
             Some(decl) => Ok(Some(decl)),
             None => Ok(None),

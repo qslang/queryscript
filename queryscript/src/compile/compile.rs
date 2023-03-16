@@ -112,7 +112,6 @@ pub trait OnSchema {
 pub struct CompilerConfig {
     pub allow_native: bool,
     pub allow_inlining: bool,
-    pub hacky_parse: bool,
     pub on_symbol: Option<Box<dyn OnSymbol + Send + Sync>>,
     pub on_schema: Option<Box<dyn OnSchema + Send + Sync>>,
     pub import_aliases: BTreeMap<Ident, String>,
@@ -123,7 +122,6 @@ impl Default for CompilerConfig {
         CompilerConfig {
             allow_native: false,
             allow_inlining: true,
-            hacky_parse: false,
             on_symbol: None,
             on_schema: None,
             import_aliases: BTreeMap::new(),
@@ -222,10 +220,6 @@ impl Compiler {
 
     pub fn allow_inlining(&self) -> Result<bool> {
         Ok(self.data.read()?.config.allow_inlining)
-    }
-
-    pub fn hacky_parse(&self) -> Result<bool> {
-        Ok(self.data.read()?.config.hacky_parse)
     }
 
     pub fn on_symbol(
@@ -643,11 +637,7 @@ pub fn lookup_path<E: Entry>(
 
     let mut imported_object = imported_object;
     for (i, ident) in path.iter().enumerate() {
-        let check_visibility = i > 0;
-
-        if let Some(decl) =
-            imported_object.get_and_check::<E>(&compiler, &ident, check_visibility, path)?
-        {
+        if let Some(decl) = imported_object.get_and_check::<E>(&compiler, &ident)? {
             return Ok((
                 imported_object,
                 Some(decl.get().clone()),
@@ -663,12 +653,9 @@ pub fn lookup_path<E: Entry>(
             }
         };
 
-        let new = if let Some(imported) = imported_object.get_and_check::<SchemaPath>(
-            &compiler,
-            &ident,
-            check_visibility,
-            path,
-        )? {
+        let new = if let Some(imported) =
+            imported_object.get_and_check::<SchemaPath>(&compiler, &ident)?
+        {
             lookup_schema(compiler.clone(), schema.clone(), &imported.value)?
                 .read()?
                 .schema
@@ -883,7 +870,7 @@ fn compile_expr(compiler: Compiler, schema: Ref<Schema>, expr: &ast::Expr) -> Re
         },
     );
 
-    if expr.is_unsafe || compiler.hacky_parse()? {
+    if expr.is_unsafe {
         compile_unsafe_expr(compiler, schema, &expr.body, &loc)
     } else {
         Ok(match &expr.body {
