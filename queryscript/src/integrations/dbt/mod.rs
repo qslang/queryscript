@@ -4,10 +4,9 @@ use std::{cell::RefCell, collections::HashSet};
 use pyo3::prelude::*;
 
 use crate::{
-    ast,
-    ast::{sqlast, SourceLocation, ToPath},
+    ast::sqlast,
     compile::{
-        error::{JSONSnafu, RuntimeSnafu},
+        error::RuntimeSnafu,
         schema::{Decl, DeclMap, Expr, Ident, MaterializeExpr, Ref, STypedExpr},
         sql::IntoTableFactor,
         traverse::{SQLVisitor, VisitSQL},
@@ -88,51 +87,6 @@ fn process_decl(
 
 pub fn gather_dbt_candidates(decls: &DeclMap<STypedExpr>) -> Result<HashSet<Ident>, CompileError> {
     Ok(gather_materialize_candidates(decls)?.into_keys().collect())
-}
-
-// XXX DELETE
-pub fn print_hacky_parse(schema: SchemaRef) -> Result<(), CompileError> {
-    // First, gather all decl names that are referenceable in the schema
-    /*
-    let mut referenceable_names = {
-        let mut names = HashSet::new();
-        for name in schema.read()?.expr_decls.keys() {
-            names.insert(name.clone());
-        }
-        for name in schema.read()?.schema_decls.keys() {
-            names.insert(name.clone());
-        }
-        names
-    };
-
-    for c in candidates.iter() {
-        // We still want to return refs for these
-        referenceable_names.remove(c);
-    } */
-    let candidates = gather_dbt_candidates(&schema.read()?.expr_decls)?;
-    let referenceable_names = HashSet::new();
-
-    let mut exprs = Vec::new();
-    for (name, decl) in schema.read()?.expr_decls.iter() {
-        if !candidates.contains(name) {
-            continue;
-        }
-
-        exprs.push(
-            process_decl(&referenceable_names, name, decl).context(RuntimeSnafu {
-                loc: decl.location().clone(),
-            })?,
-        );
-    }
-
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&SimpleSchema { exprs }).context(JSONSnafu {
-            loc: SourceLocation::File(schema.read()?.file.clone()),
-        })?
-    );
-
-    Ok(())
 }
 
 pub fn extract_metadata(schema: SchemaRef) -> Result<SimpleSchema, CompileError> {

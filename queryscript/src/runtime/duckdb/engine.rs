@@ -153,38 +153,12 @@ impl DuckDBEngine {
         DuckDBEngine { conn }
     }
 
-    async fn prepare(
+    fn eval_in_place(
         &mut self,
         query: &sqlast::Statement,
-        params: HashMap<Ident, LazySQLParam>,
-    ) -> Result<(String, HashMap<Ident, SQLParam>, LocalRelations, Vec<Ident>)> {
-        let mut unresolved_params = HashMap::new();
-        let mut file_loads = HashMap::new();
-        for (name, param) in params.into_iter() {
-            // DuckDB has the ability to load files directly, which we take advantage of
-            // so that we get HTTP and S3 support for free, and also take advantage of its
-            // performance optimizations (e.g. RANGE HTTP queries based on parquet file metadata)
-            if let Some(file_load) = param.value.as_any().downcast_ref::<LazyFileRelation>() {
-                // The state in file_load is very small (just a few strings), so this should be an irrelevant clone.
-                file_loads.insert(
-                    name,
-                    ReplacementRelation::File {
-                        file_path: file_load
-                            .file_path
-                            .clone()
-                            .into_os_string()
-                            .into_string()
-                            .unwrap(),
-                        format: file_load.format.clone(),
-                    },
-                );
-            } else {
-                unresolved_params.insert(name, param);
-            }
-        }
-
-        let params = runtime::resolve_params(unresolved_params).await?;
-
+        file_loads: HashMap<Ident, ReplacementRelation>,
+        params: HashMap<Ident, SQLParam>,
+    ) -> Result<Arc<dyn Relation>> {
         // The code below works by (globally within the connection) installing a replacement
         // scan that accesses the relations referenced in the query parameters. I did some light
         // benchmarking and the cost to create a connection seemed relatively low, but we could
@@ -245,22 +219,11 @@ impl DuckDBEngine {
 
         let query_string = format!("{}", query);
 
-        Ok((query_string, params, relation_params, scalar_params))
-    }
-
-    fn eval_in_place(
-        &mut self,
-        query_string: String,
-        params: HashMap<Ident, SQLParam>,
-        relation_params: LocalRelations,
-        scalar_params: Vec<Ident>,
-    ) -> Result<Arc<dyn Relation>> {
         let duckdb_params: Vec<&dyn duckdb::ToSql> = scalar_params
             .iter()
             .map(|k| &params.get(k).unwrap().value as &dyn duckdb::ToSql)
             .collect();
 
-        let conn_state = self.conn.get_state();
         let mut stmt = conn_state.conn.prepare(&query_string)?;
 
         let query_result = stmt.query_arrow(duckdb_params.as_slice())?;
@@ -289,15 +252,38 @@ impl SQLEngine for DuckDBEngine {
         query: &sqlast::Statement,
         params: HashMap<Ident, LazySQLParam>,
     ) -> Result<Arc<dyn Relation>> {
-        let (query_string, params, relation_params, scalar_params) =
-            self.prepare(query, params).await?;
+        let mut unresolved_params = HashMap::new();
+        let mut file_loads = HashMap::new();
+        for (name, param) in params.into_iter() {
+            // DuckDB has the ability to load files directly, which we take advantage of
+            // so that we get HTTP and S3 support for free, and also take advantage of its
+            // performance optimizations (e.g. RANGE HTTP queries based on parquet file metadata)
+            if let Some(file_load) = param.value.as_any().downcast_ref::<LazyFileRelation>() {
+                // The state in file_load is very small (just a few strings), so this should be an irrelevant clone.
+                file_loads.insert(
+                    name,
+                    ReplacementRelation::File {
+                        file_path: file_load
+                            .file_path
+                            .clone()
+                            .into_os_string()
+                            .into_string()
+                            .unwrap(),
+                        format: file_load.format.clone(),
+                    },
+                );
+            } else {
+                unresolved_params.insert(name, param);
+            }
+        }
+
+        let resolved_params = runtime::resolve_params(unresolved_params).await?;
+
         // We call block_in_place here because DuckDB may perform computationally expensive work,
         // and it's not hooked into the async coroutines that the runtime uses (and therefore cannot
         // yield work). block_in_place() tells Tokio to expect this thread to spend a while working on
         // this stuff and use other threads for other work.
-        runtime::expensive(|| {
-            self.eval_in_place(query_string, params, relation_params, scalar_params)
-        })
+        runtime::expensive(|| self.eval_in_place(query, file_loads, resolved_params))
     }
 
     async fn exec(
