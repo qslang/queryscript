@@ -115,6 +115,7 @@ pub struct CompilerConfig {
     pub hacky_parse: bool,
     pub on_symbol: Option<Box<dyn OnSymbol + Send + Sync>>,
     pub on_schema: Option<Box<dyn OnSchema + Send + Sync>>,
+    pub import_aliases: BTreeMap<Ident, String>,
 }
 
 impl Default for CompilerConfig {
@@ -125,6 +126,7 @@ impl Default for CompilerConfig {
             hacky_parse: false,
             on_symbol: None,
             on_schema: None,
+            import_aliases: BTreeMap::new(),
         }
     }
 }
@@ -1084,6 +1086,17 @@ fn declare_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
         ast::StmtBody::Import { path, list, .. } => {
             if path.len() == 0 {
                 return Err(CompileError::internal(loc.clone(), "Empty import"));
+            }
+
+            let mut path = path.clone();
+            if let Some(e) = compiler
+                .data
+                .read()?
+                .config
+                .import_aliases
+                .get(path[0].get())
+            {
+                path[0] = Located::new(Ident::from(e.clone()), path[0].location().clone());
             }
 
             let path = match ConnectionString::maybe_parse(

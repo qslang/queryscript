@@ -20,6 +20,7 @@ use crate::{
 pub struct SimpleExpr {
     pub name: Ident,
     pub code: String,
+    pub materialized: Option<String>,
     pub deps: Vec<Ident>,
 }
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
@@ -44,11 +45,14 @@ fn process_expr(
             SimpleExpr {
                 name: name.clone(),
                 code: snippet.to_string(),
+                materialized: Some("view".to_string()),
                 deps: names.names.take().into_iter().collect(),
             }
         }
         Expr::Materialize(MaterializeExpr { expr, .. }) => {
-            process_expr(referenceable_names, name, &expr.expr)?
+            let mut expr = process_expr(referenceable_names, name, &expr.expr)?;
+            expr.materialized = Some("table".to_string());
+            expr
         }
         _ => {
             unreachable!("gather_materialize_candidates should only return SQL or MaterializeExpr")

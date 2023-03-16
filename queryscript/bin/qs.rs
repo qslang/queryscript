@@ -3,6 +3,7 @@ use colored::Colorize;
 use queryscript::ast::Ident;
 use queryscript::compile::SchemaRef;
 use snafu::{prelude::*, whatever};
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
@@ -51,9 +52,13 @@ struct Cli {
     #[arg(long)]
     save: bool,
 
-    /// Skip schema inference and parse everything as unsafe
+    /// Parse into a simpler data structure for consumption by DBT
     #[arg(long)]
     hacky_parse: bool,
+
+    /// Underlying connection string aliased by DBT
+    #[arg(long)]
+    dbt_alias: Option<String>,
 }
 
 enum Mode {
@@ -109,9 +114,15 @@ fn main_result() -> Result<(), QSError> {
                 file: file.to_string(),
             })?;
 
+            let mut import_aliases = BTreeMap::new();
+            if let Some(alias) = cli.dbt_alias {
+                import_aliases.insert(Ident::from("dbt"), alias.clone());
+            }
+
             let compiler = compile::Compiler::new_with_config(compile::CompilerConfig {
                 allow_inlining: !cli.no_inlining,
                 hacky_parse: false, /* matches!(mode, Mode::HackyParse) XXX REMOVE?*/
+                import_aliases,
                 ..Default::default()
             })?;
             match run_file(
