@@ -97,6 +97,56 @@
         	metric_calculation Utf8,
         	metric_value Float64,
         }],
+        "let src_contract_stream": [{
+        	id Int64,
+        	customer_id Int64,
+        	timestamp Timestamp(
+            Microsecond,
+            None,
+        ),
+        	activity Utf8,
+        	revenue_impact Float64,
+        	plan_type Utf8,
+        	activity_occurrence Int64,
+        	activity_repeated_at Timestamp(
+            Microsecond,
+            None,
+        ),
+        }],
+        "let src_dim_customer": [{
+        	id Int64,
+        	segment Utf8,
+        	channel Utf8,
+        	first_contract_signed_date Timestamp(
+            Microsecond,
+            None,
+        ),
+        }],
+        "type ContractStream": {
+        	id Int64,
+        	customer_id Int64,
+        	timestamp Timestamp(
+            Microsecond,
+            None,
+        ),
+        	activity Utf8,
+        	revenue_impact Float64,
+        	plan_type Utf8,
+        	activity_occurrence Int64,
+        	activity_repeated_at Timestamp(
+            Microsecond,
+            None,
+        ),
+        },
+        "type DimCustomer": {
+        	id Int64,
+        	segment Utf8,
+        	channel Utf8,
+        	first_contract_signed_date Timestamp(
+            Microsecond,
+            None,
+        ),
+        },
     },
     "queries": [
         Ok(

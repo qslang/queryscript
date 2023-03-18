@@ -18,6 +18,23 @@
         	payment_method Utf8,
         	amount Float64,
         }],
+        "let raw_customers": [{
+        	id Int32,
+        	first_name Utf8,
+        	last_name Utf8,
+        }],
+        "let raw_orders": [{
+        	id Int32,
+        	user_id Int32,
+        	order_date Date32,
+        	status Utf8,
+        }],
+        "let raw_payments": [{
+        	id Int32,
+        	order_id Int32,
+        	payment_method Utf8,
+        	amount Int32,
+        }],
     },
     "queries": [
         Ok(
