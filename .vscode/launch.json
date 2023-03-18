@@ -7,8 +7,7 @@
 			"name": "Run QueryScript",
 			"program": "${workspaceFolder}/target/debug/qs",
 			"args": [
-				"${input:qsfile}",
-				"--hacky-parse"
+				"${input:qsfile}"
 			],
 			"cwd": "${workspaceFolder}",
 		},
