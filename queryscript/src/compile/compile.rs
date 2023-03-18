@@ -1039,7 +1039,7 @@ fn add_decls<E: Entry>(
     decls: &mut DeclMap<E>,
     entries: Vec<Declaration<E>>,
     loc: &SourceLocation,
-    stmt: &ast::Stmt,
+    _stmt: &ast::Stmt,
 ) -> Result<()> {
     for (name, extern_, value) in &entries {
         if decls.contains_key(name) {
