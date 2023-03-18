@@ -116,6 +116,23 @@
 				"cwd": "${workspaceFolder}/extension"
 			},
 			"label": "npm: test:compile"
+		},
+		{
+			"type": "shell",
+			"command": "",
+			"group": {
+				"kind": "build",
+				"isDefault": false,
+			},
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "never"
+			},
+			"args": [
+				"make",
+				"py"
+			],
+			"label": "maturin: build python library"
 		}
 	]
 }

@@ -232,17 +232,22 @@ fn run_file(
 
     let ctx_pool =
         queryscript::runtime::ContextPool::new(schema.read()?.folder.clone(), engine_type);
-    if matches!(mode, Mode::Compile) {
-        if execute.is_none() {
-            println!("{:#?}", schema);
-        } else {
-            println!("{:#?}", schema.read()?.exprs.first().unwrap());
+
+    match mode {
+        Mode::Compile => {
+            if execute.is_none() {
+                println!("{:#?}", schema);
+            } else {
+                println!("{:#?}", schema.read()?.exprs.first().unwrap());
+            }
+            return Ok(());
         }
-        return Ok(());
-    } else if matches!(mode, Mode::Save) {
-        rt.block_on(async { materialize::save_views(&ctx_pool, schema).await })?;
-        return Ok(());
-    }
+        Mode::Save => {
+            rt.block_on(async { materialize::save_views(&ctx_pool, schema).await })?;
+            return Ok(());
+        }
+        _ => {}
+    };
 
     let locked_schema = schema.read()?;
     let mut ctx = ctx_pool.get();

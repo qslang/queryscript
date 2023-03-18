@@ -22,7 +22,7 @@ use tokio::task::JoinHandle;
 
 type Signals = HashMap<Ident, CRef<()>>;
 
-fn gather_materialize_candidates(decls: &DeclMap<STypedExpr>) -> Result<Signals> {
+pub fn gather_materialize_candidates(decls: &DeclMap<STypedExpr>) -> Result<Signals> {
     let mut signals = Signals::new();
     for (name, decl) in decls.iter() {
         if !decl.public {

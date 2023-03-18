@@ -114,6 +114,7 @@ pub struct CompilerConfig {
     pub allow_inlining: bool,
     pub on_symbol: Option<Box<dyn OnSymbol + Send + Sync>>,
     pub on_schema: Option<Box<dyn OnSchema + Send + Sync>>,
+    pub import_aliases: BTreeMap<Ident, String>,
 }
 
 impl Default for CompilerConfig {
@@ -123,6 +124,7 @@ impl Default for CompilerConfig {
             allow_inlining: true,
             on_symbol: None,
             on_schema: None,
+            import_aliases: BTreeMap::new(),
         }
     }
 }
@@ -1037,7 +1039,7 @@ fn add_decls<E: Entry>(
     decls: &mut DeclMap<E>,
     entries: Vec<Declaration<E>>,
     loc: &SourceLocation,
-    stmt: &ast::Stmt,
+    _stmt: &ast::Stmt,
 ) -> Result<()> {
     for (name, extern_, value) in &entries {
         if decls.contains_key(name) {
@@ -1048,7 +1050,7 @@ fn add_decls<E: Entry>(
             name.get().clone(),
             Located::new(
                 Decl {
-                    public: stmt.export,
+                    public: true, // For now, any decl is public (whether it's `export` or not)
                     extern_: *extern_,
                     is_arg: false,
                     name: name.clone(),
@@ -1078,6 +1080,17 @@ fn declare_schema_entry(compiler: &Compiler, schema: &Ref<Schema>, stmt: &ast::S
         ast::StmtBody::Import { path, list, .. } => {
             if path.len() == 0 {
                 return Err(CompileError::internal(loc.clone(), "Empty import"));
+            }
+
+            let mut path = path.clone();
+            if let Some(e) = compiler
+                .data
+                .read()?
+                .config
+                .import_aliases
+                .get(path[0].get())
+            {
+                path[0] = Located::new(Ident::from(e.clone()), path[0].location().clone());
             }
 
             let path = match ConnectionString::maybe_parse(

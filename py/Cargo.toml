@@ -1,0 +1,17 @@
+[package]
+name = "py"
+version = "0.1.4"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "queryscript"
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1.0.69"
+pyo3 = { version = "0.18.1", features = ["anyhow"] }
+queryscript = { path = "../queryscript", version = "0.1.4", package = "queryscript", features = [
+	"dbt",
+	"serde",
+] }

@@ -1109,8 +1109,6 @@ pub trait Entry: Clone {
     fn kind() -> &'static str;
     fn run_on_info(&self) -> Option<(SymbolKind, CRef<SType>)>;
 
-    // XXX if convert this to get_entry() or something like that, we won't need
-    // two separate implementations?
     fn get_map(schema: &Schema) -> &DeclMap<Self>;
     fn get_conn_decl(
         _compiler: &super::Compiler,

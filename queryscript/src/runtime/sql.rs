@@ -46,6 +46,8 @@ pub trait SQLEngine: std::fmt::Debug + Send + Sync {
 pub trait SQLEnginePool {
     async fn create(url: Arc<ConnectionString>) -> Result<()>;
     async fn new(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>>;
+
+    fn normalize(query: &sqlast::Statement) -> Result<sqlast::Statement>;
 }
 
 pub trait SQLEmbedded {
@@ -140,4 +142,15 @@ pub async fn new_engine(url: Arc<ConnectionString>) -> Result<Box<dyn SQLEngine>
         DuckDB => super::duckdb::DuckDBEngine::new(url),
     }
     .await
+}
+
+pub fn normalize(
+    engine_type: SQLEngineType,
+    query: &sqlast::Statement,
+) -> Result<sqlast::Statement> {
+    use SQLEngineType::*;
+    match engine_type {
+        ClickHouse => super::clickhouse::ClickHouseEngine::normalize(query),
+        DuckDB => super::duckdb::DuckDBEngine::normalize(query),
+    }
 }

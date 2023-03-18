@@ -439,6 +439,11 @@ impl SQLEnginePool for DuckDBEngine {
         let _ = Self::new(url).await?;
         Ok(())
     }
+
+    fn normalize(query: &sqlast::Statement) -> Result<sqlast::Statement> {
+        let normalizer = DuckDBNormalizer::new(&[], &HashSet::new());
+        normalizer.normalize(&query).as_result()
+    }
 }
 
 impl SQLEmbedded for DuckDBEngine {

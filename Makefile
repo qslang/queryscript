@@ -3,7 +3,7 @@ VENV_PRE_COMMIT := ${ROOT_DIR}/venv/.pre_commit
 
 
 .PHONY: all
-all: ${VENV_PRE_COMMIT} extension qs submodules
+all: ${VENV_PRE_COMMIT} extension qs py
 
 .PHONY: qs
 qs: submodules
@@ -23,10 +23,12 @@ extension: qs yarn-deps
 yarn-deps: ts-bindings
 	cd extension && yarn install
 
-.PHONY: ts-bindings
 ts-bindings:
 	cd queryscript/src && cargo test ${CARGO_FLAGS} --features ts export_bindings
 
+.PHONY: py
+py: ${VENV_PYTHON_PACKAGES}
+	bash -c 'source venv/bin/activate && cd py && maturin develop'
 
 .PHONY: test services refresh-test-data
 test: submodules

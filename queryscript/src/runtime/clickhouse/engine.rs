@@ -117,6 +117,10 @@ impl SQLEnginePool for ClickHouseEngine {
             .await?;
         Ok(())
     }
+
+    fn normalize(query: &sqlast::Statement) -> Result<sqlast::Statement> {
+        ClickHouseNormalizer::new().normalize(query).as_result()
+    }
 }
 
 #[async_trait::async_trait]
@@ -128,8 +132,7 @@ impl SQLEngine for ClickHouseEngine {
     ) -> Result<Arc<dyn Relation>> {
         self.check_params(&resolve_params(params).await?)?;
 
-        let query = ClickHouseNormalizer::new().normalize(query).as_result()?;
-        let query_string = format!("{}", query);
+        let query_string = format!("{}", Self::normalize(query)?);
         let result = self.conn.query(query_string).fetch_all().await?;
 
         let mut schema = Vec::new();
