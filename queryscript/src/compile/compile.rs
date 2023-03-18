@@ -637,7 +637,11 @@ pub fn lookup_path<E: Entry>(
 
     let mut imported_object = imported_object;
     for (i, ident) in path.iter().enumerate() {
-        if let Some(decl) = imported_object.get_and_check::<E>(&compiler, &ident)? {
+        let check_visibility = i > 0;
+
+        if let Some(decl) =
+            imported_object.get_and_check::<E>(&compiler, &ident, check_visibility, path)?
+        {
             return Ok((
                 imported_object,
                 Some(decl.get().clone()),
@@ -653,9 +657,12 @@ pub fn lookup_path<E: Entry>(
             }
         };
 
-        let new = if let Some(imported) =
-            imported_object.get_and_check::<SchemaPath>(&compiler, &ident)?
-        {
+        let new = if let Some(imported) = imported_object.get_and_check::<SchemaPath>(
+            &compiler,
+            &ident,
+            check_visibility,
+            path,
+        )? {
             lookup_schema(compiler.clone(), schema.clone(), &imported.value)?
                 .read()?
                 .schema
@@ -1043,7 +1050,7 @@ fn add_decls<E: Entry>(
             name.get().clone(),
             Located::new(
                 Decl {
-                    public: stmt.export,
+                    public: true, // For now, any decl is public (whether it's `export` or not)
                     extern_: *extern_,
                     is_arg: false,
                     name: name.clone(),

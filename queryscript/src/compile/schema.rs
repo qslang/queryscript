@@ -1114,6 +1114,8 @@ pub trait Entry: Clone {
         _compiler: &super::Compiler,
         _schema: &mut ConnectionSchema,
         _ident: &Located<Ident>,
+        _check_visibility: bool,
+        _full_path: &ast::Path,
     ) -> Result<Option<Located<Decl<Self>>>> {
         Ok(None)
     }
@@ -1158,8 +1160,10 @@ impl Entry for ExprEntry {
         compiler: &super::Compiler,
         schema: &mut ConnectionSchema,
         ident: &Located<Ident>,
+        check_visibility: bool,
+        full_path: &ast::Path,
     ) -> Result<Option<Located<Decl<Self>>>> {
-        schema.get_decl(compiler, ident)
+        schema.get_decl(compiler, ident, check_visibility, full_path)
     }
 }
 
@@ -1225,12 +1229,21 @@ impl Importer {
         &self,
         compiler: &super::Compiler,
         ident: &Located<Ident>,
+        check_visibility: bool,
+        full_path: &ast::Path,
     ) -> Result<Option<Located<Decl<E>>>> {
         Ok(match &self {
-            Importer::Schema(schema) => schema.read()?.get_and_check(ident)?.cloned(),
-            Importer::Connection(schema) => {
-                E::get_conn_decl(compiler, &mut *schema.write()?, ident)?
-            }
+            Importer::Schema(schema) => schema
+                .read()?
+                .get_and_check(ident, check_visibility, full_path)?
+                .cloned(),
+            Importer::Connection(schema) => E::get_conn_decl(
+                compiler,
+                &mut *schema.write()?,
+                ident,
+                check_visibility,
+                full_path,
+            )?,
         })
     }
 
@@ -1293,9 +1306,24 @@ impl Schema {
         E::get_map(self)
     }
 
-    pub fn get_and_check<E: Entry>(&self, ident: &Ident) -> Result<Option<&Located<Decl<E>>>> {
+    pub fn get_and_check<E: Entry>(
+        &self,
+        ident: &Ident,
+        check_visibility: bool,
+        full_path: &ast::Path,
+    ) -> Result<Option<&Located<Decl<E>>>> {
         match self.get_decls::<E>().get(ident) {
-            Some(decl) => Ok(Some(decl)),
+            Some(decl) => {
+                if check_visibility && !decl.public {
+                    return Err(CompileError::wrong_kind(
+                        full_path.clone(),
+                        "public",
+                        E::kind(),
+                    ));
+                } else {
+                    Ok(Some(decl))
+                }
+            }
             None => Ok(None),
         }
     }

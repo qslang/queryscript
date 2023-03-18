@@ -3,14 +3,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use url::Url;
 
-use crate::ast::{Ident, Located, SourceLocation};
+use crate::ast::{self, Ident, Located, SourceLocation};
 use crate::runtime::SQLEngineType;
 
 use super::compile::ExternalTypeRank;
 use super::external::schema_infer_expr_fn;
 use super::generics::{ExternalType, GenericConstructor};
 use super::inference::mkcref;
-use super::schema::{CRef, Decl, Expr, MType, SQLBody, SQLNames, SQLSnippet, SType, STypedExpr};
+use super::schema::{
+    CRef, Decl, Entry, Expr, MType, SQLBody, SQLNames, SQLSnippet, SType, STypedExpr,
+};
 use super::sql::{select_limit_0, IntoTableFactor};
 use super::{
     error::{Result, RuntimeSnafu},
@@ -129,11 +131,21 @@ impl ConnectionSchema {
         &mut self,
         compiler: &super::Compiler,
         ident: &Located<Ident>,
+        check_visibility: bool,
+        full_path: &ast::Path,
     ) -> Result<Option<Located<Decl<ExprEntry>>>> {
         match self.expr_decls.entry(ident.get().clone()) {
             std::collections::btree_map::Entry::Occupied(e) => {
                 let decl = e.get();
-                Ok(Some(decl.clone()))
+                if check_visibility && !decl.public {
+                    Err(CompileError::wrong_kind(
+                        full_path.clone(),
+                        "public",
+                        ExprEntry::kind(),
+                    ))
+                } else {
+                    Ok(Some(decl.clone()))
+                }
             }
             std::collections::btree_map::Entry::Vacant(e) => {
                 let expr_type =
