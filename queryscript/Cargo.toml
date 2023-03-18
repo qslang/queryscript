@@ -1,6 +1,6 @@
 [package]
 name = "queryscript"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 authors = [
     "Ankur Goyal <ankrgyl@gmail.com>",
@@ -99,7 +99,7 @@ regex = { version = "1", optional = true }
 serde = { version = "1", optional = true, features = ["rc"] }
 serde_json = { version = "1", optional = true }
 snafu = { version = "0.7.3" }
-sqlparser = { path = "../sqlparser-rs", version = "0.32.0", package = "sqlparser-queryscript" }
+sqlparser = { path = "../sqlparser-rs", version = "0.32.1", package = "sqlparser-queryscript" }
 strum = { version = "0.24", features = ["derive"] }
 tabled = "0.10"
 tokio = "1.25"
