@@ -1,5 +1,5 @@
-import React from "react";
-import { VegaLite } from "react-vega";
+import React, { useEffect } from "react";
+import { VegaLite, VisualizationSpec } from "react-vega";
 import { Mark } from "vega-lite/build/src/mark";
 
 import { Type } from "queryscript/Type";
@@ -15,15 +15,15 @@ interface BarChartProps {
 
 export const BarChart = ({ data, schema }: BarChartProps) => {
   const spec = {
-    width: 400,
-    height: 400,
+    width: 500,
+    height: 500,
     mark: "bar",
     encoding: {
       x: { field: "a", type: "ordinal" },
       y: { field: "b", type: "quantitative" },
     },
     data: { name: "table" }, // note: vega-lite data attribute is a plain object instead of an array
-  } as const;
+  } as VisualizationSpec;
 
   const barData = {
     table: [
@@ -41,7 +41,7 @@ export const BarChart = ({ data, schema }: BarChartProps) => {
 
   return (
     <>
-      <VegaLite spec={spec} data={barData} />,
+      <VegaLite spec={spec} data={barData} />
     </>
   );
 };

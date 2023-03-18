@@ -143,7 +143,7 @@ class ReactPanel {
 				<meta name="viewport" content="width=device-width, initial-scale=1.0">
 				<title>QueryVM Results</title>
 				<link rel="stylesheet" type="text/css" href="${styleUri}">
-				<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src vscode-resource: https:; script-src 'nonce-${nonce}';style-src vscode-resource: 'unsafe-inline' http: https: data:;">
+				<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src vscode-resource: https:; script-src 'nonce-${nonce}' 'unsafe-eval';style-src vscode-resource: 'unsafe-inline' http: https: data:;">
 			</head>
 			<body>
 				<noscript>You need to enable JavaScript to run this app.</noscript>
