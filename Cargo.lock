@@ -2309,7 +2309,7 @@ dependencies = [
 
 [[package]]
 name = "queryscript"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "arrow",
  "arrow-buffer",
@@ -2839,7 +2839,7 @@ dependencies = [
 
 [[package]]
 name = "sqlparser-queryscript"
-version = "0.32.0"
+version = "0.32.1"
 dependencies = [
  "bigdecimal",
  "log",
