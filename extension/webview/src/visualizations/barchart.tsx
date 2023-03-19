@@ -14,29 +14,22 @@ interface BarChartProps {
 }
 
 export const BarChart = ({ data, schema }: BarChartProps) => {
+  console.log(JSON.stringify(data));
   const spec = {
     width: 500,
     height: 500,
     mark: "bar",
     encoding: {
-      x: { field: "a", type: "ordinal" },
-      y: { field: "b", type: "quantitative" },
+      x: { field: "round_number", type: "ordinal" },
+      y: { field: "teams", type: "quantitative" },
     },
     data: { name: "table" }, // note: vega-lite data attribute is a plain object instead of an array
   } as VisualizationSpec;
 
   const barData = {
-    table: [
-      { a: "A", b: 28 },
-      { a: "B", b: 55 },
-      { a: "C", b: 43 },
-      { a: "D", b: 91 },
-      { a: "E", b: 81 },
-      { a: "F", b: 53 },
-      { a: "G", b: 19 },
-      { a: "H", b: 87 },
-      { a: "I", b: 52 },
-    ],
+    table: JSON.parse(
+      "[{\"round_number\":0,\"teams\":30},{\"round_number\":1,\"teams\":30},{\"round_number\":2,\"teams\":27},{\"round_number\":3,\"teams\":21},{\"round_number\":4,\"teams\":13}]"
+    ),
   };
 
   return (
