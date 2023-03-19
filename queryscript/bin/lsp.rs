@@ -1,3 +1,5 @@
+use queryscript::compile::schema::{CTypedExpr, Ref, TypedExpr};
+use queryscript::runtime::RuntimeError;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::cell::RefCell;
@@ -30,7 +32,7 @@ use queryscript::{
     },
     parser::{error::PrettyError, parse_schema},
     runtime,
-    types::Type as QSType,
+    types::{Type as QSType, Value as QSValue},
 };
 
 // XXX Do we need any of these settings? If not, we can probably remove them.
@@ -639,10 +641,30 @@ fn is_runnable_decl(e: &ExprEntry) -> Result<bool> {
     })
 }
 
-fn get_runnable_expr_from_decl(
-    expr: &ExprEntry,
-) -> Result<queryscript::compile::schema::TypedExpr<queryscript::compile::schema::Ref<QSType>>> {
-    Ok(expr.to_runtime_type().map_err(|e| {
+async fn eval_viz_metadata(
+    ctx: &mut runtime::Context,
+    type_: &CRef<MType>,
+) -> std::result::Result<Option<QSValue>, RuntimeError> {
+    // This strange control flow ensures that the RwLockGuard created by read()? is not in scope
+    // during the await
+    let expr = if let Some(viz_type) = type_
+        .must()?
+        .read()?
+        .as_generic::<crate::compile::generics::VizType>()
+    {
+        Some(viz_type.expr().to_runtime_type()?)
+    } else {
+        None
+    };
+
+    Ok(match expr {
+        Some(expr) => Some(runtime::eval(ctx, &expr).await?),
+        None => None,
+    })
+}
+
+fn get_runnable_expr_from_decl(expr: &ExprEntry) -> Result<CTypedExpr> {
+    Ok(expr.to_ctyped_expr().map_err(|e| {
         eprintln!("Failed to convert expression to runtime type: {:?}", e);
         Error::internal_error()
     })?)
@@ -651,17 +673,12 @@ fn get_runnable_expr_from_decl(
 fn find_expr_by_location(
     schema: &Schema,
     loc: &queryscript::ast::Location,
-) -> Result<
-    Option<queryscript::compile::schema::TypedExpr<queryscript::compile::schema::Ref<QSType>>>,
-> {
+) -> Result<Option<CTypedExpr>> {
     if let Some(expr) = schema.exprs.iter().find(|expr| {
         let expr_loc = expr.location();
         expr_loc.contains(loc)
     }) {
-        return Ok(Some(expr.clone().to_runtime_type().map_err(|e| {
-            eprintln!("Failed to convert query to runtime type: {:?}", e);
-            Error::internal_error()
-        })?));
+        return Ok(Some(expr.get().clone()));
     }
 
     if let Some((_name, decl)) = schema.expr_decls.iter().find(|(_name, decl)| {
@@ -756,6 +773,7 @@ struct RunExprParams {
 struct RunExprResult {
     value: serde_json::Value,
     r#type: QSType,
+    viz: serde_json::Value,
 }
 
 impl Backend {
@@ -991,12 +1009,8 @@ impl Backend {
                     .exprs
                     .get(idx)
                     .ok_or_else(|| Error::invalid_params(format!("Invalid query index: {}", idx)))?
-                    .clone()
-                    .to_runtime_type()
-                    .map_err(|e| {
-                        eprintln!("Failed to convert query to runtime type: {:?}", e);
-                        Error::internal_error()
-                    })?,
+                    .get()
+                    .clone(),
                 RunExprType::Position { line, character } => {
                     let loc = queryscript::ast::Location {
                         line: line + 1,
@@ -1021,8 +1035,15 @@ impl Backend {
             runtime::SQLEngineType::DuckDB,
         );
 
+        let rt_expr = expr.to_runtime_type().map_err(log_internal_error)?;
+
         // XXX We should change this log_internal_error to return an error to the webview
-        let value = runtime::eval(&mut ctx, &expr)
+        let value = runtime::eval(&mut ctx, &rt_expr)
+            .await
+            .map_err(log_internal_error)?;
+
+        // XXX Same error handling issue here
+        let viz = eval_viz_metadata(&mut ctx, &expr.type_)
             .await
             .map_err(log_internal_error)?;
 
@@ -1048,7 +1069,11 @@ impl Backend {
             };
         }
 
-        Ok(RunExprResult { value, r#type })
+        Ok(RunExprResult {
+            value,
+            r#type,
+            viz: viz.map_or(serde_json::Value::Null, |v| json!(v)),
+        })
     }
 }
 

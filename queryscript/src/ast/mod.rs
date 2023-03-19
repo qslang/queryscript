@@ -238,6 +238,7 @@ pub struct Expr {
     pub body: ExprBody,
     pub start: Location,
     pub end: Location,
+    pub viz: Option<Located<sqlast::Expr>>,
     pub is_unsafe: bool,
 }
 
@@ -248,6 +249,7 @@ impl Expr {
             body,
             start: empty_loc.clone(),
             end: empty_loc,
+            viz: None,
             is_unsafe: false,
         }
     }

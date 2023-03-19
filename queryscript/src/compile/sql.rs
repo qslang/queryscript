@@ -2161,7 +2161,7 @@ lazy_static! {
         names: CSQLNames::new(),
         body: SQLBody::Expr(sqlast::Expr::Value(sqlast::Value::Null)),
     });
-    static ref NULL: CTypedExpr = CTypedExpr {
+    pub static ref NULL: CTypedExpr = CTypedExpr {
         type_: resolve_global_atom(GLOBAL_COMPILER.clone(), "null").unwrap(),
         expr: mkcref(Expr::SQL(NULL_SQLEXPR.clone(), None)),
     };

@@ -8,4 +8,5 @@ export type RunExprType =
 export interface RunExprResult {
   value: any;
   type: Type;
+  viz: any;
 }

@@ -1,5 +1,5 @@
 import React, { useCallback, useState, useEffect } from "react";
-import ReactDOM from "react-dom";
+import { createRoot } from "react-dom/client";
 import {
   VSCodePanels,
   VSCodePanelTab,
@@ -9,7 +9,7 @@ import {
 import { RunExprResult } from "api";
 
 import Table from "./visualizations/table";
-import BarChart from "./visualizations/barchart";
+import Viz from "./visualizations/viz";
 
 import "./app.css";
 
@@ -18,10 +18,18 @@ interface Panel {
   panel: JSX.Element;
 }
 
+interface vscode {
+  postMessage(message: any): void;
+}
+
+declare let acquireVsCodeApi: any;
+const vscode: vscode = acquireVsCodeApi();
+
 const App = () => {
   const [data, setData] = useState<RunExprResult>({
     value: null,
     type: { Atom: "Null" },
+    viz: null,
   });
   useEffect(() => {
     const onMessage = (event: MessageEvent<RunExprResult>) => {
@@ -29,10 +37,18 @@ const App = () => {
     };
 
     window.addEventListener("message", onMessage);
+    vscode.postMessage({ command: "ready" });
     return () => window.removeEventListener("message", onMessage);
   });
 
   const panels = [];
+
+  if (data.viz !== null) {
+    panels.push({
+      tab: "Viz",
+      panel: <Viz data={data.value} schema={data.type} viz={data.viz} />,
+    });
+  }
 
   if (data.value !== null) {
     panels.push({
@@ -40,11 +56,6 @@ const App = () => {
       panel: <Table data={data.value} schema={data.type} />,
     });
   }
-
-  panels.push({
-    tab: "Bar chart",
-    panel: <BarChart data={data.value} schema={data.type} />,
-  });
 
   panels.push({
     tab: "Raw",
@@ -63,4 +74,4 @@ const App = () => {
   );
 };
 
-ReactDOM.render(<App />, document.getElementById("root"));
+createRoot(document.getElementById("root")!).render(<App />);

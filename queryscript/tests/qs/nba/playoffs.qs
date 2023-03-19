@@ -102,4 +102,21 @@ SELECT full_name(team), COUNT(*) total FROM all_series
 GROUP BY 1 ORDER BY 2 DESC LIMIT 10;
 
 -- Overall funnel
-SELECT round_number, COUNT(DISTINCT team) teams FROM all_series GROUP BY 1 ORDER BY 1;
+SELECT round_number, COUNT(DISTINCT team) teams FROM all_series GROUP BY 1 ORDER BY 1
+WITH VIZ {
+    mark: 'bar',
+    encoding: {
+      x: { field: 'round_number', type: 'ordinal' },
+      y: { field: 'teams', type: 'quantitative' },
+    },
+  };
+
+
+SELECT full_name(team) full_name, total FROM winners
+WITH VIZ {
+    mark: 'arc',
+    encoding: {
+        theta: { field: 'total', type: 'quantitative' },
+        color: { field: 'full_name', type: 'nominal' },
+    }
+};

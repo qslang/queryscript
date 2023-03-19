@@ -24,7 +24,10 @@ export function runExpr(
       context.extensionPath,
       vscode.ViewColumn.Beside
     );
-    panel.sendMessage(resp);
+
+    panel.ready.then(() => {
+      panel.sendMessage(resp);
+    });
   };
 }
 
@@ -43,6 +46,8 @@ class ReactPanel {
   private readonly _panel: vscode.WebviewPanel;
   private readonly _extensionPath: string;
   private _disposables: vscode.Disposable[] = [];
+
+  public ready: Promise<void>;
 
   public static createOrShow(
     extensionPath: string,
@@ -90,12 +95,20 @@ class ReactPanel {
     // This happens when the user closes the panel or when the panel is closed programatically
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
+    let readyResolve: () => void;
+    this.ready = new Promise((resolve) => {
+      readyResolve = resolve;
+    });
+
     // Handle messages from the webview
     this._panel.webview.onDidReceiveMessage(
       (message) => {
         switch (message.command) {
           case "alert":
             vscode.window.showErrorMessage(message.text);
+            return;
+          case "ready":
+            readyResolve();
             return;
         }
       },
@@ -148,7 +161,6 @@ class ReactPanel {
 			<body>
 				<noscript>You need to enable JavaScript to run this app.</noscript>
 				<div id="root"></div>
-
 				<script nonce="${nonce}" src="${scriptUri}"></script>
 			</body>
 			</html>`;

@@ -10,7 +10,7 @@ use super::{
     inference::mkcref,
     inference::{CRef, Constrainable},
     schema::*,
-    sql::get_rowtype,
+    sql::{get_rowtype, NULL},
     Compiler,
 };
 use crate::ast::SourceLocation;
@@ -106,10 +106,12 @@ lazy_static! {
     pub static ref EXTERNAL_GENERIC_NAME: Ident = "External".into();
     pub static ref CONNECTION_GENERIC_NAME: Ident = "Connection".into();
     pub static ref COERCE_GENERIC_NAME: Ident = "Coerce".into();
+    pub static ref VIZ_GENERIC_NAME: Ident = "Viz".into();
     pub static ref GLOBAL_GENERICS: BTreeMap<Ident, Box<dyn GenericFactory>> = [
         BuiltinGeneric::<SumGeneric>::constructor(),
         BuiltinGeneric::<ExternalType>::constructor(),
         BuiltinGeneric::<ConnectionType>::constructor(),
+        BuiltinGeneric::<VizType>::constructor(),
     ]
     .into_iter()
     .map(|builder| (builder.name().clone(), builder))
@@ -477,5 +479,74 @@ impl Generic for ConnectionType {
 
     fn resolve(&self, loc: &SourceLocation) -> Result<CRef<MType>> {
         resolve_to_runtime_type(loc, vec![], self)
+    }
+}
+
+#[derive(Clone)]
+pub struct VizType {
+    type_: CRef<MType>,
+    viz: CTypedExpr,
+}
+
+impl VizType {
+    pub fn wrap(type_: CRef<MType>, viz: CTypedExpr) -> Arc<dyn Generic> {
+        Arc::new(VizType { type_, viz })
+    }
+
+    pub fn expr(&self) -> CTypedExpr {
+        self.viz.clone()
+    }
+}
+
+impl GenericConstructor for VizType {
+    fn new(loc: &SourceLocation, mut args: Vec<CRef<MType>>) -> Result<Arc<dyn Generic>> {
+        validate_args(loc, &args, 1, Self::static_name())?;
+        Ok(Arc::new(VizType {
+            type_: args.swap_remove(0),
+            viz: NULL.clone(),
+        }))
+    }
+
+    fn static_name() -> &'static Ident {
+        &VIZ_GENERIC_NAME
+    }
+}
+
+impl std::fmt::Debug for VizType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        debug_fmt_generic(f, Self::static_name(), vec![self.type_.clone()])
+    }
+}
+
+impl Generic for VizType {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn name(&self) -> &Ident {
+        Self::static_name()
+    }
+
+    fn to_runtime_type(&self) -> crate::runtime::error::Result<crate::types::Type> {
+        self.type_.must()?.read()?.to_runtime_type()
+    }
+
+    fn substitute(&self, variables: &BTreeMap<Ident, CRef<MType>>) -> Result<Arc<dyn Generic>> {
+        Ok(Arc::new(Self {
+            type_: self.type_.substitute(variables)?,
+            viz: self.viz.clone(),
+        }))
+    }
+
+    fn unify(&self, other: &MType) -> Result<()> {
+        self.type_.unify(&mkcref(other.clone()))
+    }
+
+    fn get_rowtype(&self, compiler: Compiler) -> Result<Option<CRef<MType>>> {
+        Ok(Some(get_rowtype(compiler, self.type_.clone())?))
+    }
+
+    fn resolve(&self, loc: &SourceLocation) -> Result<CRef<MType>> {
+        resolve_to_runtime_type(loc, vec![self.type_.clone()], self)
     }
 }

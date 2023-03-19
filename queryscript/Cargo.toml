@@ -103,7 +103,7 @@ sqlparser = { path = "../sqlparser-rs", version = "0.32.1", package = "sqlparser
 strum = { version = "0.24", features = ["derive"] }
 tabled = "0.10"
 tokio = "1.25"
-tower-lsp = { version = "0.17", optional = true }
+tower-lsp = { version = "0.19", optional = true }
 ts-rs = { version = "6.2", optional = true }
 unicase = "2.6.0"
 url = "2.3.1"

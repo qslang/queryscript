@@ -579,6 +579,7 @@ impl<'a> Parser<'a> {
                         body: ExprBody::SQLExpr(e),
                         start: self.peek_start_location().clone(),
                         end: self.peek_start_location().clone(),
+                        viz: None,
                         is_unsafe: false,
                     }),
                     Some(_) => {
@@ -785,11 +786,37 @@ impl<'a> Parser<'a> {
                 ExprBody::SQLExpr(expr)
             }
         };
+        let end = self.prev_end_location();
+
+        let viz_start = self.peek_start_location();
+        let viz = if self
+            .sqlparser
+            .parse_keywords(&[Keyword::WITH, Keyword::VIZ])
+        {
+            let viz_expr = self
+                .sqlparser
+                .parse_expr()
+                .context(self.range_context(&start))?;
+            let viz_end = self.prev_end_location();
+            Some(Located::new(
+                viz_expr,
+                SourceLocation::Range(
+                    self.file.clone(),
+                    Range {
+                        start: viz_start,
+                        end: viz_end,
+                    },
+                ),
+            ))
+        } else {
+            None
+        };
 
         Ok(Expr {
             body,
             start,
-            end: self.prev_end_location(),
+            end,
+            viz,
             is_unsafe,
         })
     }
