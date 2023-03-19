@@ -21,6 +21,7 @@ use crate::compile::inline::*;
 use crate::compile::schema::*;
 use crate::compile::scope::{AvailableReferences, SQLScope};
 use crate::compile::traverse::VisitSQL;
+use crate::runtime::RuntimeError;
 use crate::types::Field;
 use crate::types::{number::parse_numeric_type, AtomicType, IntervalUnit, Type};
 use crate::{
@@ -2203,6 +2204,18 @@ fn apply_sqlcast(
     }))?)
 }
 
+fn should_coerce_cast(my_type: &MType, target_rt: &Type) -> Result<bool, RuntimeError> {
+    if matches!(my_type, MType::Name(_)) || matches!(my_type, MType::Record(_)) {
+        return Ok(false);
+    }
+
+    if target_rt == &(my_type.to_runtime_type()?) {
+        return Ok(false);
+    }
+
+    Ok(true)
+}
+
 fn coerce_all(
     compiler: &Compiler,
     op: &sqlparser::ast::BinaryOperator,
@@ -2240,11 +2253,8 @@ fn coerce_all(
                     let my_type = my_type.read()?;
 
                     Ok(
-                        if !matches!(&*my_type, MType::Name(_))
-                            && target_rt
-                                != my_type
-                                    .to_runtime_type()
-                                    .context(RuntimeSnafu { loc: loc.clone() })?
+                        if should_coerce_cast(&my_type, &target_rt)
+                            .context(RuntimeSnafu { loc: loc.clone() })?
                         {
                             apply_sqlcast(compiler, arg.clone(), mkref(target))?
                         } else {
@@ -2777,10 +2787,10 @@ pub fn compile_sqlexpr(
                 ))
             }
         },
-        sqlast::Expr::Array(sqlast::Array { elem, .. }) => {
+        sqlast::Expr::Array(sqlast::Array { elem, named }) => {
             let c_elems = elem
                 .iter()
-                .map(|e| compile_sqlarg(compiler.clone(), schema.clone(), scope.clone(), loc, e))
+                .map(|e| c_sqlarg(e))
                 .collect::<Result<Vec<_>>>()?;
             let mut c_elem_iter = c_elems.iter();
             let data_type = if let Some(first) = c_elem_iter.next() {
@@ -2792,20 +2802,73 @@ pub fn compile_sqlexpr(
                 mkcref(MType::Atom(Located::new(AtomicType::Null, loc.clone())))
             };
 
+            let named = *named;
             CTypedExpr {
                 type_: mkcref(MType::List(Located::new(
                     data_type,
                     SourceLocation::Unknown,
                 ))),
-                expr: combine_crefs(c_elems.iter().map(|s| s.sql.clone()).collect())?.then({
-                    let expr = expr.clone();
+                expr: combine_crefs(c_elems.iter().map(|s| s.sql.clone()).collect())?.then(
                     move |args: Ref<Vec<Ref<SQL<CRef<MType>>>>>| {
                         let names = combine_sqlnames(&*args.read()?)?;
                         Ok(mkcref(Expr::native_sql(Arc::new(SQL {
                             names,
-                            body: SQLBody::Expr(expr.clone()),
+                            body: SQLBody::Expr(sqlast::Expr::Array(sqlast::Array {
+                                elem: args
+                                    .read()?
+                                    .iter()
+                                    .map(|s| Ok(s.read()?.body.as_expr()?))
+                                    .collect::<Result<Vec<_>>>()?,
+                                named,
+                            })),
                         }))))
-                    }
+                    },
+                )?,
+            }
+        }
+        sqlast::Expr::Struct(sqlast::Struct(elems)) => {
+            let mut field_names = Vec::new();
+            let mut fields = Vec::new();
+            let mut c_values = Vec::new();
+            for sqlast::StructField { name, value } in elems {
+                let CTypedSQL { type_, sql } = c_sqlarg(value)?;
+
+                fields.push(MField {
+                    name: name.get().into(),
+                    type_,
+                    nullable: true, // Just assume all literals are nulalble
+                });
+
+                field_names.push(name.clone());
+                c_values.push(sql);
+            }
+
+            let c_values = combine_crefs(c_values)?;
+
+            CTypedExpr {
+                type_: mkcref(MType::Record(Located::new(fields, loc.clone()))),
+                expr: compiler.async_cref(async move {
+                    let values = c_values.await?;
+                    let values = values.read()?;
+
+                    let mut names = CSQLNames::new();
+                    let values = field_names
+                        .into_iter()
+                        .zip(values.iter())
+                        .map(|(name, value)| {
+                            let value = value.read()?;
+                            names.extend(value.names.clone());
+                            Ok(sqlast::StructField {
+                                name,
+                                value: value.body.as_expr()?,
+                            })
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+
+                    Ok(mkcref(Expr::native_sql(Arc::new(SQL {
+                        names,
+                        body: SQLBody::Expr(sqlast::Expr::Struct(sqlast::Struct(values))),
+                    }))))
                 })?,
             }
         }

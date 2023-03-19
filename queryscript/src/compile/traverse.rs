@@ -433,6 +433,17 @@ impl<V: SQLVisitor> VisitSQL<V> for Expr {
                 elem: elem.visit_sql(visitor),
                 named: *named,
             }),
+            Struct(sqlparser::ast::Struct(elems)) => Struct(sqlparser::ast::Struct(
+                elems
+                    .into_iter()
+                    .map(|sqlparser::ast::StructField { name, value }| {
+                        sqlparser::ast::StructField {
+                            name: name.clone(),
+                            value: value.visit_sql(visitor),
+                        }
+                    })
+                    .collect(),
+            )),
             Interval {
                 value,
                 leading_field,

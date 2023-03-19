@@ -1,0 +1,41 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let foo": Int64,
+        "let lists": External<[{
+        	a [UInt64],
+        }]>,
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "a",
+                                type_: List(
+                                    Atom(
+                                        UInt64,
+                                    ),
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| a         |\n|-----------|\n| [1, 2, 3] |\n| []        |\n| [4, 5]    |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Atom(
+                        Int64,
+                    ),
+                ),
+                value: "[10, 1]",
+            },
+        ),
+    ],
+}

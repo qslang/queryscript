@@ -14,7 +14,6 @@ use dyn_clone::{clone_trait_object, DynClone};
 use futures::future::BoxFuture;
 pub use std::any::Any;
 use std::borrow::Cow;
-use std::collections::BTreeMap;
 use std::fmt;
 pub use std::sync::Arc;
 use tabled::builder::Builder as TableBuilder;
@@ -356,15 +355,16 @@ impl fmt::Display for Value {
             Self::IntervalDayTime(x) => write!(f, "DayTime {:?}", x),
             Self::IntervalMonthDayNano(x) => write!(f, "DayNano {:?}", x),
 
-            // TODO: Implement records without Debug
-            // We don't use the table builder for an individual record just yet, because
-            // we might want to do something more horizontally space efficient.
             Self::Record(r) => {
                 let schema = r.schema();
-                let values = BTreeMap::from_iter(
-                    (0..schema.len()).map(|i| ((schema[i].name.clone(), r.column(i)))),
-                );
-                write!(f, "{:?}", values)
+                write!(f, "{{")?;
+                for i in 0..schema.len() {
+                    write!(f, "{}: {}", schema[i].name, r.column(i))?;
+                    if i < schema.len() - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "}}")
             }
 
             Self::Relation(r) => {

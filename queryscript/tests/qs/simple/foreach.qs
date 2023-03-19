@@ -30,8 +30,8 @@ select
     }
 ;
 
-SELECT for item in [id, org_id] {
-    item AS f"metric_{item}"
+SELECT for item in ['id', 'org_id'] {
+    f"{item}" AS f"metric_{item}"
 } FROM users;
 
 let strings = ['id', 'org_id'];

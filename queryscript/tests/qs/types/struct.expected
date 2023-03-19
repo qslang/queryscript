@@ -1,0 +1,167 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let foo": Int64,
+        "let structs": External<[{
+        	a UInt64,
+        	b {
+        	c UInt64,
+        	d Utf8,
+        },
+        }]>,
+    },
+    "queries": [
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "a",
+                                type_: Atom(
+                                    UInt64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "b",
+                                type_: Record(
+                                    [
+                                        Field {
+                                            name: "c",
+                                            type_: Atom(
+                                                UInt64,
+                                            ),
+                                            nullable: true,
+                                        },
+                                        Field {
+                                            name: "d",
+                                            type_: Atom(
+                                                Utf8,
+                                            ),
+                                            nullable: true,
+                                        },
+                                    ],
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| a | b                 |\n|---|-------------------|\n| 1 | {c: 3, d: null}   |\n| 1 | {c: null, d: cat} |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "a",
+                                type_: Atom(
+                                    UInt64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "b",
+                                type_: Record(
+                                    [
+                                        Field {
+                                            name: "c",
+                                            type_: Atom(
+                                                UInt64,
+                                            ),
+                                            nullable: true,
+                                        },
+                                        Field {
+                                            name: "d",
+                                            type_: Atom(
+                                                Utf8,
+                                            ),
+                                            nullable: true,
+                                        },
+                                    ],
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| a | b               |\n|---|-----------------|\n| 1 | {c: 3, d: null} |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "a",
+                                type_: Atom(
+                                    UInt64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "b",
+                                type_: Record(
+                                    [
+                                        Field {
+                                            name: "c",
+                                            type_: Atom(
+                                                UInt64,
+                                            ),
+                                            nullable: true,
+                                        },
+                                        Field {
+                                            name: "d",
+                                            type_: Atom(
+                                                Utf8,
+                                            ),
+                                            nullable: true,
+                                        },
+                                    ],
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| a | b               |\n|---|-----------------|\n| 1 | {c: 3, d: null} |",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: Record(
+                    [
+                        Field {
+                            name: "a",
+                            type_: Atom(
+                                Int64,
+                            ),
+                            nullable: true,
+                        },
+                    ],
+                ),
+                value: "{a: 1}",
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: Record(
+                    [
+                        Field {
+                            name: "foo",
+                            type_: Atom(
+                                Int64,
+                            ),
+                            nullable: true,
+                        },
+                    ],
+                ),
+                value: "{foo: 1}",
+            },
+        ),
+    ],
+}

@@ -1,7 +1,11 @@
+use std::collections::BTreeMap;
+
 use arrow::datatypes::DataType as ArrowDataType;
 use sqlparser::ast::BinaryOperator;
 
-use crate::types::{AtomicType, TimeUnit, Type, DECIMAL128_MAX_PRECISION, DECIMAL128_MAX_SCALE};
+use crate::types::{
+    AtomicType, Field, TimeUnit, Type, DECIMAL128_MAX_PRECISION, DECIMAL128_MAX_SCALE,
+};
 
 macro_rules! must {
     ($val: expr) => {
@@ -181,6 +185,7 @@ pub fn comparison_coercion(lhs_type: &Type, rhs_type: &Type) -> Option<Type> {
         .or_else(|| string_coercion(lhs_type, rhs_type))
         .or_else(|| null_coercion(lhs_type, rhs_type))
         .or_else(|| string_numeric_coercion(lhs_type, rhs_type))
+        .or_else(|| record_coercion(lhs_type, rhs_type))
 }
 
 /// Returns the output type of applying numeric operations such as `=`
@@ -618,6 +623,46 @@ fn null_coercion(lhs_type: &Type, rhs_type: &Type) -> Option<Type> {
         }
         _ => None,
     }
+}
+
+fn record_coercion(lhs_type: &Type, rhs_type: &Type) -> Option<Type> {
+    let (lhs, rhs) = match (lhs_type, rhs_type) {
+        (Type::Record(lhs), Type::Record(rhs)) => (lhs, rhs),
+        _ => return None,
+    };
+
+    let mut superset = lhs.iter().map(|f| (&f.name, f)).collect::<BTreeMap<_, _>>();
+    let mut subset = BTreeMap::new();
+
+    // This is a bit of a trick: if the field does not exist on the LHS,
+    // then add it to the superset, otherwise place it in the subset. That way,
+    // we can just iterate through the superset once.
+    for f in rhs {
+        if superset.contains_key(&f.name) {
+            subset.insert(&f.name, f);
+        } else {
+            superset.insert(&f.name, f);
+        }
+    }
+
+    let mut final_type = Vec::new();
+    for (name, lhs_field) in superset {
+        let combined = match subset.get(&name) {
+            Some(rhs_field) => comparison_coercion(&lhs_field.type_, &rhs_field.type_)?,
+            None if lhs_field.nullable => lhs_field.type_.clone(),
+            None => return None,
+        };
+
+        let field = Field {
+            name: name.clone(),
+            type_: combined,
+            nullable: lhs_field.nullable,
+        };
+
+        final_type.push(field);
+    }
+
+    Some(Type::Record(final_type))
 }
 
 mod tests {

@@ -152,7 +152,7 @@
                                 nullable: true,
                             },
                             Field {
-                                name: "id + 1",
+                                name: "\"users\".\"id\" + 1",
                                 type_: Atom(
                                     Int64,
                                 ),
@@ -166,7 +166,7 @@
                                 nullable: true,
                             },
                             Field {
-                                name: "org_id + 1",
+                                name: "\"users\".\"org_id\" + 1",
                                 type_: Atom(
                                     Int64,
                                 ),
@@ -175,7 +175,7 @@
                         ],
                     ),
                 ),
-                value: "| id | id + 1 | org_id | org_id + 1 |\n|----|--------|--------|------------|\n| 1  | 2      | 1      | 2          |\n| 2  | 3      | 1      | 2          |",
+                value: "| id | \"users\".\"id\" + 1 | org_id | \"users\".\"org_id\" + 1 |\n|----|------------------|--------|----------------------|\n| 1  | 2                | 1      | 2                    |\n| 2  | 3                | 1      | 2                    |",
             },
         ),
         Ok(
@@ -184,14 +184,14 @@
                     Record(
                         [
                             Field {
-                                name: "1",
+                                name: "CAST(1 AS BIGINT)",
                                 type_: Atom(
                                     Int64,
                                 ),
                                 nullable: true,
                             },
                             Field {
-                                name: "2",
+                                name: "CAST(2 AS BIGINT)",
                                 type_: Atom(
                                     Int64,
                                 ),
@@ -200,7 +200,7 @@
                         ],
                     ),
                 ),
-                value: "| 1 | 2 |\n|---|---|\n| 1 | 2 |\n| 1 | 2 |",
+                value: "| CAST(1 AS BIGINT) | CAST(2 AS BIGINT) |\n|-------------------|-------------------|\n| 1                 | 2                 |\n| 1                 | 2                 |",
             },
         ),
         Ok(
