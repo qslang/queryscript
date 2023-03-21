@@ -1043,9 +1043,19 @@ impl Backend {
             .map_err(log_internal_error)?;
 
         // XXX Same error handling issue here
-        let viz = eval_viz_metadata(&mut ctx, &expr.type_)
+        let mut viz = eval_viz_metadata(&mut ctx, &expr.type_)
             .await
             .map_err(log_internal_error)?;
+
+        let viz = if let Some(viz) = viz {
+            match queryscript::integrations::viz::normalize(json!(viz), &rt_expr) {
+                Some(viz) => viz,
+                None => json!(viz),
+            }
+        } else {
+            serde_json::Value::Null
+        };
+        eprintln!("VIZ: {:#?}", viz);
 
         // This is a bit of a hack to support unsafe expressions, which return a different type than what's
         // reported from the compiler. Ideally, we should either assert or have an Unknown type.
@@ -1069,11 +1079,7 @@ impl Backend {
             };
         }
 
-        Ok(RunExprResult {
-            value,
-            r#type,
-            viz: viz.map_or(serde_json::Value::Null, |v| json!(v)),
-        })
+        Ok(RunExprResult { value, r#type, viz })
     }
 }
 

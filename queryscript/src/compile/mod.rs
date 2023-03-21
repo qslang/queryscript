@@ -1,5 +1,5 @@
 pub mod autocomplete;
-mod builtin_types;
+pub mod builtin_types;
 mod coerce;
 pub mod compile;
 mod connection;

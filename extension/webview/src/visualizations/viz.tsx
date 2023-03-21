@@ -33,6 +33,7 @@ export const Viz = ({ data, schema, viz: vizProp }: VizProps) => {
         vizProp["height"] = squareSize;
       }
     }
+    console.log(vizProp);
     setViz(vizProp);
   }, [vizProp]);
 

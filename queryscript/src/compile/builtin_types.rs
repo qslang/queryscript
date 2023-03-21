@@ -80,8 +80,16 @@ fn lead<R, N>(expr R, offset N, default R) -> R = sql;
 fn lag<R, N>(expr R, offset N, default R) -> R = sql;
 ";
 
+const AGG_NAME_STRS: &'static [&'static str] = &["min", "max", "count", "sum", "avg", "grouping"];
+
 lazy_static! {
     pub static ref BUILTIN_LOC: SourceLocation = SourceLocation::File("<builtin>".to_string());
+    // There is definitely a better way to do this (e.g. store this info in the compiler)
+    // or somehow in the SQL tree
+    pub static ref AGG_NAMES: Vec<Ident> = AGG_NAME_STRS
+        .iter()
+        .map(|name| Ident::from(name.to_string()))
+        .collect();
     static ref BUILTIN_TYPE_DECLS: Vec<(Ident, Decl<TypeEntry>)> = BUILTIN_TYPES
         .iter()
         .map(|(name, type_)| (
