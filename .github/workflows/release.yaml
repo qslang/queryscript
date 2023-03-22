@@ -9,7 +9,7 @@ on:
 
 # Inspired by https://github.com/rust-lang/rust-analyzer/blob/master/.github/workflows/release.yaml
 env:
-  CARGO_INCREMENTAL: 0
+  CARGO_INCREMENTAL: 1
   CARGO_NET_RETRY: 10
   CARGO_FLAGS: "--release"
   RUSTFLAGS: "-D warnings"
