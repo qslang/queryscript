@@ -138,7 +138,7 @@ jobs:
             ${{ matrix.target }}-venv-
 
       - name: Make
-        run: make all
+        run: make all -j 4
         timeout-minutes: 60
 
       #      # This code allows you to save artifacts even if the job fails. It's useful while debugging!
