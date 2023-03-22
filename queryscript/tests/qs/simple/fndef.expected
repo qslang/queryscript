@@ -190,6 +190,7 @@
                     Int64,
                 ),
                 value: "1",
+                viz: None,
             },
         ),
         Ok(
@@ -198,6 +199,7 @@
                     Float64,
                 ),
                 value: "5.0",
+                viz: None,
             },
         ),
         Err(
@@ -261,6 +263,7 @@
                     ),
                 ),
                 value: "| id | org_id | name | active |\n|----|--------|------|--------|\n| 1  | 1      | Foo  | true   |\n| 2  | 1      | Bar  | false  |",
+                viz: None,
             },
         ),
         Ok(
@@ -269,6 +272,7 @@
                     Int64,
                 ),
                 value: "6",
+                viz: None,
             },
         ),
         Ok(
@@ -277,6 +281,7 @@
                     Float64,
                 ),
                 value: "6.5",
+                viz: None,
             },
         ),
         Err(
@@ -291,6 +296,7 @@
                     Float64,
                 ),
                 value: "null",
+                viz: None,
             },
         ),
         Ok(
@@ -299,6 +305,7 @@
                     Float64,
                 ),
                 value: "null",
+                viz: None,
             },
         ),
         Ok(
@@ -307,6 +314,7 @@
                     Float64,
                 ),
                 value: "127.0",
+                viz: None,
             },
         ),
     ],

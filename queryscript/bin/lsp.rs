@@ -641,28 +641,6 @@ fn is_runnable_decl(e: &ExprEntry) -> Result<bool> {
     })
 }
 
-async fn eval_viz_metadata(
-    ctx: &mut runtime::Context,
-    type_: &CRef<MType>,
-) -> std::result::Result<Option<QSValue>, RuntimeError> {
-    // This strange control flow ensures that the RwLockGuard created by read()? is not in scope
-    // during the await
-    let expr = if let Some(viz_type) = type_
-        .must()?
-        .read()?
-        .as_generic::<crate::compile::generics::VizType>()
-    {
-        Some(viz_type.expr().to_runtime_type()?)
-    } else {
-        None
-    };
-
-    Ok(match expr {
-        Some(expr) => Some(runtime::eval(ctx, &expr).await?),
-        None => None,
-    })
-}
-
 fn get_runnable_expr_from_decl(expr: &ExprEntry) -> Result<CTypedExpr> {
     Ok(expr.to_ctyped_expr().map_err(|e| {
         eprintln!("Failed to convert expression to runtime type: {:?}", e);
@@ -1043,7 +1021,7 @@ impl Backend {
             .map_err(log_internal_error)?;
 
         // XXX Same error handling issue here
-        let mut viz = eval_viz_metadata(&mut ctx, &expr.type_)
+        let mut viz = runtime::eval_viz_metadata(&mut ctx, &expr.type_)
             .await
             .map_err(log_internal_error)?;
 

@@ -29,7 +29,7 @@ path = "bin/lsp.rs"
 required-features = ["lsp"]
 
 [features]
-default = ["cli", "all-engines", "viz"]
+default = ["cli", "all-engines"]
 all-engines = ["clickhouse", "duckdb-bundled"]
 cli = ["clap", "home", "rustyline", "backtraces"]
 dbt = ["py"]

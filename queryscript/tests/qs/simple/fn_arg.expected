@@ -29,6 +29,7 @@
                     ),
                 ),
                 value: "| metric_value |\n|--------------|\n| 2            |",
+                viz: None,
             },
         ),
         Ok(
@@ -47,6 +48,7 @@
                     ),
                 ),
                 value: "| metric_value |\n|--------------|\n| 1            |",
+                viz: None,
             },
         ),
     ],

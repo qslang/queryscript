@@ -1,8 +1,10 @@
 use futures::future::{BoxFuture, FutureExt};
+use sqlparser::ast as sqlast;
 use std::collections::HashMap;
 
-use crate::compile::schema;
+use crate::compile::schema::{self, CRef, MType};
 use crate::compile::sql::{create_table_as, select_star_from};
+use crate::types::record::VecRow;
 use crate::types::LazyValue;
 use crate::{
     ast::Ident,
@@ -231,6 +233,16 @@ pub fn eval_lazy<'a>(
             }
             schema::Expr::SQL(e, url) => {
                 let schema::SQL { body, names } = e.as_ref();
+
+                match body {
+                    schema::SQLBody::Expr(e) => {
+                        if let Some(value) = maybe_directly_eval(e) {
+                            return Ok(value.into());
+                        }
+                    }
+                    _ => {}
+                };
+
                 let sql_params = eval_params_lazy(ctx, &names.params).await?;
                 let query = body.as_statement()?;
 
@@ -303,4 +315,30 @@ pub fn eval_lazy<'a>(
         })
     }
     .boxed()
+}
+
+fn maybe_directly_eval(e: &sqlast::Expr) -> Option<Value> {
+    match e {
+        sqlast::Expr::Struct(v) if v.0.len() == 0 => Some(Value::Record(VecRow::empty())),
+        _ => None,
+    }
+}
+
+pub async fn eval_viz_metadata(ctx: &mut Context, type_: &CRef<MType>) -> Result<Option<Value>> {
+    // This strange control flow ensures that the RwLockGuard created by read()? is not in scope
+    // during the await
+    let expr = if let Some(viz_type) = type_
+        .must()?
+        .read()?
+        .as_generic::<crate::compile::generics::VizType>()
+    {
+        Some(viz_type.expr().to_runtime_type()?)
+    } else {
+        None
+    };
+
+    Ok(match expr {
+        Some(expr) => Some(eval(ctx, &expr).await?),
+        None => None,
+    })
 }

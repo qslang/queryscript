@@ -816,10 +816,15 @@ impl<'a> Parser<'a> {
             .sqlparser
             .parse_keywords(&[Keyword::WITH, Keyword::VIZ])
         {
-            let viz_expr = self
-                .sqlparser
-                .parse_expr()
-                .context(self.range_context(&start))?;
+            let viz_expr = match self.maybe_parse(|parser| {
+                parser
+                    .sqlparser
+                    .parse_expr()
+                    .context(parser.range_context(&start))
+            }) {
+                Some(expr) => expr,
+                None => sqlast::Expr::Value(sqlast::Value::Null),
+            };
             let viz_end = self.prev_end_location();
             Some(Located::new(
                 viz_expr,

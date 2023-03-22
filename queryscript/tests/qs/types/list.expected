@@ -25,6 +25,7 @@
                     ),
                 ),
                 value: "| a         |\n|-----------|\n| [1, 2, 3] |\n| []        |\n| [4, 5]    |",
+                viz: None,
             },
         ),
         Ok(
@@ -35,6 +36,17 @@
                     ),
                 ),
                 value: "[10, 1]",
+                viz: None,
+            },
+        ),
+        Err(
+            TypesystemError {
+                source: ArrowError {
+                    source: CastError(
+                        "Casting from Int32 to Null not supported",
+                    ),
+                    backtrace: None,
+                },
             },
         ),
     ],

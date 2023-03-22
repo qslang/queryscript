@@ -17,7 +17,13 @@ pub fn normalize(
     vega_spec_val: serde_json::Value,
     expr: &TypedExpr<Arc<RwLock<Type>>>,
 ) -> Option<serde_json::Value> {
-    let mut vega_spec: VegaLiteSingleSpec = serde_json::from_value(vega_spec_val.clone()).unwrap();
+    let vega_spec_val = match &vega_spec_val {
+        Value::Object(_) => vega_spec_val,
+        Value::Null => Value::Object(serde_json::Map::new()),
+        _ => return None,
+    };
+
+    let mut vega_spec: VegaLiteSingleSpec = serde_json::from_value(vega_spec_val.clone()).ok()?;
     let mut fields = summarize_fields(expr).ok()?;
 
     // Set the default visualization to be a bar if there are at least two fields

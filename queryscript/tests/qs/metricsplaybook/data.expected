@@ -150,6 +150,7 @@
                     ),
                 ),
                 value: "| id | customer_id | timestamp                 | activity                     | revenue_impact | plan_type | activity_occurrence | activity_repeated_at      |\n|----|-------------|---------------------------|------------------------------|----------------|-----------|---------------------|---------------------------|\n| 1  | 156         | 2022-05-23T08:28:22+00:00 | customer_churn_committed     | 19.2           | plan4     | 1                   | 2022-07-18T09:08:23+00:00 |\n| 2  | 258         | 2022-05-10T13:15:51+00:00 | customer_churn_committed     | 32.0           | plan3     | 1                   | null                      |\n| 3  | 296         | 2022-02-15T14:03:09+00:00 | contraction_contract_started | 30.6           | plan4     | 1                   | null                      |\n| 4  | 215         | 2022-06-05T22:31:43+00:00 | expansion_contract_started   | 25.9           | plan4     | 1                   | null                      |\n| 5  | 284         | 2022-09-03T20:53:59+00:00 | new_contract_started         | 23.4           | plan4     | 2                   | null                      |",
+                viz: None,
             },
         ),
         Ok(
@@ -199,6 +200,7 @@
                     ),
                 ),
                 value: "| id | segment  | channel  | first_contract_signed_date | cohort  |\n|----|----------|----------|----------------------------|---------|\n| 1  | segment2 | channel4 | 2022-05-20T11:24:40+00:00  | 2022-05 |\n| 2  | segment7 | channel1 | 2022-03-13T09:36:31+00:00  | 2022-03 |\n| 3  | segment3 | channel3 | 2021-12-24T10:37:19+00:00  | 2021-12 |\n| 4  | segment3 | channel4 | 2022-09-26T22:04:35+00:00  | 2022-09 |\n| 5  | segment7 | channel3 | 2022-01-21T20:27:11+00:00  | 2022-01 |",
+                viz: None,
             },
         ),
     ],

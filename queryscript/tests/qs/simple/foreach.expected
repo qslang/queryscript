@@ -45,6 +45,7 @@
                     ),
                 ),
                 value: "| id | org_id |\n|----|--------|\n| 1  | 1      |\n| 2  | 1      |",
+                viz: None,
             },
         ),
         Ok(
@@ -70,6 +71,7 @@
                     ),
                 ),
                 value: "| item | item |\n|------|------|\n| 1    | 1    |\n| 2    | 1    |",
+                viz: None,
             },
         ),
         Ok(
@@ -137,6 +139,7 @@
                     ),
                 ),
                 value: "| id | org_id | name | active | id | org_id | name | active |\n|----|--------|------|--------|----|--------|------|--------|\n| 1  | 1      | Foo  | true   | 1  | 1      | Foo  | true   |\n| 2  | 1      | Bar  | false  | 2  | 1      | Bar  | false  |",
+                viz: None,
             },
         ),
         Ok(
@@ -176,6 +179,7 @@
                     ),
                 ),
                 value: "| id | \"users\".\"id\" + 1 | org_id | \"users\".\"org_id\" + 1 |\n|----|------------------|--------|----------------------|\n| 1  | 2                | 1      | 2                    |\n| 2  | 3                | 1      | 2                    |",
+                viz: None,
             },
         ),
         Ok(
@@ -201,6 +205,7 @@
                     ),
                 ),
                 value: "| CAST(1 AS BIGINT) | CAST(2 AS BIGINT) |\n|-------------------|-------------------|\n| 1                 | 2                 |\n| 1                 | 2                 |",
+                viz: None,
             },
         ),
         Ok(
@@ -226,6 +231,7 @@
                     ),
                 ),
                 value: "| 'month' | 'day' |\n|---------|-------|\n| month   | day   |",
+                viz: None,
             },
         ),
         Ok(
@@ -251,6 +257,7 @@
                     ),
                 ),
                 value: "| metric_id | metric_org_id |\n|-----------|---------------|\n| 1         | 1             |\n| 2         | 1             |",
+                viz: None,
             },
         ),
         Ok(
@@ -261,6 +268,7 @@
                     ),
                 ),
                 value: "[id, org_id]",
+                viz: None,
             },
         ),
         Ok(
@@ -281,6 +289,7 @@
                     ),
                 ),
                 value: "| strings      |\n|--------------|\n| [id, org_id] |",
+                viz: None,
             },
         ),
         Ok(
@@ -291,6 +300,7 @@
                     ),
                 ),
                 value: "[id, org_id]",
+                viz: None,
             },
         ),
         Ok(
@@ -311,6 +321,7 @@
                     ),
                 ),
                 value: "| numbers      |\n|--------------|\n| [id, org_id] |",
+                viz: None,
             },
         ),
         Ok(
@@ -336,6 +347,7 @@
                     ),
                 ),
                 value: "| 'id' | 'org_id' |\n|------|----------|\n| id   | org_id   |\n| id   | org_id   |",
+                viz: None,
             },
         ),
         Ok(
@@ -361,6 +373,7 @@
                     ),
                 ),
                 value: "| 'id' | 'org_id' |\n|------|----------|\n| id   | org_id   |\n| id   | org_id   |",
+                viz: None,
             },
         ),
         Ok(
@@ -386,6 +399,7 @@
                     ),
                 ),
                 value: "| id | org_id |\n|----|--------|\n| 1  | 1      |\n| 2  | 1      |",
+                viz: None,
             },
         ),
         Ok(
@@ -411,6 +425,7 @@
                     ),
                 ),
                 value: "| id | org_id |\n|----|--------|\n| 1  | 1      |\n| 2  | 1      |",
+                viz: None,
             },
         ),
         Ok(
@@ -436,6 +451,7 @@
                     ),
                 ),
                 value: "| id | org_id |\n|----|--------|\n| 1  | 1      |\n| 2  | 1      |",
+                viz: None,
             },
         ),
         Ok(
@@ -454,6 +470,7 @@
                     ),
                 ),
                 value: "| foo    |\n|--------|\n| id     |\n| org_id |",
+                viz: None,
             },
         ),
         Ok(
@@ -472,6 +489,7 @@
                     ),
                 ),
                 value: "| id |\n|----|\n| 1  |\n| 2  |",
+                viz: None,
             },
         ),
         Ok(
@@ -497,6 +515,7 @@
                     ),
                 ),
                 value: "| id | org_id |\n|----|--------|\n| 1  | 1      |\n| 2  | 1      |",
+                viz: None,
             },
         ),
     ],

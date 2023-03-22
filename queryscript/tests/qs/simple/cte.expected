@@ -46,6 +46,7 @@
                     ),
                 ),
                 value: "| id | org_id | name | active |\n|----|--------|------|--------|\n| 2  | 1      | Bar  | false  |",
+                viz: None,
             },
         ),
     ],

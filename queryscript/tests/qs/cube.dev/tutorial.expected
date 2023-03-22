@@ -31,6 +31,7 @@
                     ),
                 ),
                 value: "| count(*) |\n|----------|\n| 5        |",
+                viz: None,
             },
         ),
         Ok(
@@ -56,6 +57,7 @@
                     ),
                 ),
                 value: "| city          | count(id) |\n|---------------|-----------|\n| San Francisco | 1         |\n| Palo Alto     | 1         |\n| Redwood       | 1         |\n| Mountain View | 1         |\n| Santa Cruz    | 1         |",
+                viz: None,
             },
         ),
         Ok(
@@ -74,6 +76,7 @@
                     ),
                 ),
                 value: "| COUNT(*) |\n|----------|\n| 3        |",
+                viz: None,
             },
         ),
         Ok(
@@ -92,6 +95,7 @@
                     ),
                 ),
                 value: "| 100.0 * COUNT(CASE WHEN paying THEN users.id END) / COUNT(users.id) |\n|---------------------------------------------------------------------|\n| 60.0                                                                |",
+                viz: None,
             },
         ),
     ],

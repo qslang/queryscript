@@ -73,6 +73,7 @@
                     ),
                 ),
                 value: "| id | org_id | name | active | id > 0 OR active | max_user |",
+                viz: None,
             },
         ),
     ],

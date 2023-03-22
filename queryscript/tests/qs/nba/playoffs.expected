@@ -36,6 +36,10 @@
         	opponent Int64,
         	won Int64,
         }],
+        "let overall": [{
+        	round_number Int64,
+        	teams Int64,
+        }],
         "let playoffs": External<[{
         	SEASON_ID Utf8,
         	TEAM_ID Int64,
@@ -139,6 +143,7 @@
                     ),
                 ),
                 value: "| full_name              | total |\n|------------------------|-------|\n| Los Angeles Lakers     | 98    |\n| Boston Celtics         | 77    |\n| San Antonio Spurs      | 76    |\n| Chicago Bulls          | 64    |\n| Houston Rockets        | 56    |\n| Utah Jazz              | 56    |\n| Detroit Pistons        | 55    |\n| Miami Heat             | 53    |\n| Portland Trail Blazers | 51    |\n| Oklahoma City Thunder  | 50    |",
+                viz: None,
             },
         ),
         Ok(
@@ -164,6 +169,7 @@
                     ),
                 ),
                 value: "| full_name             | total |\n|-----------------------|-------|\n| Los Angeles Lakers    | 16    |\n| Boston Celtics        | 8     |\n| San Antonio Spurs     | 6     |\n| Miami Heat            | 6     |\n| Chicago Bulls         | 6     |\n| Golden State Warriors | 6     |\n| Detroit Pistons       | 5     |\n| Cleveland Cavaliers   | 5     |\n| Houston Rockets       | 4     |\n| Philadelphia 76ers    | 3     |",
+                viz: None,
             },
         ),
         Ok(
@@ -189,6 +195,7 @@
                     ),
                 ),
                 value: "| full_name(team)       | total |\n|-----------------------|-------|\n| Los Angeles Lakers    | 10    |\n| Chicago Bulls         | 6     |\n| San Antonio Spurs     | 5     |\n| Boston Celtics        | 4     |\n| Golden State Warriors | 4     |\n| Miami Heat            | 3     |\n| Detroit Pistons       | 3     |\n| Houston Rockets       | 2     |\n| Cleveland Cavaliers   | 1     |\n| Dallas Mavericks      | 1     |",
+                viz: None,
             },
         ),
         Ok(
@@ -214,6 +221,7 @@
                     ),
                 ),
                 value: "| full_name(team)        | total |\n|------------------------|-------|\n| Utah Jazz              | 56    |\n| Portland Trail Blazers | 51    |\n| Oklahoma City Thunder  | 50    |\n| Phoenix Suns           | 50    |\n| Indiana Pacers         | 46    |\n| Atlanta Hawks          | 42    |\n| New York Knicks        | 42    |\n| Denver Nuggets         | 37    |\n| Brooklyn Nets          | 34    |\n| Orlando Magic          | 27    |",
+                viz: None,
             },
         ),
         Ok(
@@ -239,6 +247,7 @@
                     ),
                 ),
                 value: "| full_name(team)        | total |\n|------------------------|-------|\n| Portland Trail Blazers | 2     |\n| Phoenix Suns           | 2     |\n| Brooklyn Nets          | 2     |\n| New York Knicks        | 2     |\n| Utah Jazz              | 2     |\n| Orlando Magic          | 2     |\n| Oklahoma City Thunder  | 2     |\n| Indiana Pacers         | 1     |",
+                viz: None,
             },
         ),
         Ok(
@@ -264,6 +273,9 @@
                     ),
                 ),
                 value: "| round_number | teams |\n|--------------|-------|\n| 0            | 30    |\n| 1            | 30    |\n| 2            | 27    |\n| 3            | 21    |\n| 4            | 13    |",
+                viz: Some(
+                    "null",
+                ),
             },
         ),
         Ok(
@@ -272,14 +284,14 @@
                     Record(
                         [
                             Field {
-                                name: "full_name",
+                                name: "round_number",
                                 type_: Atom(
-                                    Utf8,
+                                    Int64,
                                 ),
                                 nullable: true,
                             },
                             Field {
-                                name: "total",
+                                name: "teams",
                                 type_: Atom(
                                     Int64,
                                 ),
@@ -288,7 +300,38 @@
                         ],
                     ),
                 ),
-                value: "| full_name             | total |\n|-----------------------|-------|\n| Boston Celtics        | 4     |\n| Cleveland Cavaliers   | 1     |\n| Chicago Bulls         | 6     |\n| Dallas Mavericks      | 1     |\n| Golden State Warriors | 4     |\n| Houston Rockets       | 2     |\n| Los Angeles Lakers    | 10    |\n| Miami Heat            | 3     |\n| Milwaukee Bucks       | 1     |\n| Philadelphia 76ers    | 1     |\n| San Antonio Spurs     | 5     |\n| Toronto Raptors       | 1     |\n| Detroit Pistons       | 3     |",
+                value: "| round_number | teams |\n|--------------|-------|\n| 0            | 30    |\n| 1            | 30    |\n| 2            | 27    |\n| 3            | 21    |\n| 4            | 13    |",
+                viz: Some(
+                    "{mark: line}",
+                ),
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: List(
+                    Record(
+                        [
+                            Field {
+                                name: "round_number",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                            Field {
+                                name: "teams",
+                                type_: Atom(
+                                    Int64,
+                                ),
+                                nullable: true,
+                            },
+                        ],
+                    ),
+                ),
+                value: "| round_number | teams |\n|--------------|-------|\n| 0            | 30    |\n| 1            | 30    |\n| 2            | 27    |\n| 3            | 21    |\n| 4            | 13    |",
+                viz: Some(
+                    "{mark: arc}",
+                ),
             },
         ),
     ],

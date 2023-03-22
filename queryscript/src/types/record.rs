@@ -11,6 +11,13 @@ impl VecRow {
     pub fn new(schema: Arc<Vec<Field>>, values: Vec<Value>) -> Arc<dyn Record> {
         Arc::new(VecRow { schema, values })
     }
+
+    pub fn empty() -> Arc<dyn Record> {
+        Arc::new(VecRow {
+            schema: Arc::new(vec![]),
+            values: vec![],
+        })
+    }
 }
 
 impl Record for VecRow {

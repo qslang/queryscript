@@ -49,6 +49,7 @@
                     ),
                 ),
                 value: "| a | b                 |\n|---|-------------------|\n| 1 | {c: 3, d: null}   |\n| 1 | {c: null, d: cat} |",
+                viz: None,
             },
         ),
         Ok(
@@ -89,6 +90,7 @@
                     ),
                 ),
                 value: "| a | b               |\n|---|-----------------|\n| 1 | {c: 3, d: null} |",
+                viz: None,
             },
         ),
         Ok(
@@ -129,6 +131,7 @@
                     ),
                 ),
                 value: "| a | b               |\n|---|-----------------|\n| 1 | {c: 3, d: null} |",
+                viz: None,
             },
         ),
         Ok(
@@ -145,6 +148,7 @@
                     ],
                 ),
                 value: "{a: 1}",
+                viz: None,
             },
         ),
         Ok(
@@ -161,6 +165,16 @@
                     ],
                 ),
                 value: "{foo: 1}",
+                viz: None,
+            },
+        ),
+        Ok(
+            TypedValue {
+                type_: Record(
+                    [],
+                ),
+                value: "{}",
+                viz: None,
             },
         ),
     ],
