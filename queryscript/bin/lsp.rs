@@ -1,5 +1,4 @@
-use queryscript::compile::schema::{CTypedExpr, Ref, TypedExpr};
-use queryscript::runtime::RuntimeError;
+use queryscript::compile::schema::CTypedExpr;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::cell::RefCell;
@@ -32,7 +31,7 @@ use queryscript::{
     },
     parser::{error::PrettyError, parse_schema},
     runtime,
-    types::{Type as QSType, Value as QSValue},
+    types::Type as QSType,
 };
 
 // XXX Do we need any of these settings? If not, we can probably remove them.
@@ -1021,7 +1020,7 @@ impl Backend {
             .map_err(log_internal_error)?;
 
         // XXX Same error handling issue here
-        let mut viz = runtime::eval_viz_metadata(&mut ctx, &expr.type_)
+        let viz = runtime::eval_viz_metadata(&mut ctx, &expr.type_)
             .await
             .map_err(log_internal_error)?;
 

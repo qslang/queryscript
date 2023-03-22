@@ -39,11 +39,28 @@ export const Viz = ({ data, schema, viz: vizProp, darkMode }: VizProps) => {
   return (
     <>
       {viz ? (
-        <VegaLite
-          spec={viz}
-          data={{ table: data }}
-          theme={darkMode ? "dark" : undefined}
-        />
+        <div style={{ width: "vw" }} className="foo">
+          <VegaLite
+            spec={viz}
+            data={{ table: data }}
+            theme={darkMode ? "dark" : undefined}
+          />
+          <VegaLite
+            spec={viz}
+            data={{ table: data }}
+            theme={darkMode ? "dark" : undefined}
+          />
+          <VegaLite
+            spec={viz}
+            data={{ table: data }}
+            theme={darkMode ? "dark" : undefined}
+          />
+          <VegaLite
+            spec={viz}
+            data={{ table: data }}
+            theme={darkMode ? "dark" : undefined}
+          />
+        </div>
       ) : null}
     </>
   );
