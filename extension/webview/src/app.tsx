@@ -12,10 +12,17 @@ import Table from "./visualizations/table";
 import Viz from "./visualizations/viz";
 
 import "./app.css";
+import { boolean } from "ts-pattern/dist/patterns";
 
 interface Panel {
   tab: string;
   panel: JSX.Element;
+}
+
+declare global {
+  interface Window {
+    darkMode: boolean;
+  }
 }
 
 interface vscode {
@@ -25,15 +32,21 @@ interface vscode {
 declare let acquireVsCodeApi: any;
 const vscode: vscode = acquireVsCodeApi();
 
+type Message = { theme: { darkMode: boolean }; data: RunExprResult };
+
 const App = () => {
   const [data, setData] = useState<RunExprResult>({
     value: null,
     type: { Atom: "Null" },
     viz: null,
   });
+
+  const [darkMode, setDarkMode] = useState<boolean>(false);
+
   useEffect(() => {
-    const onMessage = (event: MessageEvent<RunExprResult>) => {
-      setData(event.data);
+    const onMessage = (event: MessageEvent<Message>) => {
+      setDarkMode(event.data.theme.darkMode);
+      setData(event.data.data);
     };
 
     window.addEventListener("message", onMessage);
@@ -46,7 +59,14 @@ const App = () => {
   if (data.viz !== null) {
     panels.push({
       tab: "Viz",
-      panel: <Viz data={data.value} schema={data.type} viz={data.viz} />,
+      panel: (
+        <Viz
+          data={data.value}
+          schema={data.type}
+          viz={data.viz}
+          darkMode={darkMode}
+        />
+      ),
     });
   }
 

@@ -56,3 +56,12 @@ SELECT COUNT(*) FROM churned_revenue_cube;
 SELECT COUNT(*) FROM new_revenue_cube;
 SELECT COUNT(*) FROM contraction_revenue_cube;
 SELECT COUNT(*) FROM expansion_contract_started;
+
+
+let churned_bar_graph = churned_revenue_cube WITH VIZ {
+    mark: 'bar',
+    encoding: {
+        x: { field: 'metric_date' , type: 'nominal'    },
+        y: { field: 'metric_value', type: 'quantitative' },
+    },
+};

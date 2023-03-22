@@ -25,8 +25,11 @@ export function runExpr(
       vscode.ViewColumn.Beside
     );
 
+    const darkMode =
+      vscode.window.activeColorTheme.kind == vscode.ColorThemeKind.Dark;
+
     panel.ready.then(() => {
-      panel.sendMessage(resp);
+      panel.sendMessage({ theme: { darkMode }, data: resp });
     });
   };
 }
