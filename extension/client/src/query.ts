@@ -24,7 +24,13 @@ export function runExpr(
       context.extensionPath,
       vscode.ViewColumn.Beside
     );
-    panel.sendMessage(resp);
+
+    const darkMode =
+      vscode.window.activeColorTheme.kind == vscode.ColorThemeKind.Dark;
+
+    panel.ready.then(() => {
+      panel.sendMessage({ theme: { darkMode }, data: resp });
+    });
   };
 }
 
@@ -43,6 +49,8 @@ class ReactPanel {
   private readonly _panel: vscode.WebviewPanel;
   private readonly _extensionPath: string;
   private _disposables: vscode.Disposable[] = [];
+
+  public ready: Promise<void>;
 
   public static createOrShow(
     extensionPath: string,
@@ -90,12 +98,20 @@ class ReactPanel {
     // This happens when the user closes the panel or when the panel is closed programatically
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
+    let readyResolve: () => void;
+    this.ready = new Promise((resolve) => {
+      readyResolve = resolve;
+    });
+
     // Handle messages from the webview
     this._panel.webview.onDidReceiveMessage(
       (message) => {
         switch (message.command) {
           case "alert":
             vscode.window.showErrorMessage(message.text);
+            return;
+          case "ready":
+            readyResolve();
             return;
         }
       },
@@ -143,12 +159,11 @@ class ReactPanel {
 				<meta name="viewport" content="width=device-width, initial-scale=1.0">
 				<title>QueryVM Results</title>
 				<link rel="stylesheet" type="text/css" href="${styleUri}">
-				<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src vscode-resource: https:; script-src 'nonce-${nonce}';style-src vscode-resource: 'unsafe-inline' http: https: data:;">
+				<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src vscode-resource: https:; script-src 'nonce-${nonce}' 'unsafe-eval';style-src vscode-resource: 'unsafe-inline' http: https: data:;">
 			</head>
 			<body>
 				<noscript>You need to enable JavaScript to run this app.</noscript>
 				<div id="root"></div>
-
 				<script nonce="${nonce}" src="${scriptUri}"></script>
 			</body>
 			</html>`;

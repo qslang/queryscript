@@ -45,15 +45,19 @@ export const Table = ({ data, schema }: TableProps) => {
       >
         <VSCodeDataGridRow row-type="header">
           {fields.map((field, idx) => (
-            <VSCodeDataGridCell cell-type="columnheader" grid-column={idx + 1}>
+            <VSCodeDataGridCell
+              cell-type="columnheader"
+              grid-column={idx + 1}
+              key={idx}
+            >
               {field.name}
             </VSCodeDataGridCell>
           ))}
         </VSCodeDataGridRow>
-        {(data as any[]).map((row) => (
-          <VSCodeDataGridRow>
+        {(data as any[]).map((row, ridx) => (
+          <VSCodeDataGridRow key={ridx}>
             {fields.map((field, idx) => (
-              <VSCodeDataGridCell grid-column={idx + 1}>
+              <VSCodeDataGridCell grid-column={idx + 1} key={idx}>
                 {normalizeForDisplay(row[field.name as string])}
               </VSCodeDataGridCell>
             ))}

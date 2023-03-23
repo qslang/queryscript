@@ -1,3 +1,4 @@
+use queryscript::compile::schema::CTypedExpr;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::cell::RefCell;
@@ -639,10 +640,8 @@ fn is_runnable_decl(e: &ExprEntry) -> Result<bool> {
     })
 }
 
-fn get_runnable_expr_from_decl(
-    expr: &ExprEntry,
-) -> Result<queryscript::compile::schema::TypedExpr<queryscript::compile::schema::Ref<QSType>>> {
-    Ok(expr.to_runtime_type().map_err(|e| {
+fn get_runnable_expr_from_decl(expr: &ExprEntry) -> Result<CTypedExpr> {
+    Ok(expr.to_ctyped_expr().map_err(|e| {
         eprintln!("Failed to convert expression to runtime type: {:?}", e);
         Error::internal_error()
     })?)
@@ -651,17 +650,12 @@ fn get_runnable_expr_from_decl(
 fn find_expr_by_location(
     schema: &Schema,
     loc: &queryscript::ast::Location,
-) -> Result<
-    Option<queryscript::compile::schema::TypedExpr<queryscript::compile::schema::Ref<QSType>>>,
-> {
+) -> Result<Option<CTypedExpr>> {
     if let Some(expr) = schema.exprs.iter().find(|expr| {
         let expr_loc = expr.location();
         expr_loc.contains(loc)
     }) {
-        return Ok(Some(expr.clone().to_runtime_type().map_err(|e| {
-            eprintln!("Failed to convert query to runtime type: {:?}", e);
-            Error::internal_error()
-        })?));
+        return Ok(Some(expr.get().clone()));
     }
 
     if let Some((_name, decl)) = schema.expr_decls.iter().find(|(_name, decl)| {
@@ -756,6 +750,7 @@ struct RunExprParams {
 struct RunExprResult {
     value: serde_json::Value,
     r#type: QSType,
+    viz: serde_json::Value,
 }
 
 impl Backend {
@@ -991,12 +986,8 @@ impl Backend {
                     .exprs
                     .get(idx)
                     .ok_or_else(|| Error::invalid_params(format!("Invalid query index: {}", idx)))?
-                    .clone()
-                    .to_runtime_type()
-                    .map_err(|e| {
-                        eprintln!("Failed to convert query to runtime type: {:?}", e);
-                        Error::internal_error()
-                    })?,
+                    .get()
+                    .clone(),
                 RunExprType::Position { line, character } => {
                     let loc = queryscript::ast::Location {
                         line: line + 1,
@@ -1021,10 +1012,27 @@ impl Backend {
             runtime::SQLEngineType::DuckDB,
         );
 
+        let rt_expr = expr.to_runtime_type().map_err(log_internal_error)?;
+
         // XXX We should change this log_internal_error to return an error to the webview
-        let value = runtime::eval(&mut ctx, &expr)
+        let value = runtime::eval(&mut ctx, &rt_expr)
             .await
             .map_err(log_internal_error)?;
+
+        // XXX Same error handling issue here
+        let viz = runtime::eval_viz_metadata(&mut ctx, &expr.type_)
+            .await
+            .map_err(log_internal_error)?;
+
+        let viz = if let Some(viz) = viz {
+            match queryscript::integrations::viz::normalize(json!(viz), &rt_expr) {
+                Some(viz) => viz,
+                None => json!(viz),
+            }
+        } else {
+            serde_json::Value::Null
+        };
+        eprintln!("VIZ: {:#?}", viz);
 
         // This is a bit of a hack to support unsafe expressions, which return a different type than what's
         // reported from the compiler. Ideally, we should either assert or have an Unknown type.
@@ -1048,7 +1056,7 @@ impl Backend {
             };
         }
 
-        Ok(RunExprResult { value, r#type })
+        Ok(RunExprResult { value, r#type, viz })
     }
 }
 

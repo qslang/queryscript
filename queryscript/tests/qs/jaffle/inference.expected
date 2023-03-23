@@ -46,6 +46,7 @@
                     ),
                 ),
                 value: "| id | user_id | order_date | status    |\n|----|---------|------------|-----------|\n| 1  | 1       | 2018-01-01 | returned  |\n| 2  | 3       | 2018-01-02 | completed |\n| 3  | 94      | 2018-01-04 | completed |\n| 4  | 50      | 2018-01-05 | completed |\n| 5  | 64      | 2018-01-05 | completed |\n| 6  | 54      | 2018-01-07 | completed |\n| 7  | 88      | 2018-01-09 | completed |\n| 8  | 2       | 2018-01-11 | returned  |\n| 9  | 53      | 2018-01-12 | completed |\n| 10 | 7       | 2018-01-14 | completed |",
+                viz: None,
             },
         ),
         Ok(
@@ -64,6 +65,7 @@
                     ),
                 ),
                 value: "| MAX(order_date) |\n|-----------------|\n| 2018-04-09      |",
+                viz: None,
             },
         ),
     ],

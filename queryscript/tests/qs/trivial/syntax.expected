@@ -1,0 +1,9 @@
+{
+    "compile_errors": [],
+    "decls": {
+        "let sum2": ∀ "R" λ {
+        	a "R",
+        } -> External<SumAgg<"R">>,
+    },
+    "queries": [],
+}

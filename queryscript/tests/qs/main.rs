@@ -95,25 +95,30 @@ mod tests {
     struct TypedValue {
         pub type_: types::Type,
         pub value: String,
+        pub viz: Option<String>,
     }
     fn eval_expr(
         rt: &runtime::Runtime,
-        expr: &compile::schema::CTypedExpr,
+        cexpr: &compile::schema::CTypedExpr,
         schema: &SchemaRef,
     ) -> Result<TypedValue, runtime::RuntimeError> {
-        let expr = expr.to_runtime_type()?;
+        let expr = cexpr.to_runtime_type()?;
 
         let engine_type = runtime::SQLEngineType::DuckDB;
         let mut async_ctx =
             queryscript::runtime::Context::new(schema.read()?.folder.clone(), engine_type);
         let async_expr = expr.clone();
 
-        let value = rt.block_on(async move { runtime::eval(&mut async_ctx, &async_expr).await })?;
-
+        let value = rt.block_on(async { runtime::eval(&mut async_ctx, &async_expr).await })?;
         let type_ = expr.type_.read().unwrap();
+
+        let viz_meta =
+            rt.block_on(async { runtime::eval_viz_metadata(&mut async_ctx, &cexpr.type_).await })?;
+
         Ok(TypedValue {
             type_: type_.clone(),
             value: format!("{}", value),
+            viz: viz_meta.map(|m| format!("{}", m)),
         })
     }
 

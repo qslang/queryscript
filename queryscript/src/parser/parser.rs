@@ -31,6 +31,7 @@ type ParseResult<T> = MultiResult<T, ParserError>;
 
 pub struct Parser<'a> {
     file: String,
+    extra_tokens: Vec<TokenWithLocation>,
     sqlparser: parser::Parser<'a>,
 }
 
@@ -39,6 +40,7 @@ impl<'a> Parser<'a> {
         let dialect = &GenericDialect {};
         Parser {
             file: file.to_string(),
+            extra_tokens: vec![],
             sqlparser: parser::Parser::new_with_locations(tokens, eof, dialect).with_options(
                 parser::ParserOptions {
                     trailing_commas: true,
@@ -47,12 +49,31 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub fn push_extra_token(&mut self, token: TokenWithLocation) {
+        self.extra_tokens.push(token);
+    }
+
     pub fn next_token(&mut self) -> TokenWithLocation {
+        if self.extra_tokens.len() > 0 {
+            return self.extra_tokens.swap_remove(0);
+        }
         self.sqlparser.next_token()
     }
 
     pub fn peek_token(&self) -> TokenWithLocation {
+        if self.extra_tokens.len() > 0 {
+            return self.extra_tokens[0].clone();
+        }
         self.sqlparser.peek_token()
+    }
+
+    #[must_use]
+    pub fn consume_token(&mut self, expected: &Token) -> bool {
+        if self.extra_tokens.len() > 0 && self.extra_tokens[0].token == *expected {
+            self.extra_tokens.swap_remove(0);
+            return true;
+        }
+        self.sqlparser.consume_token(expected)
     }
 
     pub fn peek_start_location(&self) -> Location {
@@ -78,11 +99,6 @@ impl<'a> Parser<'a> {
 
         self.sqlparser.prev_token();
         return self.sqlparser.next_token() != Token::SemiColon;
-    }
-
-    #[must_use]
-    pub fn consume_token(&mut self, expected: &Token) -> bool {
-        self.sqlparser.consume_token(expected)
     }
 
     pub fn token_location(&self) -> ErrorLocation {
@@ -579,6 +595,7 @@ impl<'a> Parser<'a> {
                         body: ExprBody::SQLExpr(e),
                         start: self.peek_start_location().clone(),
                         end: self.peek_start_location().clone(),
+                        viz: None,
                         is_unsafe: false,
                     }),
                     Some(_) => {
@@ -667,6 +684,13 @@ impl<'a> Parser<'a> {
                     match self.next_token().token {
                         Token::Comma => {}
                         Token::Gt => break,
+                        Token::ShiftRight => {
+                            self.push_extra_token(TokenWithLocation {
+                                token: Token::Gt,
+                                location: self.peek_end_location(),
+                            });
+                            break;
+                        }
                         _ => {
                             return unexpected_token!(
                                 self.file.clone(),
@@ -785,11 +809,42 @@ impl<'a> Parser<'a> {
                 ExprBody::SQLExpr(expr)
             }
         };
+        let end = self.prev_end_location();
+
+        let viz_start = self.peek_start_location();
+        let viz = if self
+            .sqlparser
+            .parse_keywords(&[Keyword::WITH, Keyword::VIZ])
+        {
+            let viz_expr = match self.maybe_parse(|parser| {
+                parser
+                    .sqlparser
+                    .parse_expr()
+                    .context(parser.range_context(&start))
+            }) {
+                Some(expr) => expr,
+                None => sqlast::Expr::Value(sqlast::Value::Null),
+            };
+            let viz_end = self.prev_end_location();
+            Some(Located::new(
+                viz_expr,
+                SourceLocation::Range(
+                    self.file.clone(),
+                    Range {
+                        start: viz_start,
+                        end: viz_end,
+                    },
+                ),
+            ))
+        } else {
+            None
+        };
 
         Ok(Expr {
             body,
             start,
-            end: self.prev_end_location(),
+            end,
+            viz,
             is_unsafe,
         })
     }

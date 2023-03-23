@@ -28,7 +28,7 @@ ts-bindings:
 
 .PHONY: py
 py: ${VENV_PYTHON_PACKAGES}
-	bash -c 'source venv/bin/activate && cd py && maturin develop'
+	bash -c 'source venv/bin/activate && cd py && maturin develop ${CARGO_FLAGS}'
 
 .PHONY: test services refresh-test-data
 test: submodules

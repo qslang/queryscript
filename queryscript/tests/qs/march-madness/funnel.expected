@@ -221,6 +221,7 @@
                     ),
                 ),
                 value: "| DayNum |\n|--------|\n| 134    |\n| 135    |\n| 136    |\n| 137    |\n| 138    |\n| 139    |\n| 140    |\n| 143    |\n| 144    |\n| 145    |\n| 146    |\n| 147    |\n| 148    |\n| 152    |\n| 154    |",
+                viz: None,
             },
         ),
         Ok(
@@ -330,6 +331,7 @@
                     ),
                 ),
                 value: "| Season | DayNum | WTeamID | WScore | LTeamID | LScore | WLoc | NumOT | TeamID | TeamName       | FirstD1Season | LastD1Season | CoachName        | stage       |\n|--------|--------|---------|--------|---------|--------|------|-------|--------|----------------|---------------|--------------|------------------|-------------|\n| 1985   | 136    | 1116    | 63     | 1234    | 54     | N    | 0     | 1116   | Arkansas       | 1985          | 2022         | eddie_sutton     | Round 1: 64 |\n| 1985   | 136    | 1120    | 59     | 1345    | 58     | N    | 0     | 1120   | Auburn         | 1985          | 2022         | sonny_smith      | Round 1: 64 |\n| 1985   | 136    | 1207    | 68     | 1250    | 43     | N    | 0     | 1207   | Georgetown     | 1985          | 2022         | john_thompson_jr | Round 1: 64 |\n| 1985   | 136    | 1229    | 58     | 1425    | 55     | N    | 0     | 1229   | Illinois St    | 1985          | 2022         | bob_donewald     | Round 1: 64 |\n| 1985   | 136    | 1242    | 49     | 1325    | 38     | N    | 0     | 1242   | Kansas         | 1985          | 2022         | larry_brown      | Round 1: 64 |\n| 1985   | 136    | 1246    | 66     | 1449    | 58     | N    | 0     | 1246   | Kentucky       | 1985          | 2022         | joe_b_hall       | Round 1: 64 |\n| 1985   | 136    | 1256    | 78     | 1338    | 54     | N    | 0     | 1256   | Louisiana Tech | 1985          | 2022         | andy_russo       | Round 1: 64 |\n| 1985   | 136    | 1260    | 59     | 1233    | 58     | N    | 0     | 1260   | Loyola-Chicago | 1985          | 2022         | gene_sullivan    | Round 1: 64 |\n| 1985   | 136    | 1314    | 76     | 1292    | 57     | N    | 0     | 1314   | North Carolina | 1985          | 2022         | dean_smith       | Round 1: 64 |\n| 1985   | 136    | 1323    | 79     | 1333    | 70     | N    | 0     | 1323   | Notre Dame     | 1985          | 2022         | digger_phelps    | Round 1: 64 |",
+                viz: None,
             },
         ),
         Ok(
@@ -355,6 +357,7 @@
                     ),
                 ),
                 value: "| stage                   | COUNT(DISTINCT \"TeamName\") |\n|-------------------------|----------------------------|\n| Round 1: 64             | 188                        |\n| Round 2: 32 teams       | 120                        |\n| Round 3: Sweet Sixteen  | 74                         |\n| Round 4: Elite Eight    | 53                         |\n| Round 5: Final Four     | 31                         |\n| Round 6: National Final | 19                         |",
+                viz: None,
             },
         ),
         Ok(
@@ -380,6 +383,7 @@
                     ),
                 ),
                 value: "| stage                   | COUNT(DISTINCT \"CoachName\") |\n|-------------------------|-----------------------------|\n| Round 1: 64             | 306                         |\n| Round 2: 32 teams       | 185                         |\n| Round 3: Sweet Sixteen  | 105                         |\n| Round 4: Elite Eight    | 72                          |\n| Round 5: Final Four     | 41                          |\n| Round 6: National Final | 26                          |",
+                viz: None,
             },
         ),
     ],

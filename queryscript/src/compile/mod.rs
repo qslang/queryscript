@@ -1,12 +1,12 @@
 pub mod autocomplete;
-mod builtin_types;
+pub mod builtin_types;
 mod coerce;
 pub mod compile;
 mod connection;
 pub mod error;
 mod external;
 mod fmtstring;
-mod generics;
+pub mod generics;
 pub mod inference;
 pub mod inline;
 pub mod schema;

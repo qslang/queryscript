@@ -72,6 +72,7 @@
                     ),
                 ),
                 value: "| id | org_id | name | active |\n|----|--------|------|--------|\n| 1  | 1      | Foo  | true   |\n| 2  | 1      | Bar  | false  |",
+                viz: None,
             },
         ),
         Ok(
@@ -111,6 +112,7 @@
                     ),
                 ),
                 value: "| id | org_id | name | active |\n|----|--------|------|--------|\n| 1  | 1      | Foo  | true   |\n| 2  | 1      | Bar  | false  |",
+                viz: None,
             },
         ),
         Ok(
@@ -129,6 +131,7 @@
                     ),
                 ),
                 value: "| org_id |\n|--------|\n| 1      |\n| 1      |",
+                viz: None,
             },
         ),
         Ok(
@@ -154,6 +157,7 @@
                     ),
                 ),
                 value: "| id | org_id |\n|----|--------|\n| 1  | 1      |",
+                viz: None,
             },
         ),
         Err(

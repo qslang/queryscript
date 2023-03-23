@@ -153,6 +153,8 @@ macro_rules! casync {
 }
 pub(crate) use casync;
 
+use super::generics::VizType;
+
 #[derive(Debug, Clone)]
 pub struct Compiler {
     runtime: Ref<tokio::runtime::Runtime>,
@@ -880,7 +882,7 @@ fn compile_expr(compiler: Compiler, schema: Ref<Schema>, expr: &ast::Expr) -> Re
     if expr.is_unsafe {
         compile_unsafe_expr(compiler, schema, &expr.body, &loc)
     } else {
-        Ok(match &expr.body {
+        let mut compiled_expr = match &expr.body {
             ast::ExprBody::SQLQuery(q) => {
                 let (_scope, type_, query) =
                     compile_sqlquery(compiler.clone(), schema.clone(), None, &loc, q)?;
@@ -900,7 +902,24 @@ fn compile_expr(compiler: Compiler, schema: Ref<Schema>, expr: &ast::Expr) -> Re
                 let scope = SQLScope::new(None);
                 compile_sqlexpr(compiler.clone(), schema.clone(), scope, &loc, e)?
             }
-        })
+        };
+
+        if let Some(viz) = &expr.viz {
+            let scope = SQLScope::new(None);
+            let viz_expr = compile_sqlexpr(
+                compiler.clone(),
+                schema.clone(),
+                scope,
+                viz.location(),
+                viz.get(),
+            )?;
+            compiled_expr.type_ = mkcref(MType::Generic(Located::new(
+                VizType::wrap(compiled_expr.type_.clone(), viz_expr),
+                viz.location().clone(),
+            )));
+        }
+
+        Ok(compiled_expr)
     }
 }
 

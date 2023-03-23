@@ -74,6 +74,7 @@
                     ),
                 ),
                 value: "| order_id | customer_id | order_date | status    |\n|----------|-------------|------------|-----------|\n| 1        | 1           | 2018-01-01 | returned  |\n| 2        | 3           | 2018-01-02 | completed |\n| 3        | 94          | 2018-01-04 | completed |\n| 4        | 50          | 2018-01-05 | completed |\n| 5        | 64          | 2018-01-05 | completed |\n| 6        | 54          | 2018-01-07 | completed |\n| 7        | 88          | 2018-01-09 | completed |\n| 8        | 2           | 2018-01-11 | returned  |\n| 9        | 53          | 2018-01-12 | completed |\n| 10       | 7           | 2018-01-14 | completed |",
+                viz: None,
             },
         ),
         Ok(
@@ -113,6 +114,7 @@
                     ),
                 ),
                 value: "| payment_id | order_id | payment_method | amount |\n|------------|----------|----------------|--------|\n| 1          | 1        | credit_card    | 10.0   |\n| 2          | 2        | credit_card    | 20.0   |\n| 3          | 3        | coupon         | 1.0    |\n| 4          | 4        | coupon         | 25.0   |\n| 5          | 5        | bank_transfer  | 17.0   |\n| 6          | 6        | credit_card    | 6.0    |\n| 7          | 7        | credit_card    | 16.0   |\n| 8          | 8        | credit_card    | 23.0   |\n| 9          | 9        | gift_card      | 23.0   |\n| 10         | 9        | bank_transfer  | 0.0    |",
+                viz: None,
             },
         ),
         Ok(
@@ -145,6 +147,7 @@
                     ),
                 ),
                 value: "| customer_id | first_name | last_name |\n|-------------|------------|-----------|\n| 1           | Michael    | P.        |\n| 2           | Shawn      | M.        |\n| 3           | Kathleen   | P.        |\n| 4           | Jimmy      | C.        |\n| 5           | Katherine  | R.        |\n| 6           | Sarah      | R.        |\n| 7           | Martin     | M.        |\n| 8           | Frank      | R.        |\n| 9           | Jennifer   | F.        |\n| 10          | Henry      | W.        |",
+                viz: None,
             },
         ),
         Ok(
@@ -163,6 +166,7 @@
                     ),
                 ),
                 value: "| COUNT(*) |\n|----------|\n| 99       |",
+                viz: None,
             },
         ),
         Ok(
@@ -181,6 +185,7 @@
                     ),
                 ),
                 value: "| count(*) |\n|----------|\n| 113      |",
+                viz: None,
             },
         ),
         Ok(
@@ -199,6 +204,7 @@
                     ),
                 ),
                 value: "| Count(*) |\n|----------|\n| 100      |",
+                viz: None,
             },
         ),
     ],

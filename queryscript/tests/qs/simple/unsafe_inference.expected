@@ -56,6 +56,7 @@
                     ),
                 ),
                 value: "| COUNT(*) |\n|----------|\n| 1        |",
+                viz: None,
             },
         ),
         Ok(
@@ -74,6 +75,7 @@
                     ),
                 ),
                 value: "| count_star() |\n|--------------|\n| 1            |",
+                viz: None,
             },
         ),
         Ok(
@@ -99,6 +101,7 @@
                     ),
                 ),
                 value: "| MIN(rn) | MAX(rn) |\n|---------|---------|\n| 1       | 4       |",
+                viz: None,
             },
         ),
         Ok(
@@ -124,6 +127,7 @@
                     ),
                 ),
                 value: "| min(rn) | max(rn) |\n|---------|---------|\n| 1       | 4       |",
+                viz: None,
             },
         ),
         Ok(
@@ -149,6 +153,7 @@
                     ),
                 ),
                 value: "| bottom | top |\n|--------|-----|\n| 1      | 4   |",
+                viz: None,
             },
         ),
         Ok(
@@ -174,6 +179,7 @@
                     ),
                 ),
                 value: "| bottom | top |\n|--------|-----|\n| 1      | 4   |",
+                viz: None,
             },
         ),
         Ok(
@@ -192,6 +198,7 @@
                     ),
                 ),
                 value: "| 'bogus types' |\n|---------------|\n| bogus types   |",
+                viz: None,
             },
         ),
         Ok(
@@ -217,6 +224,7 @@
                     ),
                 ),
                 value: "| bottom | top |\n|--------|-----|\n| 1      | 4   |",
+                viz: None,
             },
         ),
     ],

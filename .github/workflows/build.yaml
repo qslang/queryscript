@@ -113,6 +113,7 @@ jobs:
           restore-keys: |
             ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}-release-
             ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ matrix.target }}-cargo-
 
       - uses: actions/cache@v3
         with:
@@ -124,6 +125,7 @@ jobs:
           restore-keys: |
             ${{ matrix.target }}-yarn-${{ hashFiles('./extension/yarn.lock', './extension/webview/yarn.lock', './extension/client/yarn.lock') }}-release-
             ${{ matrix.target }}-yarn-${{ hashFiles('./extension/yarn.lock', './extension/webview/yarn.lock', './extension/client/yarn.lock') }}
+            ${{ matrix.target }}-yarn-
 
       - uses: actions/cache@v3
         with:
@@ -133,6 +135,7 @@ jobs:
           restore-keys: |
             ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}-release-
             ${{ matrix.target }}-venv-${{ hashFiles('./qsutils/setup.py') }}
+            ${{ matrix.target }}-venv-
 
       - name: Make
         run: make all

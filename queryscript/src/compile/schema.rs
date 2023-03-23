@@ -24,6 +24,8 @@ use crate::types::{AtomicType, Field, FnType, Type};
 pub use crate::compile::inference::CRef;
 pub use ast::Ident;
 
+use super::generics::as_generic;
+
 #[derive(Debug, Clone)]
 pub struct MField {
     pub name: Ident,
@@ -320,6 +322,13 @@ impl MType {
             MType::Fn(t) => t.location().clone(),
             MType::Name(t) => t.location().clone(),
             MType::Generic(t) => t.location().clone(),
+        }
+    }
+
+    pub fn as_generic<T: Generic + 'static>(&self) -> Option<&T> {
+        match self {
+            MType::Generic(generic) => as_generic(generic.get().as_ref()),
+            _ => None,
         }
     }
 }
@@ -1025,6 +1034,13 @@ impl STypedExpr {
             type_: CRef::new_unknown(&format!("{} type", debug_name)),
             expr: CRef::new_unknown(&format!("{} expr", debug_name)),
         }
+    }
+
+    pub fn to_ctyped_expr(&self) -> runtime::error::Result<CTypedExpr> {
+        Ok(CTypedExpr {
+            type_: self.type_.must()?.read()?.body.clone(),
+            expr: self.expr.clone(),
+        })
     }
 
     pub fn to_runtime_type(&self) -> runtime::error::Result<TypedExpr<Ref<Type>>> {
