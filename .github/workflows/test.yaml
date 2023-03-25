@@ -5,7 +5,7 @@ on:
 
 # Inspired by https://github.com/rust-lang/rust-analyzer/blob/master/.github/workflows/release.yaml
 env:
-  CARGO_INCREMENTAL: 0
+  CARGO_INCREMENTAL: 1
   CARGO_NET_RETRY: 10
   CARGO_FLAGS: "--release"
   RUSTFLAGS: "-D warnings"
@@ -14,6 +14,7 @@ env:
   MACOSX_DEPLOYMENT_TARGET: 10.15
   CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
   CARGO_TARGET_ARM_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
+  OPENSSL_STATIC: 1
 
 jobs:
   test:
