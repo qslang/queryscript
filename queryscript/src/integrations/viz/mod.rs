@@ -58,13 +58,31 @@ pub fn normalize(
             if encoding.get("y").is_none() {
                 if let Some(field) = first_matching_measure(&mut fields) {
                     encoding.insert("y".to_string(), field.to_field(true));
+                } else {
+                    return None;
                 }
             }
 
             if encoding.get("x").is_none() {
                 if let Some(field) = first_matching_dimension(&mut fields) {
                     encoding.insert("x".to_string(), field.to_field(false));
+                } else {
+                    return None;
                 }
+            }
+
+            let mut x_dim = match encoding.get_mut("x").unwrap() {
+                Value::Object(m) => m,
+                _ => return None,
+            };
+
+            let x_continuous = x_dim
+                .get("type")
+                .map(|t| t == "quantitative" || t == "temporal")
+                .unwrap_or(false);
+
+            if x_dim.get("sort").is_none() && !x_continuous {
+                x_dim.insert("sort".to_string(), Value::Null);
             }
         }
     }
