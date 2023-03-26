@@ -71,7 +71,7 @@ pub fn normalize(
                 }
             }
 
-            let mut x_dim = match encoding.get_mut("x").unwrap() {
+            let x_dim = match encoding.get_mut("x").unwrap() {
                 Value::Object(m) => m,
                 _ => return None,
             };
