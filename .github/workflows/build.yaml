@@ -140,7 +140,7 @@ jobs:
 
       - name: Make
         run: make all
-        timeout-minutes: 60
+        timeout-minutes: 120
 
       #      # This code allows you to save artifacts even if the job fails. It's useful while debugging!
       #      - uses: actions/cache/save@v3
